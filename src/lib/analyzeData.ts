@@ -14,14 +14,60 @@ const KNOWN_TRANSPORTERS = [
   'Raben','PostNL','Van Dieren','Kloosterboer',
 ];
 
+// Contextual phrase patterns for secondary classification when keyword pass finds nothing.
+// Each entry maps a regex to a category id.
+const CONTEXT_PATTERNS: Array<{ pattern: RegExp; id: string }> = [
+  // Delay signals
+  { pattern: /\b(not yet|still not|hasn.t arrived|haven.t received|expected .{1,20} but)\b/i, id: 'delay' },
+  { pattern: /\b(driver|truck|vehicle|courier)\b.{0,30}\b(not|late|missing|absent)\b/i, id: 'delay' },
+  // Document / missing info signals
+  { pattern: /\b(no|missing|without|not received|not provided).{0,20}(doc|cert|form|paper|letter)\b/i, id: 'customs' },
+  { pattern: /\b(document|paperwork|certificate|permit).{0,20}(missing|not|required|needed|wrong|incorrect)\b/i, id: 'customs' },
+  // Amendment / wrong data signals
+  { pattern: /\b(wrong|incorrect|error|mistake|invalid).{0,20}(name|address|city|country|zip|postcode|weight|volume|quantity|number|code|date)\b/i, id: 'amendment' },
+  { pattern: /\b(please|kindly|need to).{0,20}(update|correct|change|amend|modify|fix)\b/i, id: 'amendment' },
+  // Rate / billing signals
+  { pattern: /\b(invoice|billing|charge|cost|fee|price).{0,20}(query|wrong|issue|error|dispute|question|clarif)\b/i, id: 'rate' },
+  { pattern: /\b(charged|billed).{0,20}(too much|incorrectly|wrong amount|double)\b/i, id: 'rate' },
+  // Tracking signals
+  { pattern: /\b(where|when).{0,30}(shipment|cargo|parcel|goods|container|delivery)\b/i, id: 'tracking' },
+  { pattern: /\b(no|without).{0,20}(tracking|trace|update|visibility|information|status)\b/i, id: 'tracking' },
+  // Communication signals
+  { pattern: /\b(no.one|nobody|no response|no reply|no answer|not respond|not reply)\b/i, id: 'communication' },
+  { pattern: /\b(complaint|dissatisfied|unhappy|frustrated|urgent|escalat)\b/i, id: 'communication' },
+  // Damage signals
+  { pattern: /\b(goods|cargo|parcel|items?|products?).{0,30}(broken|damaged|missing|lost|stolen|wet|short)\b/i, id: 'damage' },
+  // Equipment signals
+  { pattern: /\b(container|trailer|truck|vehicle|unit|reefer).{0,30}(broken|damaged|defective|unavailable|failure|fault)\b/i, id: 'equipment' },
+  // Reference signals
+  { pattern: /\b(no|without|missing).{0,20}(reference|ref|booking number|order number|po number)\b/i, id: 'load_ref' },
+  // Waiting signals
+  { pattern: /\b(waiting|waited|standing|idle).{0,20}(hours?|days?|long time|since|for)\b/i, id: 'waiting_time' },
+  // Closing time signals
+  { pattern: /\b(missed|after|past|beyond).{0,20}(cutoff|cut-off|deadline|closing|gate)\b/i, id: 'closing_time' },
+];
+
 function classifyText(text: string): string[] {
   const t = text.toLowerCase();
   const matches: string[] = [];
+
+  // Primary pass: keyword matching
   for (const tax of ISSUE_TAXONOMY) {
     if (tax.id === 'other') continue;
     if (tax.keywords.some(kw => t.includes(kw))) matches.push(tax.id);
   }
-  return matches.length > 0 ? matches : ['other'];
+
+  if (matches.length > 0) return matches;
+
+  // Secondary pass: contextual regex patterns for text that slipped through keyword matching
+  const contextMatches = new Set<string>();
+  for (const { pattern, id } of CONTEXT_PATTERNS) {
+    if (pattern.test(text)) contextMatches.add(id);
+  }
+
+  if (contextMatches.size > 0) return Array.from(contextMatches);
+
+  return ['other'];
 }
 
 function extractTransporterFromText(text: string): string | null {
