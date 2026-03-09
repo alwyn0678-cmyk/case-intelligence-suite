@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import type { RawRecord, NormalisedRecord, ParsedFile } from '../types';
+import { isTransporter } from './transporters';
 
 // Maps known column name variants to a standard key
 const COLUMN_ALIASES: Record<string, string[]> = {
@@ -98,6 +99,15 @@ export async function parseUploadedFile(file: File): Promise<ParsedFile> {
         (norm as unknown as Record<string, unknown>)[stdKey] = val ? String(val).trim() : undefined;
       }
     }
+    // Reclassify: if no dedicated transporter column, check if the customer
+    // account name is a known transporter and move it accordingly.
+    if (!columnMap.transporter && norm.customer) {
+      if (isTransporter(norm.customer)) {
+        norm.transporter = norm.customer;
+        norm.customer = undefined;
+      }
+    }
+
     return norm;
   });
 
