@@ -19,8 +19,13 @@ const COLUMN_ALIASES: Record<string, string[]> = {
 
 function normaliseHeaderName(header: string): string | null {
   const h = header.toLowerCase().trim();
+  // Exact match first (prevents 'details' in description aliases swallowing 'isr details')
   for (const [key, aliases] of Object.entries(COLUMN_ALIASES)) {
-    if (aliases.some(a => h === a || h.includes(a))) return key;
+    if (aliases.some(a => h === a)) return key;
+  }
+  // Partial match fallback
+  for (const [key, aliases] of Object.entries(COLUMN_ALIASES)) {
+    if (aliases.some(a => h.includes(a))) return key;
   }
   return null;
 }
