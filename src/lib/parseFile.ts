@@ -39,12 +39,35 @@ function parseFlexDate(val: unknown): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+function scoreHeaderRow(row: unknown[]): number {
+  let score = 0;
+  for (const cell of row) {
+    if (normaliseHeaderName(String(cell ?? ''))) score++;
+  }
+  return score;
+}
+
 export async function parseUploadedFile(file: File): Promise<ParsedFile> {
   const buffer = await file.arrayBuffer();
   const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
   const sheetName = wb.SheetNames[0];
   const ws = wb.Sheets[sheetName];
-  const raw: RawRecord[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+  // Read raw arrays first to detect header row (some exports have metadata rows above)
+  const rawArrays: unknown[][] = XLSX.utils.sheet_to_json(ws, { defval: '', header: 1 });
+  if (!rawArrays.length) throw new Error('File is empty or has no readable rows.');
+
+  // Find the row with the most recognisable column names (search first 30 rows)
+  let headerRowIndex = 0;
+  let bestScore = scoreHeaderRow(rawArrays[0]);
+  for (let i = 1; i < Math.min(rawArrays.length, 30); i++) {
+    const s = scoreHeaderRow(rawArrays[i]);
+    if (s > bestScore) { bestScore = s; headerRowIndex = i; }
+  }
+
+  // Re-parse from that header row
+  const ws2 = wb.Sheets[sheetName];
+  const raw: RawRecord[] = XLSX.utils.sheet_to_json(ws2, { defval: '', range: headerRowIndex });
 
   if (!raw.length) throw new Error('File is empty or has no readable rows.');
 
