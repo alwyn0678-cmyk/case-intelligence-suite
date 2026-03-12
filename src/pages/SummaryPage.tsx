@@ -3,10 +3,16 @@ import { KpiCard } from '../components/ui/Card';
 import { DonutChart, TrendLine } from '../components/ui/ChartWrapper';
 import type { AnalysisResult } from '../types/analysis';
 
+function trendArrow(a: number, b: number) {
+  if (b > a * 1.1) return { icon: '↑', color: '#dc6d7d' };
+  if (b < a * 0.9) return { icon: '↓', color: '#52c7c7' };
+  return { icon: '→', color: '#a6aec4' };
+}
+
 interface Props { analysis: AnalysisResult }
 
 export function SummaryPage({ analysis }: Props) {
-  const { summary, issueBreakdown, weeklyHistory, sortedWeeks } = analysis;
+  const { summary, issueBreakdown, weeklyHistory, sortedWeeks, isrVsExternal } = analysis;
 
   const donutData = issueBreakdown.slice(0, 8).map(i => ({
     name: i.label, value: i.count, color: i.color,
@@ -63,6 +69,56 @@ export function SummaryPage({ analysis }: Props) {
           }
         </div>
       </div>
+
+      {/* ISR vs External */}
+      {(isrVsExternal.totalIsr > 0 || isrVsExternal.totalExternal > 0) && (() => {
+        const wkData = isrVsExternal.weeklyBreakdown.map(w => ({
+          week: w.week.replace(/^\d{4}-/, ''),
+          External: w.external,
+          ISR: w.isr,
+        }));
+        const lastTwo = isrVsExternal.weeklyBreakdown.slice(-2);
+        const isrTrend = lastTwo.length === 2 ? trendArrow(lastTwo[0].isrPct, lastTwo[1].isrPct) : null;
+        return (
+          <div className="space-y-4">
+            <p className="text-sm font-medium text-[#eceff7]">ISR vs External Case Split</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-[#171922] border border-[#2a2f3f] rounded-lg p-4">
+                <p className="text-xs text-[#a6aec4] uppercase tracking-wider">External Cases</p>
+                <p className="text-2xl font-semibold text-[#52c7c7] mt-1">{isrVsExternal.totalExternal.toLocaleString()}</p>
+                <p className="text-xs text-[#a6aec4] mt-1">{isrVsExternal.externalPct.toFixed(1)}% of total</p>
+              </div>
+              <div className="bg-[#171922] border border-[#2a2f3f] rounded-lg p-4">
+                <p className="text-xs text-[#a6aec4] uppercase tracking-wider">ISR Internal Cases</p>
+                <p className="text-2xl font-semibold text-[#8b7cff] mt-1">{isrVsExternal.totalIsr.toLocaleString()}</p>
+                <p className="text-xs text-[#a6aec4] mt-1">{isrVsExternal.isrPct.toFixed(1)}% of total</p>
+              </div>
+              {isrTrend && (
+                <div className="bg-[#171922] border border-[#2a2f3f] rounded-lg p-4">
+                  <p className="text-xs text-[#a6aec4] uppercase tracking-wider">ISR % — WoW</p>
+                  <p className="text-2xl font-semibold mt-1" style={{ color: isrTrend.color }}>
+                    {isrTrend.icon} {lastTwo[1].isrPct.toFixed(1)}%
+                  </p>
+                  <p className="text-xs text-[#a6aec4] mt-1">vs {lastTwo[0].isrPct.toFixed(1)}% prior week</p>
+                </div>
+              )}
+            </div>
+            {wkData.length >= 2 && (
+              <div className="bg-[#171922] border border-[#2a2f3f] rounded-lg p-5">
+                <p className="text-xs text-[#a6aec4] uppercase tracking-wider font-medium mb-4">Weekly External vs ISR Volume</p>
+                <TrendLine
+                  data={wkData}
+                  lines={[
+                    { key: 'External', label: 'External', color: '#52c7c7' },
+                    { key: 'ISR',      label: 'ISR Internal', color: '#8b7cff' },
+                  ]}
+                  height={200}
+                />
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Data quality */}
       {(summary.reviewFlagCount > 0 || summary.unknownEntityCount > 0 || (summary.unknownCustomerCount ?? 0) > 0) && (

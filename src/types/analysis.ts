@@ -116,6 +116,20 @@ export interface LoadRefIntelligence {
   topOffenders: Array<{ name: string; count: number }>;
 }
 
+export interface IsrVsExternal {
+  totalIsr: number;
+  totalExternal: number;
+  isrPct: number;
+  externalPct: number;
+  /** Per-week breakdown: isr count, external count, isr percentage */
+  weeklyBreakdown: Array<{
+    week: string;
+    isr: number;
+    external: number;
+    isrPct: number;
+  }>;
+}
+
 export interface AreaHotspot {
   name: string;
   count: number;
@@ -207,6 +221,7 @@ export interface AnalysisResult {
   customsCompliance: CustomsCompliance;
   loadRefIntelligence: LoadRefIntelligence;
   areaHotspots: AreaHotspot[];
+  isrVsExternal: IsrVsExternal;
   forecast: Forecast;
   actions: Actions;
   records: EnrichedRecord[];

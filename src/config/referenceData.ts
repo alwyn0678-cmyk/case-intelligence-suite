@@ -374,11 +374,29 @@ export function isInternalISRLabel(name: string): boolean {
 // Block these from customer charts and treat as unresolved.
 // ─────────────────────────────────────────────────────────────────
 const CUSTOMER_JUNK_EXACT = new Set<string>([
+  // Generic role/function labels masquerading as customer names
   'service',
   'service representative',
   'service intermodal',
   'service team',
   'reference',
+  'intermodal',
+  'delivery',
+  'logistics',
+  'forwarding',
+  'transport',
+  'shipping',
+  'freight',
+  'rail',
+  'barge',
+  'inland',
+  'serve',
+  // Operational phrases that sometimes leak in as customer values
+  'rail-und barge',
+  'serve - rail-und barge',
+  'not be able to load',
+  'unable to load',
+  // Generic non-value placeholders
   'unknown',
   'n/a',
   'na',
@@ -402,18 +420,36 @@ const CUSTOMER_JUNK_EXACT = new Set<string>([
   'test account',
   'demo',
   'placeholder',
-  'intermodal',
 ]);
+
+// Regex patterns for non-company labels that should not appear as customer names.
+// These catch phrases / fragments that exact-match cannot cover.
+const CUSTOMER_JUNK_PATTERNS: RegExp[] = [
+  // Starts with a generic operational word and nothing else meaningful
+  /^(deliver(y|ies)?|logistic[s]?|forward(ing)?|transport(ation)?|shipping|freight|barg(e|ing)|inland|ser?ve?)[\s.,:!?-]*$/i,
+  // "not be able to ..." / "unable to ..." — action phrases, not company names
+  /^(not be able to|unable to|cannot|can't)\b/i,
+  // "serve - " or "service - " prefix followed by operational words
+  /^serv(e|ice)\s*[-–]\s*(rail|barge|inland|transport|logistics)/i,
+  // Pure operational instructions or email-fragment-style strings
+  /^(please|kindly|urgent|asap|re:|fw:|fwd:|attn:|attention:)\b/i,
+  // Strings that look like email addresses or partial mailbox names
+  /@[a-z0-9.-]+\.[a-z]{2,}/i,
+  // Purely numeric or very-short non-alphabetic strings
+  /^[\d\s\-_./:]{1,10}$/,
+];
 
 /**
  * Returns true if the name is a generic junk label rather than a real company.
+ * Checks both the exact-match set and pattern-based non-company detection.
  * These must not appear in Customer Burden or related customer charts.
  */
 export function isCustomerJunkLabel(name: string): boolean {
   if (!name) return false;
   const lower = name.toLowerCase().trim();
   if (lower.length < 2) return true;
-  return CUSTOMER_JUNK_EXACT.has(lower);
+  if (CUSTOMER_JUNK_EXACT.has(lower)) return true;
+  return CUSTOMER_JUNK_PATTERNS.some(p => p.test(name.trim()));
 }
 // ─────────────────────────────────────────────────────────────────
 // OUTPUT QUALITY VALIDATION
@@ -456,6 +492,8 @@ export function validateOutputGuards(
   for (const c of customerBurden) {
     if (isBlockedFromCustomerRole(c.name))
       v.push({ rule: 'BLOCKED_ENTITY_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
+    else if (isCustomerJunkLabel(c.name))
+      v.push({ rule: 'JUNK_LABEL_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
   }
 
   for (const t of transporterPerformance) {

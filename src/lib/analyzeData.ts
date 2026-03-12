@@ -5,10 +5,25 @@ import type {
   AnalysisResult, EnrichedRecord, IssueBreakdownItem,
   CustomerBurdenItem, TransporterItem, DepotItem, DeepseaTerminalItem,
   CustomsCompliance, LoadRefIntelligence, AreaHotspot,
-  WeeklySnapshot, Actions, UnknownEntityItem,
+  WeeklySnapshot, Actions, UnknownEntityItem, IsrVsExternal,
 } from '../types/analysis';
 import { buildForecast } from './forecast';
-import { isKnownOperationalEntity, isApprovedTransporter, isBlockedFromCustomerRole } from '../config/referenceData';
+import { isKnownOperationalEntity, isApprovedTransporter, isBlockedFromCustomerRole, isInternalISRLabel } from '../config/referenceData';
+
+// ─────────────────────────────────────────────────────────────────
+// Non-operational area labels to suppress from Area Hotspots.
+// These come from the NL/BE ZIP rules and are too granular or
+// geographically generic for this inland logistics dashboard.
+// The operational split (Mainz/Germersheim + Duisburg/Rhine-Ruhr)
+// already covers German ZIPs. Rotterdam and Antwerp (deepsea hubs)
+// are retained for terminal visibility.
+// ─────────────────────────────────────────────────────────────────
+const EXCLUDED_AREA_LABELS = new Set<string>([
+  'Brussels', 'Tilburg / Breda', 'Eindhoven', 'Namur / Wallonia',
+  'Charleroi / Belgium South', 'Bruges / West Flanders',
+  'Ghent / East Flanders', 'Leuven / Belgium East', 'Liège / Belgium',
+  'Utrecht / NL Central', 'Amsterdam', 'Venlo / Limburg NL',
+]);
 
 function trend2(a: number, b: number): 'up' | 'down' | 'stable' {
   if (b > a * 1.2) return 'up';
@@ -461,6 +476,7 @@ export function runAnalysis(
   }
 
   const areaHotspots: AreaHotspot[] = Object.values(areaMap)
+    .filter(a => !EXCLUDED_AREA_LABELS.has(a.name))
     .map(a => {
       const recs = records.filter(r => r.resolvedArea === a.name);
       const topIssue = topIssueForGroup(recs);
@@ -469,7 +485,31 @@ export function runAnalysis(
     })
     .sort((a, b) => b.count - a.count);
 
-  // ─── 12. Summary ──────────────────────────────────────────────
+  // ─── 12. ISR vs External ──────────────────────────────────────
+  // An "ISR case" is one where the raw customer column held an internal
+  // Maersk/MSL address-book entry, indicating it was routed through the
+  // internal ISR workflow rather than submitted by an external customer.
+  const isrRecords     = records.filter(r => isInternalISRLabel(r.customer ?? ''));
+  const externalCount  = records.length - isrRecords.length;
+
+  const isrVsExternal: IsrVsExternal = {
+    totalIsr:      isrRecords.length,
+    totalExternal: externalCount,
+    isrPct:        totalCases > 0 ? (isrRecords.length / totalCases) * 100 : 0,
+    externalPct:   totalCases > 0 ? (externalCount / totalCases) * 100 : 0,
+    weeklyBreakdown: sortedWeeks.map(wk => {
+      const weekRecs = records.filter(r => r.weekKey === wk);
+      const weekIsr  = weekRecs.filter(r => isInternalISRLabel(r.customer ?? '')).length;
+      return {
+        week: wk,
+        isr: weekIsr,
+        external: weekRecs.length - weekIsr,
+        isrPct: weekRecs.length > 0 ? (weekIsr / weekRecs.length) * 100 : 0,
+      };
+    }),
+  };
+
+  // ─── 13. Summary ──────────────────────────────────────────────
   const topIssue      = issueBreakdown.find(i => i.id !== 'other');
   const topCustomer   = customerBurden[0];
   const topTransporter= [...transporterPerformance].sort((a, b) => b.delays - a.delays)[0];
@@ -524,6 +564,7 @@ export function runAnalysis(
     customsCompliance,
     loadRefIntelligence,
     areaHotspots,
+    isrVsExternal,
     forecast,
     actions,
     records,

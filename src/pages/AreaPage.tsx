@@ -13,7 +13,7 @@ export function AreaPage({ analysis }: Props) {
   if (areaHotspots.length === 0) {
     return (
       <div className="p-8 space-y-6">
-        <SectionHeader title="Area Hotspots" subtitle="Geographic burden using ZIP / area mapping" />
+        <SectionHeader title="Area Hotspots" subtitle="Operational routing split — Mainz/Germersheim · Duisburg/Rhine-Ruhr · deepsea ports" />
         <div className="bg-[#7aa2ff]/8 border border-[#7aa2ff]/20 rounded-lg p-5 text-sm text-[#a6aec4]">
           No area data found. Add an <span className="text-[#7aa2ff] font-medium">Area</span> or <span className="text-[#7aa2ff] font-medium">Postcode</span> column, or upload a ZIP mapping file on the Upload page.
         </div>
@@ -25,7 +25,7 @@ export function AreaPage({ analysis }: Props) {
 
   return (
     <div className="p-8 space-y-8">
-      <SectionHeader title="Area Hotspots" subtitle="Geographic burden using ZIP / area mapping" />
+      <SectionHeader title="Area Hotspots" subtitle="Operational routing split — Mainz/Germersheim · Duisburg/Rhine-Ruhr · deepsea ports" />
 
       {meta.hasZipMap && (
         <div className="bg-[#52c7c7]/8 border border-[#52c7c7]/20 rounded-lg px-4 py-3">
