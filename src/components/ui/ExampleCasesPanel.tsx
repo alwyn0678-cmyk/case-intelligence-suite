@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ExampleCase } from '../../types/analysis';
+import { exportCasesToXlsx } from '../../lib/exportEvidence';
 
 interface Props {
   title: string;
@@ -15,9 +16,29 @@ function confColor(c: number): string {
   return '#dc6d7d';
 }
 
+// Issue state badge — subtle colour per intent
+function stateColor(s: string): string {
+  switch (s) {
+    case 'missing':      return '#dc6d7d';
+    case 'provided':     return '#52c7c7';
+    case 'amended':      return '#d8a34c';
+    case 'delayed':      return '#e07b45';
+    case 'escalated':    return '#c46be8';
+    case 'informational': return '#7aa2ff';
+    default:             return '#a6aec4';
+  }
+}
+
+// Preview limit — show first N rows before "Show all" is clicked
+const PREVIEW_LIMIT = 10;
+
 export function ExampleCasesPanel({ title, subtitle, cases, onClose }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const shown = expanded ? cases : cases.slice(0, 5);
+  const shown = expanded ? cases : cases.slice(0, PREVIEW_LIMIT);
+
+  function handleDownload() {
+    exportCasesToXlsx(title, cases);
+  }
 
   return (
     // Backdrop — click outside to close
@@ -52,13 +73,14 @@ export function ExampleCasesPanel({ title, subtitle, cases, onClose }: Props) {
               No example cases available for this group.
             </p>
           ) : (
-            <table className="w-full text-xs min-w-[800px]">
+            <table className="w-full text-xs min-w-[860px]">
               <thead className="sticky top-0 bg-[#1d2030] border-b border-[#2a2f3f]">
                 <tr>
                   {[
                     'Case No.',
                     'Booking',
                     'Issue',
+                    'State',
                     'Subject',
                     'Date',
                     'Customer',
@@ -93,6 +115,15 @@ export function ExampleCasesPanel({ title, subtitle, cases, onClose }: Props) {
                     {/* Issue */}
                     <td className="px-3 py-2.5 text-[#eceff7] whitespace-nowrap">
                       {c.issueLabel}
+                    </td>
+                    {/* State */}
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      <span
+                        className="text-xs font-medium capitalize"
+                        style={{ color: stateColor(c.issueState) }}
+                      >
+                        {c.issueState ?? '—'}
+                      </span>
                     </td>
                     {/* Subject */}
                     <td className="px-3 py-2.5 max-w-[200px]">
@@ -151,20 +182,29 @@ export function ExampleCasesPanel({ title, subtitle, cases, onClose }: Props) {
 
         {/* Footer */}
         {cases.length > 0 && (
-          <div className="px-5 py-3 border-t border-[#2a2f3f] shrink-0 flex items-center justify-between">
+          <div className="px-5 py-3 border-t border-[#2a2f3f] shrink-0 flex items-center justify-between gap-3 flex-wrap">
             <p className="text-xs text-[#a6aec4]">
               Showing <span className="text-[#eceff7] font-medium">{shown.length}</span> of{' '}
-              <span className="text-[#eceff7] font-medium">{cases.length}</span> example case
+              <span className="text-[#eceff7] font-medium">{cases.length}</span> case
               {cases.length !== 1 ? 's' : ''} — sorted by classification confidence
             </p>
-            {cases.length > 5 && (
+            <div className="flex items-center gap-3 shrink-0">
+              {cases.length > PREVIEW_LIMIT && (
+                <button
+                  onClick={() => setExpanded(x => !x)}
+                  className="text-xs text-[#7aa2ff] hover:text-[#8fb3ff] font-medium"
+                >
+                  {expanded ? 'Show fewer' : `Show all ${cases.length}`}
+                </button>
+              )}
               <button
-                onClick={() => setExpanded(x => !x)}
-                className="text-xs text-[#7aa2ff] hover:text-[#8fb3ff] font-medium ml-4 shrink-0"
+                onClick={handleDownload}
+                className="text-xs bg-[#2a2f3f] hover:bg-[#333a50] text-[#eceff7] font-medium px-3 py-1.5 rounded-md border border-[#3a4155] transition-colors"
+                title={`Export all ${cases.length} cases to Excel`}
               >
-                {expanded ? 'Show fewer' : `Show all ${cases.length}`}
+                ↓ Download All ({cases.length})
               </button>
-            )}
+            </div>
           </div>
         )}
       </div>

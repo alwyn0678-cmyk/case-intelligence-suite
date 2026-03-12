@@ -42,17 +42,18 @@ export interface EnrichedRecord extends NormalisedRecord {
 // aggregation and retained so the UI can show real case evidence
 // behind any chart metric without re-scanning records at render time.
 export interface ExampleCase {
-  caseNumber: string | null;     // case number / ticket ID from source
-  bookingRef: string | null;     // booking reference from source or classifier
-  primaryIssue: string;          // taxonomy id
-  issueLabel: string;            // human-readable label
-  subject: string | null;        // case subject (truncated to 120 chars)
-  date: string | null;           // formatted date string (dd Mon yyyy)
-  customer: string | null;       // resolvedCustomer
-  transporter: string | null;    // resolvedTransporter
-  loadRef: string | null;        // extracted from classifier evidence
+  caseNumber: string | null;      // case number / ticket ID from source
+  bookingRef: string | null;      // booking reference from source or classifier
+  primaryIssue: string;           // taxonomy id
+  issueLabel: string;             // human-readable label
+  issueState: string;             // intent/state: missing | provided | amended | delayed | escalated | informational | unknown
+  subject: string | null;         // case subject (truncated to 120 chars)
+  date: string | null;            // formatted date string (dd Mon yyyy)
+  customer: string | null;        // resolvedCustomer
+  transporter: string | null;     // resolvedTransporter
+  loadRef: string | null;         // extracted from classifier evidence
   containerNumber: string | null; // extracted from classifier evidence
-  confidence: number;            // 0–1 classification confidence
+  confidence: number;             // 0–1 classification confidence
 }
 
 export interface IssueBreakdownItem {

@@ -200,16 +200,19 @@ function topIssueForGroup(records: EnrichedRecord[]): string {
 }
 
 // ── Evidence drilldown helper ─────────────────────────────────────
-// Builds the top-10 ExampleCase array from a set of matching records.
+// Builds the full ExampleCase array from a set of matching records.
 // Records are sorted by confidence descending so the strongest
 // classifications appear first. The caller is responsible for passing
 // only the records that already match the group's filter criteria —
 // this function never re-filters, ensuring strict matching consistency.
+//
+// No cap is applied here — all matching records are returned so the UI
+// can display, paginate, or export the full evidence set. The panel
+// component is responsible for any display-level truncation.
 function buildExampleCases(matchingRecords: EnrichedRecord[]): ExampleCase[] {
   return matchingRecords
     .slice()
     .sort((a, b) => b.confidence - a.confidence)
-    .slice(0, 10)
     .map(r => {
       const loadRef        = r.evidence.find(e => e.startsWith('ref[load_ref]='))?.slice('ref[load_ref]='.length) ?? null;
       const containerNumber = r.evidence.find(e => e.startsWith('ref[container]='))?.slice('ref[container]='.length) ?? null;
@@ -224,6 +227,7 @@ function buildExampleCases(matchingRecords: EnrichedRecord[]): ExampleCase[] {
         bookingRef:      r.booking_ref ?? bookingEvidence ?? null,
         primaryIssue:    r.primaryIssue,
         issueLabel:      TAXONOMY_MAP[r.primaryIssue]?.label ?? r.primaryIssue,
+        issueState:      r.issueState,
         subject:         r.subject ? r.subject.slice(0, 120) : null,
         date:            dateStr,
         customer:        r.resolvedCustomer,

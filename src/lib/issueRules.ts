@@ -208,8 +208,11 @@ const TOPIC_RULES: TopicRule[] = [
       // Note: 'transport order' intentionally excluded — it is a document (see transport_order topic)
     ],
     weakSignals: [
-      'reference', 'booking', 'ref missing', 'no reference', 'without reference',
-      'missing reference', 'ref not', 'number missing',
+      // Only specific "missing X" patterns — bare 'reference' and 'booking' are
+      // too broad and cause false positives with booking amendments, transport orders, etc.
+      'ref missing', 'no reference provided', 'without load reference',
+      'missing reference', 'ref not received', 'ref not provided',
+      'load number missing', 'number not provided',
     ],
   },
   {

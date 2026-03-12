@@ -183,7 +183,10 @@ export function operationalClueScan(text: string): IssueMatch | null {
     { keyword: 'driver',         issueId: 'delay',            state: 'unknown' },
     { keyword: 'delivery',       issueId: 'delay',            state: 'unknown' },
     { keyword: 'collection',     issueId: 'delay',            state: 'unknown' },
-    { keyword: 'booking',        issueId: 'load_ref',         state: 'unknown' },
+    // Note: 'booking' intentionally omitted — too broad, fires on booking amendments,
+    // transport orders, and scheduling cases. Specific booking-ref patterns are
+    // handled by the FALLBACK_RULES ref_provided/load_ref regex rules above.
+    { keyword: 'amendment',      issueId: 'amendment',        state: 'amended' },
     { keyword: 'schedule',       issueId: 'scheduling',       state: 'unknown' },
     { keyword: 'slot',           issueId: 'scheduling',       state: 'unknown' },
     { keyword: 'release',        issueId: 'equipment_release',state: 'unknown' },

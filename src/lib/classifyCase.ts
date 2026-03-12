@@ -352,32 +352,33 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   //
   // The load_ref topic fires on keywords like "load ref", "booking ref",
   // "ref no", etc. Whether the case is MISSING or PROVIDED depends on intent.
-  // Two disambiguation passes run here:
+  //
+  // DESCRIPTION IS SOURCE OF TRUTH: the description/email body is checked first.
+  // If it contains an explicit provided-reference pattern, that overrides any
+  // "missing" signal from the subject line.
   //
   // Case A (state=unknown): a reference number follows the keyword immediately.
   //   "ref no BKG1234" — "no" is "number" not negation → provided.
   //
-  // Case B (state=missing): subject line suggests "missing" but the description
-  //   body explicitly provides the actual reference value or contains a "see below"
-  //   / "ref is XXXX" pattern. Description body overrides subject intent for this.
+  // Case B (any state): description body explicitly provides the actual reference
+  //   value or contains a "see below / ref is XXXX / correct ref" pattern.
+  //   Body wins over any subject-derived missing signal.
   if (issues.includes('load_ref')) {
-    if (issueState === 'unknown') {
-      // Case A: alphanumeric ref value immediately follows keyword
+    const descText = fields.description ?? '';
+    if (textProvidesRef(descText)) {
+      // Description explicitly provides the reference — override any state.
+      // This covers: state=missing (subject says "Missing Load Ref" but body
+      // provides it), state=unknown (ambiguous subject, body is clear), etc.
+      issues = issues.map(i => i === 'load_ref' ? 'ref_provided' : i);
+      issueState = 'provided';
+      evidence.push('[description] body provides explicit ref — overrides subject signal → ref_provided');
+    } else if (issueState === 'unknown') {
+      // Case A: no description-level evidence, but a ref code immediately follows keyword
       const refNumPresent = /(?:(?:load\s*)?ref(?:erence)?|loadref|booking\s*ref(?:erence)?)\s*(?:no\.?\s*|#\s*)?[A-Z0-9]{4,}/i.test(normalizedText);
       if (refNumPresent) {
         issues = issues.map(i => i === 'load_ref' ? 'ref_provided' : i);
         issueState = 'provided';
-        evidence.push('load-ref number present → ref_provided');
-      }
-    } else if (issueState === 'missing') {
-      // Case B: description body explicitly provides the reference.
-      // This happens when the subject says "Missing Load Ref" (driving state=missing)
-      // but the email body actually contains the ref value. Body wins.
-      const descText = fields.description ?? '';
-      if (textProvidesRef(descText)) {
-        issues = issues.map(i => i === 'load_ref' ? 'ref_provided' : i);
-        issueState = 'provided';
-        evidence.push('[description] body provides explicit ref — overrides subject missing-signal → ref_provided');
+        evidence.push('load-ref number present in text → ref_provided');
       }
     }
   }
@@ -385,10 +386,56 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   // ── Contradiction guard: ref_provided and load_ref are mutually exclusive ──
   // Context-window detection can produce both if subject and description disagree.
   // Keep only ref_provided — a reference cannot be simultaneously missing and provided.
-  // This also prevents secondary load_ref from inflating "Missing Load Ref" counts
-  // in the aggregation layer (which sums all issues[], not just primaryIssue).
+  // Also fix issueState: when load_ref is removed in favour of ref_provided, ensure
+  // issueState reflects the provided intent (prevents stale 'missing' state leaking
+  // through when the primary match was load_ref and secondary was ref_provided).
   if (issues.includes('ref_provided') && issues.includes('load_ref')) {
     issues = issues.filter(i => i !== 'load_ref');
+    // Lock state to 'provided' — ref_provided always means the ref was given
+    issueState = 'provided';
+  }
+
+  // ── Description-first override: general topic contradiction guard ──
+  //
+  // When the primary classification came from the Subject field (higher weight
+  // than any description match), but the Description field independently
+  // classifies as a DIFFERENT topic at meaningful confidence, Description wins.
+  //
+  // This implements the "body is source of truth" principle without breaking
+  // the weighted accumulation that already favours description (weight=1.00
+  // vs subject=0.88) for same-topic matches. This guard only fires when the
+  // topics CONFLICT — i.e. the description is saying something different from
+  // what the subject shorthand implies.
+  //
+  // Mechanism: re-classify ONLY the description field and compare its primary
+  // topic against the overall primary topic. If they differ and the description
+  // match is at least WEAK_SIGNAL confidence, promote the description's result.
+  if ((fields.description ?? '').trim().length > SUBSTANTIVE_DESC_MIN_LENGTH) {
+    const descOnlyMatches = classifyByRules(fields.description);
+    if (descOnlyMatches.length > 0) {
+      const descPrimary = descOnlyMatches[0];
+      const overallPrimary = issues[0];
+      // Conflict: description says something clearly different from the overall winner
+      const topicsDiffer = descPrimary.issueId !== overallPrimary &&
+        // Don't override if they are in the same logical family (e.g. load_ref vs ref_provided)
+        !(descPrimary.issueId === 'ref_provided' && overallPrimary === 'load_ref') &&
+        !(descPrimary.issueId === 'load_ref' && overallPrimary === 'ref_provided');
+      // Only promote if description has a meaningful signal (not just operational clue)
+      const descConfidentEnough = descPrimary.confidence >= 0.55;
+      if (topicsDiffer && descConfidentEnough) {
+        // Description classification takes precedence — prepend to issues list
+        // and replace issueState with description's state.
+        if (!issues.includes(descPrimary.issueId)) {
+          issues = [descPrimary.issueId, ...issues];
+        } else {
+          // Already in list — move to front
+          issues = [descPrimary.issueId, ...issues.filter(i => i !== descPrimary.issueId)];
+        }
+        issueState = descPrimary.state;
+        confidence = Math.min(descPrimary.confidence, confidence + 0.05); // slight confidence boost for agreement
+        evidence.push(`[description-override] description classifies as ${descPrimary.issueId} (${descPrimary.evidence.join(', ')}) — overrides subject-derived ${overallPrimary}`);
+      }
+    }
   }
 
   // ── Subject-only classification penalty ───────────────────────
