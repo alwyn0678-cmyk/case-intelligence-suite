@@ -14,7 +14,8 @@ The dashboard turns a weekly case export into structured operational insight:
 - **Depot & Terminal** — case volume per inland depot and deepsea terminal
 - **Area Hotspots** — ZIP-derived routing clusters (Mainz/Germersheim, Duisburg/Rhine-Ruhr)
 - **Week-on-Week** — spike detection and trend direction per issue, customer, transporter, and area
-- **Evidence Drilldown** — click any row to see the underlying cases with Case Number, subject, customer, date, and classification confidence
+- **Evidence Drilldown** — click any metric to see all underlying cases: Case Number, Issue State, Subject, Date, Customer, Transporter, Load Ref, Container, Confidence
+- **Full Export** — download all matching cases for any category, customer, transporter, or area to Excel (.xlsx)
 
 ---
 
@@ -50,15 +51,34 @@ Every row is classified in a fixed pipeline:
 3. **Infer customer** — only after blocking all operational entities
 4. **Extract references** — load ref, booking ref, container number, customs/MRN/T1 refs, ZIP
 5. **Map ZIP to area** — field-priority order: Subject → Description → ISR Details
-6. **Classify issue** — per-field weighted pass:
-   - Description: weight 1.00
-   - Subject: weight 0.88
-   - ISR Details: weight 0.78
-   - Category: weight 0.70
-7. **Detect issue intent** — missing / provided / amended / delayed / escalated / informational
-8. **Assign confidence** — strong signal ≥ 0.85, weak signal 0.55–0.70, intent bonus +0.10
-9. **Recovery pass** — fallback rules and operational clue scan before assigning Other
-10. **Aggregate** — build customer burden, transporter performance, area hotspots, issue breakdown
+6. **Classify issue** — Description is source of truth (weight 1.00); Subject is secondary signal (weight 0.88); ISR Details supporting (weight 0.78); Category (weight 0.70)
+7. **Detect issue intent** — missing / provided / amended / delayed / escalated / informational — detected per topic in a 280-char context window around each keyword
+8. **Contradiction check** — if Description provides a reference, it overrides any "missing" signal from Subject; if Description classifies a different topic from Subject at ≥ 0.55 confidence, Description wins
+9. **Assign confidence** — strong signal ≥ 0.85, weak signal 0.55–0.70, intent bonus +0.10
+10. **Recovery pass** — fallback rules and operational clue scan before assigning Other
+11. **Aggregate** — clean entity gates applied before chart output; Case Number preserved as primary evidence key
+
+### Issue families vs issue state
+
+Every case carries both a **topic** (what the case is about) and a **state** (what is happening):
+
+| State | Example |
+|-------|---------|
+| `missing` | "Please provide load ref" |
+| `provided` | "Please see below load ref BKG123" |
+| `amended` | "Please correct the booking address" |
+| `delayed` | "Driver still not arrived" |
+| `escalated` | "This is unacceptable, escalating to management" |
+| `informational` | "Just to confirm — transport booked" |
+
+Load reference examples:
+
+| Email body | Final category |
+|-----------|----------------|
+| `"Please provide load ref"` | Missing Load Reference |
+| `"Please see below load ref BKG123"` | Reference Update / Info Provided |
+| `"Correct ref is BKG456"` | Reference Update / Info Provided |
+| `"Please send us the transport order"` | Transport Order Request |
 
 ### Issue families
 

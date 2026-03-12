@@ -247,12 +247,19 @@ export function auditCustomerAcceptance(name: string): CustomerAcceptanceResult 
  * // → false
  */
 export const SENTENCE_FRAGMENT_PATTERNS: RegExp[] = [
+  // Finite English verb phrases — sentences, not company names
   /\b(did\s+not|has\s+not|have\s+not|was\s+not|were\s+not|had\s+not|is\s+not|are\s+not|could\s+not|would\s+not|will\s+not|shall\s+not|does\s+not|do\s+not)\b/i,
+  // Auto-generated / system notification phrases
   /\bautomatically\s+generated\b/i,
   /\bdo\s+not\s+reply\b/i,
   /\bno[\s\-]?reply\b/i,
+  // Sentence-opener patterns (demonstratives/articles — never a company name)
   /^(this\s+(is|was|are|will)|there\s+(is|are|was|were)|it\s+(is|was)|the\s+(above|below|following|attached|enclosed))\b/i,
+  // Fragment ending with a bare preposition (sentence tail, not a company name)
   /\s+(to|from|for|with|of|by|at|in|on)\s*\.?\s*$/i,
+  // Single-word portal / system / interface labels (not company names)
+  // Mirrors the CUSTOMER_JUNK_PATTERNS entry in referenceData.ts — keep in sync.
+  /^(portal|system|platform|application|app|software|database|server|interface|module|dashboard|tool|solution|service\s+portal|customer\s+portal|web\s+portal)\.?\s*$/i,
 ];
 
 export function isSentenceFragment(text: string): boolean {

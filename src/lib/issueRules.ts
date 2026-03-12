@@ -202,7 +202,10 @@ const TOPIC_RULES: TopicRule[] = [
     strongSignals: [
       'load ref', 'loadref', 'load reference', 'booking ref', 'booking reference',
       'booking number', 'reference number', 'ref number', 'ref no',
-      'order reference', 'order number', 'order no', 'po number', 'purchase order',
+      'order reference', 'order number', 'po number', 'purchase order',
+      // Note: 'order no' intentionally excluded — at only 8 chars it matches as a substring
+      // inside "transport order not received" → causes transport_order to misclassify as load_ref.
+      // "order number" (with full word) covers the same intent without the ambiguity.
       'job reference', 'job number', 'shipment reference', 'shipment ref',
       'consignment number', 'consignment ref', 'load number',
       // Note: 'transport order' intentionally excluded — it is a document (see transport_order topic)
