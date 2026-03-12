@@ -55,6 +55,7 @@ export const CONTEXT_WINDOW_AFTER = 160;
 const MISSING_SIGNALS = [
   'please provide', 'please send', 'please share', 'please forward',
   'please supply', 'kindly provide', 'kindly send',
+  'please add', 'please include', 'kindly add',  // "please add load reference"
   'can you send', 'can you provide', 'can you share', 'can you advise',
   'please advise', 'please let us know', 'could you please', 'could you advise',
   'we need', 'we require', 'we are waiting', 'still waiting',
@@ -218,6 +219,9 @@ const TOPIC_RULES: TopicRule[] = [
       // Note: 'transport order' intentionally excluded — it is a document (see transport_order topic)
     ],
     weakSignals: [
+      // Explicit "correct/updated ref" phrases — indicate a reference is being supplied
+      // (state=amended → resolveIssueId produces ref_provided).
+      'correct ref', 'corrected ref', 'updated ref', 'update ref',
       // Booking reference terminology — weak so planning emails with "booking reference"
       // don't beat a closing_time or capacity topic that fires at strong (0.85).
       'booking ref', 'booking reference',
@@ -254,7 +258,10 @@ const TOPIC_RULES: TopicRule[] = [
   {
     topic: 'customs',
     strongSignals: [
-      'customs', 'douane', 'zoll', 'declaration', 'customs clearance',
+      'customs', 'douane', 'zoll', 'customs clearance',
+      // Note: bare 'declaration' removed — it matches substring of "transit declaration"
+      // causing customs to incorrectly beat t1. Use specific forms ('import declaration',
+      // 'export declaration') which do NOT appear in T1/transit contexts.
       'customs hold', 'customs delay', 'customs release', 'customs check',
       'customs inspection', 'customs exam', 'import declaration',
       'export declaration', 'mrn', 'customs entry', 'customs documents',

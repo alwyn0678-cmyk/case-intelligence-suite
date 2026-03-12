@@ -143,11 +143,13 @@ export const LOAD_REF_EXPLICIT_MISSING: string[] = [
  * These represent feasibility, capacity, scheduling or booking-planning inquiries.
  */
 export const LOAD_REF_PLANNING_BLOCKLIST: string[] = [
+  // ── Planning / feasibility ─────────────────────────────────────
   'feasibility',
   'intermodal feasibility',
   'loading feasibility',
   'booking feasibility',
   'capacity request',
+  'capacity',        // general capacity-availability queries
   'rail cut',        // covers "rail cut off", "rail cutoff", "rail cut-off"
   'barge schedule',
   'preferred load date',
@@ -158,7 +160,96 @@ export const LOAD_REF_PLANNING_BLOCKLIST: string[] = [
   'advise rail',
   'loading window',
   'operational planning',
+  // ── Billing / cost contexts ────────────────────────────────────
+  'demurrage',
+  'detention',           // detention charges
+  'extra cost',          // "extra costs report"
+  'extra costs',
+  'additional charge',   // "additional charges"
+  'surcharge',
+  'cost report',
+  'rate discussion',     // rate-discussion emails
+  'rate query',
+  'rate inquiry',
+  // ── Routing / transport planning ───────────────────────────────
+  'routing',             // routing check / route planning
 ];
+
+// ─── Body intent detection ────────────────────────────────────────
+//
+// A lightweight pre-classifier that identifies the dominant intent of the
+// description + ISR fields BEFORE the proximity check runs.
+//
+// Purpose: prevent Missing Load Reference from being assigned when the case
+// body is clearly about billing (demurrage, rates, invoices), operational
+// planning (feasibility, capacity), or routing — even if a loose "load ref"
+// keyword appears somewhere in the text.
+//
+// Only called when at least one of description or ISR is substantive (> 30 chars).
+// Subject is intentionally NOT checked here — subject overrides are handled
+// at lower priority (steps 4-6 in validateLoadRefMissing).
+// ─────────────────────────────────────────────────────────────────
+
+export type BodyIntent = 'billing' | 'planning' | 'routing' | 'documentation' | 'unknown';
+
+export interface BodyIntentResult {
+  intent: BodyIntent;
+  trigger: string | null;
+}
+
+/** Billing-context signals — demurrage, charges, costs, rate discussions. */
+const BILLING_INTENT_SIGNALS: string[] = [
+  'demurrage', 'detention', 'extra cost', 'extra costs', 'additional charge',
+  'surcharge', 'cost report', 'rate discussion', 'rate query', 'rate inquiry',
+  'invoice', 'waiting costs', 'charges report',
+  // 'rate' alone is included because freight-rate discussion emails almost always
+  // mention 'rate' in the body, and the explicit-missing check (step 1) still
+  // catches genuine "please provide load ref" phrases before this check runs.
+  'rate',
+];
+
+/** Planning/feasibility signals — mirrors a subset of LOAD_REF_PLANNING_BLOCKLIST. */
+const PLANNING_INTENT_SIGNALS: string[] = [
+  'feasibility', 'capacity request', 'rail cut', 'barge schedule',
+  'preferred load date', 'advise load date', 'loading window', 'operational planning',
+];
+
+/** Routing / re-routing signals. */
+const ROUTING_INTENT_SIGNALS: string[] = [
+  'routing', 'route planning', 'route change', 'routing check',
+];
+
+/**
+ * Detects the dominant intent class of the case body (description + ISR).
+ *
+ * Returns 'billing' for demurrage/rate/cost contexts,
+ *         'planning' for feasibility/capacity/scheduling contexts,
+ *         'routing' for routing/re-routing contexts,
+ *         'unknown' when no dominant signal is found.
+ *
+ * Used by validateLoadRefMissing (step 2a) to block Missing Load Reference
+ * when the description context clearly belongs to a different operational class.
+ *
+ * @example
+ * detectBodyIntent('Demurrage charges are pending.', '')
+ * // → { intent: 'billing', trigger: 'demurrage' }
+ *
+ * detectBodyIntent('Please advise on loading feasibility.', '')
+ * // → { intent: 'planning', trigger: 'feasibility' }
+ */
+export function detectBodyIntent(description: string, isr: string): BodyIntentResult {
+  const lower = (description + ' ' + isr).toLowerCase();
+  for (const s of BILLING_INTENT_SIGNALS) {
+    if (lower.includes(s)) return { intent: 'billing', trigger: s };
+  }
+  for (const s of PLANNING_INTENT_SIGNALS) {
+    if (lower.includes(s)) return { intent: 'planning', trigger: s };
+  }
+  for (const s of ROUTING_INTENT_SIGNALS) {
+    if (lower.includes(s)) return { intent: 'routing', trigger: s };
+  }
+  return { intent: 'unknown', trigger: null };
+}
 
 // ─── Proximity check helpers ─────────────────────────────────────
 
@@ -275,6 +366,32 @@ export function validateLoadRefMissing(
     }
     if (isrLower.includes(phrase)) {
       return { valid: true, triggerPhrase: phrase, sourceField: 'isr_details', rejectReason: null };
+    }
+  }
+
+  // ── 2a. Body intent detection ─────────────────────────────────────
+  // When description or ISR is substantive (> 30 chars), detect the dominant
+  // intent class. If the body is about billing, planning, or routing, reject
+  // Missing Load Reference — the explicit missing check (step 1) already
+  // accepted genuine cases before we reach this point.
+  //
+  // This is the "Description overrides Subject" rule: even if the subject
+  // says "Load Reference Required", a description about demurrage or rate
+  // discussion overrides the subject-based trigger.
+  const bodySubstantive = description.trim().length > 30 || isr.trim().length > 30;
+  if (bodySubstantive) {
+    const bodyIntent = detectBodyIntent(description, isr);
+    if (
+      bodyIntent.intent === 'billing' ||
+      bodyIntent.intent === 'planning' ||
+      bodyIntent.intent === 'routing'
+    ) {
+      return {
+        valid: false,
+        triggerPhrase: null,
+        sourceField: null,
+        rejectReason: `Body intent is ${bodyIntent.intent} ("${bodyIntent.trigger}") — description context overrides subject-based load-ref trigger`,
+      };
     }
   }
 

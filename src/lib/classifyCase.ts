@@ -23,7 +23,7 @@ import { classifyByRules }              from './issueRules';
 import { fallbackClassify, operationalClueScan } from './fallbackIssueRules';
 import { resolveZipToArea, extractZipsFromText } from '../config/zipAreaRules';
 import { normalizeText }                from './textNormalization';
-import { textProvidesRef, validateLoadRefMissing } from './loadRefGuards';
+import { textProvidesRef, validateLoadRefMissing, detectBodyIntent } from './loadRefGuards';
 import type { IssueState, IssueMatch }  from './issueRules';
 
 // ─── Confidence scoring constants ────────────────────────────────
@@ -52,6 +52,24 @@ export const SUBJECT_ONLY_FLOOR = 0.48;
  * subject-only classifications.
  */
 export const SUBSTANTIVE_DESC_MIN_LENGTH = 30;
+
+/**
+ * Reduced confidence weight applied to load_ref (Missing Load Reference)
+ * matches derived from the subject field only.
+ *
+ * Subject lines frequently contain incidental "load ref" / "booking ref"
+ * phrases in billing, routing, and demurrage emails. Reducing this weight
+ * ensures that the description + ISR fields must corroborate the topic
+ * before load_ref reaches meaningful confidence.
+ *
+ * Strong load_ref from subject: 0.95 × 0.30 = 0.285 — below review threshold.
+ * Strong load_ref from description: 0.95 × 1.00 = 0.95 — wins decisively.
+ *
+ * ref_provided from subject is intentionally NOT reduced — a subject that
+ * explicitly states a reference value (e.g. "Load Ref BKG12345") is a
+ * reliable provided-ref signal.
+ */
+export const LOAD_REF_SUBJECT_WEIGHT = 0.30;
 import type { ExtractedEntity }         from './entityExtraction';
 import type { RoutingAlignment }        from '../config/zipAreaRules';
 import type { NormalisedRecord }        from '../types';
@@ -273,7 +291,17 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     if (!fieldText?.trim()) continue;
     const fieldMatches = classifyByRules(fieldText);
     for (const m of fieldMatches) {
-      const weightedConf = Math.min(m.confidence * weight, 0.98);
+      // load_ref (Missing Load Reference) from the subject line is severely
+      // down-weighted. Subject lines frequently contain incidental "load ref"
+      // phrases in billing, routing, and demurrage emails. The description
+      // and ISR must corroborate the topic for load_ref to reach meaningful
+      // confidence. ref_provided from subject is NOT reduced — an explicit
+      // reference value in the subject is a reliable provided-ref signal.
+      const effectiveWeight =
+        key === 'subject' && m.issueId === 'load_ref'
+          ? LOAD_REF_SUBJECT_WEIGHT
+          : weight;
+      const weightedConf = Math.min(m.confidence * effectiveWeight, 0.98);
       const existing = matchMap.get(m.issueId);
       if (!existing || weightedConf > existing.confidence) {
         matchMap.set(m.issueId, {
@@ -448,9 +476,17 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
         }
       }
     } else {
-      // Accepted — store trigger phrase + source field for audit
+      // Accepted — store trigger phrase, source field, and body intent for audit.
+      // Every accepted Missing Load Reference case must carry a full audit trail:
+      // trigger phrase, source field, and detected body intent class.
+      const bodyIntentResult = detectBodyIntent(
+        fields.description ?? '',
+        fields.isr_details  ?? '',
+      );
       evidence.push(
-        `[load_ref-gate] ACCEPTED: trigger="${gateResult.triggerPhrase}" source=${gateResult.sourceField}`,
+        `[load_ref-gate] ACCEPTED: trigger="${gateResult.triggerPhrase}" source=${gateResult.sourceField}` +
+        ` body_intent=${bodyIntentResult.intent}` +
+        (bodyIntentResult.trigger ? ` ("${bodyIntentResult.trigger}")` : ''),
       );
     }
   }
