@@ -14,6 +14,8 @@
 // NO operational entity (terminal / depot / transporter / carrier) may appear in Customer Burden.
 // ─────────────────────────────────────────────────────────────────
 
+import { normalizeForMatching, generateNormalizedVariants } from '../lib/textNormalization';
+
 export type EntityType = 'transporter' | 'depot' | 'deepsea_terminal' | 'customer' | 'carrier' | 'unknown_entity';
 
 export interface EntityEntry {
@@ -193,16 +195,60 @@ export const ENTITY_ALIAS_MAP: Map<string, EntityEntry> = (() => {
 })();
 
 /**
+ * Fallback normalized alias map — keys are legal-suffix-stripped forms.
+ * Used as a secondary lookup when the primary alias map has no match.
+ *
+ * Example: "dp world intermodal n.v." fails to match "dp world intermodal bv"
+ * but matches "dp world intermodal" in the normalized map.
+ */
+export const ENTITY_NORMALIZED_ALIAS_MAP: Map<string, EntityEntry> = (() => {
+  const map = new Map<string, EntityEntry>();
+  for (const entry of ALL_ENTITIES) {
+    const normalizedVariants = generateNormalizedVariants(entry.aliases);
+    for (const variant of normalizedVariants) {
+      const existing = map.get(variant);
+      if (!existing || PRIORITY[entry.entityType] > PRIORITY[existing.entityType]) {
+        map.set(variant, entry);
+      }
+    }
+    // Also index the canonical name normalized
+    const normalizedCanonical = normalizeForMatching(entry.canonicalName);
+    if (normalizedCanonical && normalizedCanonical.length > 2) {
+      const existing = map.get(normalizedCanonical);
+      if (!existing || PRIORITY[entry.entityType] > PRIORITY[existing.entityType]) {
+        map.set(normalizedCanonical, entry);
+      }
+    }
+  }
+  return map;
+})();
+
+/**
  * Look up a raw string against the entity alias map.
  * Returns the best matching EntityEntry and the alias that matched, or null.
+ *
+ * Two-pass lookup:
+ *   1. Primary: exact alias substring match (current behavior)
+ *   2. Fallback: normalized form match (strips legal suffixes like GmbH, B.V., etc.)
+ *      to catch variants like "DP World Intermodal N.V." → "dp world intermodal"
  */
 export function lookupEntity(text: string): { entry: EntityEntry; matchedAlias: string } | null {
   const lower = text.toLowerCase().trim();
-  // Try longest aliases first (greedy match) to avoid 'dhl' swallowing 'dhl freight'
+  // Pass 1: longest alias first (greedy match to avoid 'dhl' swallowing 'dhl freight')
   const sortedAliases = Array.from(ENTITY_ALIAS_MAP.keys()).sort((a, b) => b.length - a.length);
   for (const alias of sortedAliases) {
     if (lower.includes(alias)) {
       return { entry: ENTITY_ALIAS_MAP.get(alias)!, matchedAlias: alias };
+    }
+  }
+  // Pass 2: normalized form (strips legal suffixes before matching)
+  const normalizedInput = normalizeForMatching(lower);
+  if (normalizedInput.length > 2) {
+    const sortedNormalized = Array.from(ENTITY_NORMALIZED_ALIAS_MAP.keys()).sort((a, b) => b.length - a.length);
+    for (const alias of sortedNormalized) {
+      if (normalizedInput.includes(alias) && alias.length >= 4) {
+        return { entry: ENTITY_NORMALIZED_ALIAS_MAP.get(alias)!, matchedAlias: alias };
+      }
     }
   }
   return null;
@@ -462,6 +508,27 @@ const CUSTOMER_JUNK_EXACT = new Set<string>([
   'serve - rail-und barge',
   'not be able to load',
   'unable to load',
+  // German operational single words / short labels
+  'spedition',
+  'spediteur',
+  'logistik',
+  'verkehr',
+  'hafen',
+  'lager',
+  'versand',
+  'frachtfuehrer',
+  // Dutch operational single words
+  'vervoer',
+  'vervoerder',
+  'afzender',
+  'ontvanger',
+  'expediteur',
+  'expeditie',
+  'opslag',
+  // French operational single words
+  'logistique',
+  'transitaire',
+  'transporteur',
   // Generic non-value placeholders
   'unknown',
   'n/a',
@@ -497,8 +564,12 @@ const CUSTOMER_JUNK_EXACT = new Set<string>([
 // Any name whose words are ALL from this set is treated as junk.
 // This catches: "Service Logistics", "Delivery Transport", "Freight Forwarding", etc.
 // without blocking real names like "Maersk Logistics" (Maersk not in set).
+//
+// IMPORTANT: isCustomerJunkLabel() strips legal suffixes (GmbH, B.V., etc.) BEFORE
+// running the Layer 2 check. This means "Logistik GmbH" → "logistik" → junk,
+// while "BASF GmbH" → "basf" → NOT in this set → not junk.
 const JUNK_SINGLE_WORDS = new Set<string>([
-  // All words from CUSTOMER_JUNK_EXACT that are single words
+  // English operational vocabulary
   'service','representative','intermodal','reference','delivery','logistics',
   'forwarding','transport','transportation','shipping','freight','rail','barge',
   'inland','serve','pickup','collection','export','import','booking','amendment',
@@ -511,6 +582,36 @@ const JUNK_SINGLE_WORDS = new Set<string>([
   'carrier','haulier','hauler','agent','broker','operator','company','customer',
   'account','client','shipper','consignee','receiver','sender','team',
   'general','unknown','test','demo','placeholder','blank','null','none',
+  'fleet','drayage','multimodal','consolidation','repositioning','empties',
+  'haulage','groupage','crossdock',
+  // German operational vocabulary (frequently appear as junk customer labels)
+  'spedition',      // German: freight forwarding company
+  'spediteur',      // German: freight forwarder (person/company)
+  'logistik',       // German: logistics
+  'verkehr',        // German: traffic/transport
+  'hafen',          // German: port/harbour
+  'lager',          // German: warehouse/storage
+  'versand',        // German: dispatch/shipping
+  'empfang',        // German: reception/receipt
+  'absender',       // German: sender
+  'empfaenger',     // German: receiver (alternate spelling)
+  'frachtfuehrer',  // German: carrier
+  'speicherung',    // German: storage
+  // Dutch operational vocabulary
+  'vervoer',        // Dutch: transport
+  'vervoerder',     // Dutch: carrier
+  'afzender',       // Dutch: sender/shipper
+  'ontvanger',      // Dutch: receiver/consignee
+  'expediteur',     // Dutch: freight forwarder
+  'expeditie',      // Dutch: freight forwarding
+  'opslag',         // Dutch: storage/warehousing
+  'inklaring',      // Dutch: customs clearance
+  'goederenvervoer',// Dutch: freight transport
+  // French operational vocabulary
+  'transitaire',    // French: freight forwarder
+  'transporteur',   // French: carrier
+  'expediteur',     // French: shipper/forwarder (overlaps Dutch)
+  'logistique',     // French: logistics
 ]);
 
 // Layer 3 — regex patterns for non-company text
@@ -540,7 +641,10 @@ const CUSTOMER_JUNK_PATTERNS: RegExp[] = [
  *
  * Uses three layers of detection:
  * 1. Exact lowercase match against CUSTOMER_JUNK_EXACT
- * 2. All-junk-words check: every word in the name is in JUNK_SINGLE_WORDS
+ * 2. All-junk-words check after stripping legal suffixes (GmbH, B.V., NV, etc.):
+ *      - "Logistik GmbH" → strip → "logistik" → in JUNK_SINGLE_WORDS → junk
+ *      - "BASF GmbH" → strip → "basf" → NOT in JUNK_SINGLE_WORDS → not junk
+ *      - "Transport Service NV" → strip → "transport service" → both in set → junk
  * 3. Regex pattern match against CUSTOMER_JUNK_PATTERNS
  *
  * A company name is only accepted when NONE of the three layers fire.
@@ -556,8 +660,11 @@ export function isCustomerJunkLabel(name: string): boolean {
   // Layer 1: exact match
   if (CUSTOMER_JUNK_EXACT.has(lower)) return true;
 
-  // Layer 2: all words are generic ops vocabulary (catches multi-word junk combos)
-  const words = lower.split(/[\s\-–_/]+/).filter(w => w.length > 1);
+  // Layer 2: strip legal suffixes THEN check if every remaining word is generic ops vocabulary.
+  // This catches "Logistik GmbH", "Spedition BV", "Transport Service NV", etc.
+  // while preserving real names like "BASF GmbH" or "Maersk Logistics".
+  const strippedForWordCheck = normalizeForMatching(lower); // strips GmbH, B.V., NV, etc.
+  const words = strippedForWordCheck.split(/[\s\-–_/]+/).filter(w => w.length > 1);
   if (words.length >= 1 && words.every(w => JUNK_SINGLE_WORDS.has(w))) return true;
 
   // Layer 3: regex patterns

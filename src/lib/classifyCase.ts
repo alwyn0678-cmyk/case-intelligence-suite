@@ -22,6 +22,7 @@ import { lookupEntity, isInternalISRLabel, isCustomerJunkLabel } from '../config
 import { classifyByRules }              from './issueRules';
 import { fallbackClassify, operationalClueScan } from './fallbackIssueRules';
 import { resolveZipToArea, extractZipsFromText } from '../config/zipAreaRules';
+import { normalizeText }                from './textNormalization';
 import type { IssueState }              from './issueRules';
 import type { ExtractedEntity }         from './entityExtraction';
 import type { RoutingAlignment }        from '../config/zipAreaRules';
@@ -79,12 +80,15 @@ function extractReferences(text: string): Record<string, string> {
 
 export function classifyCase(record: NormalisedRecord): CaseClassification {
   // ── 1 + 2. Collect and normalize all text fields ──────────────
+  // normalizeText() cleans whitespace, line endings, and repeated separators.
+  // Applied per-field before combining so that separators between fields don't
+  // create spurious matches across field boundaries.
   const fields: Record<string, string> = {
-    subject:      record.subject ?? '',
-    description:  record.description ?? '',
-    isr_details:  record.isr_details ?? '',
-    category:     record.category ?? '',
-    status:       record.status ?? '',
+    subject:      normalizeText(record.subject ?? ''),
+    description:  normalizeText(record.description ?? ''),
+    isr_details:  normalizeText(record.isr_details ?? ''),
+    category:     normalizeText(record.category ?? ''),
+    status:       normalizeText(record.status ?? ''),
   };
 
   const sourceFieldsUsed: string[] = Object.entries(fields)
@@ -186,12 +190,33 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   // Unresolved areas are omitted from area hotspot charts rather than
   // being incorrectly assigned to a geography.
 
-  // Routing alignment: compare expected depot from ZIP vs. actual depot found
+  // Routing alignment: compare ZIP-expected routing area vs. resolved depot/area
+  // - aligned:   ZIP routing and resolved area agree (or no conflict detectable)
+  // - unusual:   ZIP implies a different depot than the one mentioned
+  // - no_zip:    no ZIP was found in the record
   let routingAlignment: RoutingAlignment = 'no_zip';
   if (extractedZip) {
     const zipResult = resolveZipToArea(extractedZip, normalizedText);
     if (zipResult) {
-      routingAlignment = 'aligned'; // default — no conflict data to compare against
+      // Check for routing conflict: if ZIP implies one depot cluster but the
+      // resolved area (from the record) is a different operational cluster,
+      // flag as unusual routing for review.
+      const zipArea = zipResult.area?.toLowerCase() ?? '';
+      const resolvedAreaLower = resolvedArea?.toLowerCase() ?? '';
+      if (resolvedAreaLower && zipArea && resolvedAreaLower !== zipArea) {
+        // Only flag as unusual if both are known operational areas (not generic)
+        const isMainzZone = zipArea.includes('mainz') || zipArea.includes('germersheim');
+        const isDuisburgZone = zipArea.includes('duisburg') || zipArea.includes('rhine-ruhr');
+        const resolvedInMainz = resolvedAreaLower.includes('mainz') || resolvedAreaLower.includes('germersheim');
+        const resolvedInDuisburg = resolvedAreaLower.includes('duisburg') || resolvedAreaLower.includes('rhine-ruhr');
+        if ((isMainzZone && resolvedInDuisburg) || (isDuisburgZone && resolvedInMainz)) {
+          routingAlignment = 'unusual';
+        } else {
+          routingAlignment = 'aligned';
+        }
+      } else {
+        routingAlignment = 'aligned';
+      }
     }
   }
 

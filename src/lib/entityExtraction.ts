@@ -17,6 +17,7 @@
 // ─────────────────────────────────────────────────────────────────
 
 import { lookupEntity, ENTITY_ALIAS_MAP, type EntityType, isInternalISRLabel, isCustomerJunkLabel } from '../config/referenceData';
+import { hasCompanyNameStructure } from './textNormalization';
 
 export interface ExtractedEntity {
   rawValue: string;
@@ -160,12 +161,11 @@ export function extractEntities(
   // ── Customer inference ────────────────────────────────────────
   // Customer is inferred only AFTER all operational entities are identified.
   //
-  // Blocking rule: ONLY deepsea_terminal, depot, and transporter (approved hauliers)
-  // prevent a customer_col value from being treated as a customer.
-  //
-  // KNOWN_CARRIERS have entityType='carrier' — they are NOT operational for this
-  // dashboard. If a carrier (e.g. DSV, DHL) appears in the customer column, they
-  // can be treated as a customer/counterparty in that case context.
+  // Blocking rules — the following are NEVER treated as customers:
+  //   - deepsea_terminal, depot, approved transporter, carrier (logistics entities)
+  //   - Internal ISR / Maersk address-book labels
+  //   - Junk placeholder labels
+  //   - Names that fail structural validation (no company-name structure)
   let customer: ExtractedEntity | null = null;
   const custText = customerCol?.trim() ?? '';
 
@@ -174,36 +174,46 @@ export function extractEntities(
   if (custText && (isInternalISRLabel(custText) || isCustomerJunkLabel(custText))) {
     // Leave customer as null — treated as unresolved in aggregation.
   } else if (custText) {
-    const knownMatch = lookupEntity(custText);
-    const isOperationalBlock =
-      knownMatch !== null &&
-      (knownMatch.entry.entityType === 'deepsea_terminal' ||
-       knownMatch.entry.entityType === 'depot' ||
-       knownMatch.entry.entityType === 'transporter' ||
-       knownMatch.entry.entityType === 'carrier');  // all logistics entities blocked from customer slot
+    // Structural check: the value must at least look like a real name (has letters, etc.)
+    if (!hasCompanyNameStructure(custText)) {
+      // Leave as null — purely numeric, symbolic, or empty-ish values are not customers.
+    } else {
+      const knownMatch = lookupEntity(custText);
+      const isOperationalBlock =
+        knownMatch !== null &&
+        (knownMatch.entry.entityType === 'deepsea_terminal' ||
+         knownMatch.entry.entityType === 'depot' ||
+         knownMatch.entry.entityType === 'transporter' ||
+         knownMatch.entry.entityType === 'carrier');  // all logistics entities blocked from customer slot
 
-    if (!isOperationalBlock) {
-      // Not a known entity, OR an unrecognised name — safe to treat as customer
-      const canonicalName = knownMatch ? knownMatch.entry.canonicalName : custText;
-      customer = {
-        rawValue: custText,
-        normalizedValue: canonicalName,
-        entityType: 'customer',
-        roles: ['customer'],
-        canonicalName,
-        matchedAlias: knownMatch?.matchedAlias ?? '',
-        sourceField: 'customer_col',
-        confidence: 0.85,
-        snippet: custText,
-      };
+      if (!isOperationalBlock) {
+        // Not a known entity, OR an unrecognised name — safe to treat as customer.
+        // Confidence is slightly lower for single-word names (could be abbreviations or codes).
+        const canonicalName = knownMatch ? knownMatch.entry.canonicalName : custText;
+        const wordCount = custText.trim().split(/\s+/).length;
+        const baseConfidence = wordCount === 1 && custText.length <= 4 ? 0.65 : 0.85;
+        customer = {
+          rawValue: custText,
+          normalizedValue: canonicalName,
+          entityType: 'customer',
+          roles: ['customer'],
+          canonicalName,
+          matchedAlias: knownMatch?.matchedAlias ?? '',
+          sourceField: 'customer_col',
+          confidence: baseConfidence,
+          snippet: custText,
+        };
+      }
+      // If operational block: entity is already in allEntities under its correct type.
+      // Leave customer as null.
     }
-    // If operational block: entity is already in allEntities under its correct type.
-    // Leave customer as null.
   }
 
   // ── Deep entity recovery pass ────────────────────────────────
   // If customer is still null, scan all text fields for a company name
   // that looks like a customer (not a hard-blocked operational entity).
+  // Candidates from this pass get lower confidence (0.55) as they are
+  // inferred from text context rather than a dedicated customer column.
   if (!customer) {
     const allText = fields.map(f => f.text).join(' ');
     const accountPatterns = [
@@ -217,6 +227,11 @@ export function extractEntities(
       const m = allText.match(pattern);
       if (m && m[1]) {
         const candidate = m[1].trim();
+
+        // Apply the same guards as primary inference: structural + junk + entity block
+        if (!hasCompanyNameStructure(candidate)) continue;
+        if (isInternalISRLabel(candidate) || isCustomerJunkLabel(candidate)) continue;
+
         const knownMatch = lookupEntity(candidate);
         const isOperationalBlock =
           knownMatch !== null &&
