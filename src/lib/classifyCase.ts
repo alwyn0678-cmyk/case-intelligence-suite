@@ -143,6 +143,11 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     }
   }
 
+  // Ultimate fallback: cases with no resolvable area default to Switzerland area
+  if (!resolvedArea) {
+    resolvedArea = 'Switzerland area';
+  }
+
   // Routing alignment: compare expected depot from ZIP vs. actual depot found
   let routingAlignment: RoutingAlignment = 'no_zip';
   if (extractedZip) {

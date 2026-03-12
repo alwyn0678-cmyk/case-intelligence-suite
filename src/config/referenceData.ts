@@ -80,42 +80,51 @@ export const INLAND_DEPOTS: EntityEntry[] = [
 ];
 
 // ─────────────────────────────────────────────────────────────────
-// TRUCK TRANSPORTERS / HAULIERS
+// APPROVED SPECIALIST INLAND HAULIERS
+// Only these 6 appear in Transporter Performance reporting.
 // ─────────────────────────────────────────────────────────────────
-export const TRANSPORTERS: EntityEntry[] = [
-  // Specialist inland container hauliers
-  { canonicalName: 'Starmans',              entityType: 'transporter', aliases: ['starmans'] },
-  { canonicalName: 'Henk Dammes',           entityType: 'transporter', aliases: ['henk dammes','dammes'] },
-  { canonicalName: 'Falcoline',             entityType: 'transporter', aliases: ['falcoline'] },
-  { canonicalName: 'GTS Coldchain',         entityType: 'transporter', aliases: ['gts coldchain','gts cold','gts truck','gts logistics'] },
-  { canonicalName: 'CTV Vrede',             entityType: 'transporter', aliases: ['ctv vrede','ctv transport','ctv'] },
-  { canonicalName: 'EKB Transport',         entityType: 'transporter', aliases: ['ekb transport','ekb'] },
-  // Major European road carriers
-  { canonicalName: 'DB Schenker',           entityType: 'transporter', aliases: ['db schenker','schenker','dbschenker'] },
-  { canonicalName: 'DHL Freight',           entityType: 'transporter', aliases: ['dhl freight','dhl logistics','dhl'] },
-  { canonicalName: 'DSV',                   entityType: 'transporter', aliases: ['dsv road','dsv air','dsv logistics','dsv'] },
-  { canonicalName: 'Rhenus Logistics',      entityType: 'transporter', aliases: ['rhenus logistics','rhenus road','rhenus transport'] },
-  { canonicalName: 'Dachser',               entityType: 'transporter', aliases: ['dachser'] },
-  { canonicalName: 'Kuehne+Nagel',          entityType: 'transporter', aliases: ['kuehne nagel','kühne nagel','kühnenegel','kuhne nagel','k+n','kuehne+nagel'] },
-  { canonicalName: 'XPO Logistics',         entityType: 'transporter', aliases: ['xpo logistics','xpo transport','xpo'] },
-  { canonicalName: 'Geodis',                entityType: 'transporter', aliases: ['geodis'] },
-  { canonicalName: 'Ceva Logistics',        entityType: 'transporter', aliases: ['ceva logistics','ceva'] },
-  { canonicalName: 'Raben Group',           entityType: 'transporter', aliases: ['raben group','raben transport','raben'] },
-  { canonicalName: 'Gefco',                 entityType: 'transporter', aliases: ['gefco','ceva gefco'] },
-  { canonicalName: 'Fiege Logistics',       entityType: 'transporter', aliases: ['fiege logistics','fiege'] },
-  { canonicalName: 'Samskip',              entityType: 'transporter', aliases: ['samskip'] },
-  { canonicalName: 'Nedcargo',             entityType: 'transporter', aliases: ['nedcargo'] },
-  { canonicalName: 'Van Dieren Transport', entityType: 'transporter', aliases: ['van dieren','vandieren'] },
-  { canonicalName: 'Kloosterboer',         entityType: 'transporter', aliases: ['kloosterboer'] },
-  { canonicalName: 'PostNL',               entityType: 'transporter', aliases: ['postnl','post nl'] },
-  { canonicalName: 'TNT Express',          entityType: 'transporter', aliases: ['tnt express','tnt'] },
-  { canonicalName: 'UPS',                  entityType: 'transporter', aliases: ['ups supply chain','ups freight','ups'] },
-  { canonicalName: 'FedEx',               entityType: 'transporter', aliases: ['fedex freight','fedex'] },
-  { canonicalName: 'Wincanton',            entityType: 'transporter', aliases: ['wincanton'] },
-  { canonicalName: 'HGK Shipping',         entityType: 'transporter', aliases: ['hgk shipping','hgk'] },
-  { canonicalName: 'Broekman Logistics',   entityType: 'transporter', aliases: ['broekman logistics','broekman'] },
-  { canonicalName: 'CTD Logistics',        entityType: 'transporter', aliases: ['ctd logistics','ctd'] },
+export const APPROVED_TRANSPORTERS: EntityEntry[] = [
+  { canonicalName: 'Starmans',    entityType: 'transporter', aliases: ['starmans'] },
+  { canonicalName: 'Henk Dammes', entityType: 'transporter', aliases: ['henk dammes','dammes'] },
+  { canonicalName: 'Falcoline',   entityType: 'transporter', aliases: ['falcoline','falcoline gmbh','falcoline transport','falcoline spedition'] },
+  { canonicalName: 'GTS Coldchain',entityType: 'transporter', aliases: ['gts coldchain','gts cold','gts truck','gts logistics','gts duisburg','gts transport','gts'] },
+  { canonicalName: 'CTV Vrede',   entityType: 'transporter', aliases: ['ctv vrede','ctv transport','ctv','ctv spedition','ctv gmbh'] },
+  { canonicalName: 'EKB Transport',entityType: 'transporter', aliases: ['ekb transport','ekb'] },
 ];
+
+// ─────────────────────────────────────────────────────────────────
+// KNOWN EXTERNAL CARRIERS (recognised as operational — blocked from
+// customer charts — but NOT shown in Transporter Performance)
+// ─────────────────────────────────────────────────────────────────
+export const KNOWN_CARRIERS: EntityEntry[] = [
+  { canonicalName: 'DB Schenker',        entityType: 'transporter', aliases: ['db schenker','schenker','dbschenker'] },
+  { canonicalName: 'DHL Freight',        entityType: 'transporter', aliases: ['dhl freight','dhl logistics','dhl'] },
+  { canonicalName: 'DSV',                entityType: 'transporter', aliases: ['dsv road','dsv air','dsv logistics','dsv'] },
+  { canonicalName: 'Rhenus Logistics',   entityType: 'transporter', aliases: ['rhenus logistics','rhenus road','rhenus transport'] },
+  { canonicalName: 'Dachser',            entityType: 'transporter', aliases: ['dachser'] },
+  { canonicalName: 'Kuehne+Nagel',       entityType: 'transporter', aliases: ['kuehne nagel','kühne nagel','kühnenegel','kuhne nagel','k+n','kuehne+nagel'] },
+  { canonicalName: 'XPO Logistics',      entityType: 'transporter', aliases: ['xpo logistics','xpo transport','xpo'] },
+  { canonicalName: 'Geodis',             entityType: 'transporter', aliases: ['geodis'] },
+  { canonicalName: 'Ceva Logistics',     entityType: 'transporter', aliases: ['ceva logistics','ceva'] },
+  { canonicalName: 'Raben Group',        entityType: 'transporter', aliases: ['raben group','raben transport','raben'] },
+  { canonicalName: 'Gefco',              entityType: 'transporter', aliases: ['gefco','ceva gefco'] },
+  { canonicalName: 'Fiege Logistics',    entityType: 'transporter', aliases: ['fiege logistics','fiege'] },
+  { canonicalName: 'Samskip',            entityType: 'transporter', aliases: ['samskip'] },
+  { canonicalName: 'Nedcargo',           entityType: 'transporter', aliases: ['nedcargo'] },
+  { canonicalName: 'Van Dieren Transport',entityType: 'transporter', aliases: ['van dieren','vandieren'] },
+  { canonicalName: 'Kloosterboer',       entityType: 'transporter', aliases: ['kloosterboer'] },
+  { canonicalName: 'PostNL',             entityType: 'transporter', aliases: ['postnl','post nl'] },
+  { canonicalName: 'TNT Express',        entityType: 'transporter', aliases: ['tnt express','tnt'] },
+  { canonicalName: 'UPS',                entityType: 'transporter', aliases: ['ups supply chain','ups freight','ups'] },
+  { canonicalName: 'FedEx',              entityType: 'transporter', aliases: ['fedex freight','fedex'] },
+  { canonicalName: 'Wincanton',          entityType: 'transporter', aliases: ['wincanton'] },
+  { canonicalName: 'HGK Shipping',       entityType: 'transporter', aliases: ['hgk shipping','hgk'] },
+  { canonicalName: 'Broekman Logistics', entityType: 'transporter', aliases: ['broekman logistics','broekman'] },
+  { canonicalName: 'CTD Logistics',      entityType: 'transporter', aliases: ['ctd logistics','ctd'] },
+];
+
+// Combined export kept for backward compatibility
+export const TRANSPORTERS: EntityEntry[] = [...APPROVED_TRANSPORTERS, ...KNOWN_CARRIERS];
 
 // ─────────────────────────────────────────────────────────────────
 // Combined lookup (priority order enforced in entityExtraction.ts)
@@ -182,9 +191,9 @@ export const OPERATIONAL_ALIAS_SET: Set<string> = new Set(
   [...DEEPSEA_TERMINALS, ...INLAND_DEPOTS, ...TRANSPORTERS].flatMap(e => e.aliases)
 );
 
-/** Approved transporter canonical names */
+/** Approved transporter canonical names — only the 6 specialist inland hauliers */
 export const APPROVED_TRANSPORTER_CANONICAL: Set<string> = new Set(
-  TRANSPORTERS.map(e => e.canonicalName.toLowerCase())
+  APPROVED_TRANSPORTERS.map(e => e.canonicalName.toLowerCase())
 );
 
 /**
