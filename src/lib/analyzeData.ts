@@ -310,16 +310,22 @@ export function runAnalysis(
   // ─── 3. Issue breakdown ────────────────────────────────────────
   const issueCounts: Record<string, number> = {};
   const issueHours:  Record<string, number> = {};
-  // Collect matching records per issue id for evidence drilldown
+  // Drilldown map: keyed by PRIMARY issue only.
+  // Issue counts/hours still sum over all r.issues (primary + secondaries) —
+  // this reflects total exposure per issue family.
+  // Drilldown evidence is restricted to primaryIssue matches so that clicking
+  // "Missing Load Ref" never returns cases whose primary classification is
+  // Delay, Demurrage, or another unrelated category.
   const issueRecordsMap: Record<string, EnrichedRecord[]> = {};
   for (const r of records) {
     for (const iss of r.issues) {
       issueCounts[iss] = (issueCounts[iss] ?? 0) + 1;
       const tax = TAXONOMY_MAP[iss];
       issueHours[iss] = (issueHours[iss] ?? 0) + (tax?.hours ?? 0.5);
-      if (!issueRecordsMap[iss]) issueRecordsMap[iss] = [];
-      issueRecordsMap[iss].push(r);
     }
+    // Drilldown: only primary issue
+    if (!issueRecordsMap[r.primaryIssue]) issueRecordsMap[r.primaryIssue] = [];
+    issueRecordsMap[r.primaryIssue].push(r);
   }
   const totalCases = records.length;
 
@@ -894,10 +900,8 @@ export function runAnalysis(
     }
 
     // ── Row-level load-ref contradiction scan ─────────────────────
-    // After all classification passes (context-window detection, description-override,
-    // contradiction guard), any remaining load_ref(missing) case whose description
-    // contains an explicit provided-ref pattern is a classifier false positive.
-    // Flag these so they can be investigated and the classifier improved.
+    // Any remaining load_ref(missing) case whose description contains an explicit
+    // provided-ref pattern is a classifier false positive.
     const loadRefFalsePositives = records.filter(r =>
       r.primaryIssue === 'load_ref' &&
       r.issueState  !== 'provided' &&
@@ -912,6 +916,27 @@ export function runAnalysis(
           subject:    r.subject?.slice(0, 80) ?? '—',
           descSnippet: r.description?.slice(0, 120) ?? '—',
           confidence: r.confidence,
+          evidence:   r.evidence,
+        })),
+      );
+    }
+
+    // ── Transport-order-as-load-ref misclassification scan ─────────
+    // Cases containing "transport order" phrasing that ended up as load_ref
+    // are a known false-positive type (the trigger phrase was previously in
+    // load_ref strongSignals). Flag any that survive as a regression check.
+    const TRANSPORT_ORDER_PHRASES = /\btransport\s+order\b/i;
+    const transportOrderMisclassified = records.filter(r =>
+      r.primaryIssue === 'load_ref' &&
+      TRANSPORT_ORDER_PHRASES.test((r.subject ?? '') + ' ' + (r.description ?? ''))
+    );
+    if (transportOrderMisclassified.length > 0) {
+      console.error(
+        `[CIS validation] TRANSPORT_ORDER_AS_LOAD_REF: ${transportOrderMisclassified.length} case(s) with "transport order" phrasing classified as Missing Load Ref.`,
+        transportOrderMisclassified.map(r => ({
+          caseNumber: r.case_number ?? '—',
+          subject:    r.subject?.slice(0, 80) ?? '—',
+          primaryIssue: r.primaryIssue,
           evidence:   r.evidence,
         })),
       );

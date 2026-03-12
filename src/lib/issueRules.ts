@@ -181,11 +181,31 @@ const TOPIC_RULES: TopicRule[] = [
       'booking number', 'reference number', 'ref number', 'ref no',
       'order reference', 'order number', 'order no', 'po number', 'purchase order',
       'job reference', 'job number', 'shipment reference', 'shipment ref',
-      'consignment number', 'consignment ref', 'load number', 'transport order',
+      'consignment number', 'consignment ref', 'load number',
+      // Note: 'transport order' intentionally excluded — it is a document (see transport_order topic)
     ],
     weakSignals: [
       'reference', 'booking', 'ref missing', 'no reference', 'without reference',
       'missing reference', 'ref not', 'number missing',
+    ],
+  },
+  {
+    // Transport Order (TRO) — an instruction document sent to the haulier.
+    // This is NOT a load reference number; it is a separate operational document.
+    // Example: "Please send us the transport order for BL MAEU262065895"
+    //          → object: transport order, intent: requested → transport_order (missing)
+    topic: 'transport_order',
+    strongSignals: [
+      'transport order', 'transport instruction', 'haulier order', 'haulier instruction',
+      'transport booking order', 'driver order', 'driver instruction',
+      'missing transport order', 'transport order missing', 'transport order not received',
+      'transport order required', 'please send transport order', 'send transport order',
+      'send us the transport order', 'send the transport order',
+      'no transport order', 'transport order not issued', 'transport order not sent',
+    ],
+    weakSignals: [
+      'tro', 'carrier instruction', 'carrier order', 'transport confirmation',
+      'haulage instruction', 'movement order',
     ],
   },
   {
@@ -455,6 +475,8 @@ const TOPIC_RULES: TopicRule[] = [
 
 // ─── Resolve final issueId based on topic + state ──────────────────
 // The "ref_provided" category distinguishes "load ref was given" from "load ref is missing".
+// transport_order stays as transport_order regardless of state — the state
+// (missing/provided) is captured in issueState but the taxonomy id doesn't fork.
 function resolveIssueId(topic: string, state: IssueState): string {
   if (topic === 'load_ref' && (state === 'provided' || state === 'informational' || state === 'amended')) {
     return 'ref_provided';

@@ -728,6 +728,15 @@ const CUSTOMER_JUNK_PATTERNS: RegExp[] = [
   /^(case|ticket|ref|incident|issue)[:\s#]+[\w\-]+$/i,
   // Strings ending in operational suffixes with no company context
   /\b(team|group|department|dept|division|unit|desk|inbox|mailbox|queue)$/i,
+  // IBAN / bank account numbers — e.g. "NL57ABNA0421705191", "DE89370400440532013000"
+  // Pattern: 2-letter country code + 2 check digits + 11–30 alphanumeric BBAN chars
+  // These are financial account identifiers, never company names.
+  /^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/,
+  // Shipping/container/booking reference codes that might appear in customer column
+  // e.g. "MAEU262065895", "TCKU1234567", "BKG12345678"
+  /^[A-Z]{3,4}\d{7,12}$/,
+  // Long purely alphanumeric codes without spaces (reference codes, not names)
+  /^[A-Z0-9]{10,25}$/,
 ];
 
 /**

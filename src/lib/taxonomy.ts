@@ -20,8 +20,23 @@ export const ISSUE_TAXONOMY: TaxonomyItem[] = [
       'order reference','order number missing','po number missing','po number not',
       'purchase order missing','without po','shipment reference','shipment ref',
       'consignment number missing','no consignment ref','job reference','job number missing',
+      // Note: 'transport order' intentionally excluded — see transport_order category
     ],
     hours: 0.5, preventable: true, color: '#dc6d7d',
+  },
+  {
+    // Transport Order / TRO — a specific instruction document sent to the haulier.
+    // Distinct from a load reference number. Cases requesting or providing a TRO
+    // belong here, not under Missing Load Reference.
+    id: 'transport_order',
+    label: 'Transport Order Request',
+    keywords: [
+      'transport order','transport instruction','haulier order','haulier instruction',
+      'transport booking order','driver order','driver instruction',
+      'missing transport order','transport order missing','transport order not received',
+      'transport order required','no transport order','tro',
+    ],
+    hours: 0.5, preventable: true, color: '#8b7cff',
   },
   {
     id: 'customs',
