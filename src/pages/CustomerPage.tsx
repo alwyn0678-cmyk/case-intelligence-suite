@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { HBarChart } from '../components/ui/ChartWrapper';
 import { ExampleCasesPanel } from '../components/ui/ExampleCasesPanel';
+import { isBlockedFromCustomerRole, isPositiveCustomerCandidate } from '../config/referenceData';
 import type { AnalysisResult, CustomerBurdenItem } from '../types/analysis';
 
 interface Props { analysis: AnalysisResult }
@@ -11,8 +12,24 @@ const TREND_ICON: Record<string, string> = { up: '↑', down: '↓', stable: '�
 const TREND_CLR: Record<string, string>  = { up: '#dc6d7d', down: '#52c7c7', stable: '#a6aec4' };
 
 export function CustomerPage({ analysis }: Props) {
-  const { customerBurden, loadRefIntelligence, summary } = analysis;
-  // customerBurden already excludes 'Unknown' and all operational entities (guards in analyzeData.ts)
+  const { customerBurden: rawCustomerBurden, loadRefIntelligence, summary } = analysis;
+
+  // Final pre-render safety filter: even if something slipped through analyzeData.ts,
+  // block it here before it can reach any chart or table.
+  // Excluded entries are counted toward the unresolved display.
+  const { customerBurden, renderFilteredOut } = useMemo(() => {
+    const passed: CustomerBurdenItem[] = [];
+    let filtered = 0;
+    for (const c of rawCustomerBurden) {
+      if (!isBlockedFromCustomerRole(c.name) && isPositiveCustomerCandidate(c.name)) {
+        passed.push(c);
+      } else {
+        filtered++;
+      }
+    }
+    return { customerBurden: passed, renderFilteredOut: filtered };
+  }, [rawCustomerBurden]);
+
   const top15 = customerBurden.slice(0, 15);
 
   const [selected, setSelected] = useState<CustomerBurdenItem | null>(null);
@@ -24,7 +41,7 @@ export function CustomerPage({ analysis }: Props) {
     : '0';
 
   const resolvedCount = customerBurden.reduce((s, c) => s + c.count, 0);
-  const unresolvedCount = summary.unknownCustomerCount ?? 0;
+  const unresolvedCount = (summary.unknownCustomerCount ?? 0) + renderFilteredOut;
 
   return (
     <div className="p-8 space-y-8">

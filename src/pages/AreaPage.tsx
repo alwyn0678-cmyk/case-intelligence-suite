@@ -1,5 +1,7 @@
+import { useMemo } from 'react';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { HBarChart } from '../components/ui/ChartWrapper';
+import { isAllowedAreaLabel } from '../config/referenceData';
 import type { AnalysisResult } from '../types/analysis';
 
 interface Props { analysis: AnalysisResult }
@@ -8,7 +10,14 @@ const TREND_ICON: Record<string, string> = { up: '↑', down: '↓', stable: '�
 const TREND_CLR: Record<string, string>  = { up: '#dc6d7d', down: '#52c7c7', stable: '#a6aec4' };
 
 export function AreaPage({ analysis }: Props) {
-  const { areaHotspots, meta } = analysis;
+  const { meta } = analysis;
+
+  // Final pre-render safety filter: only allowed operational area labels
+  // (Mainz/Germersheim, Duisburg/Rhine-Ruhr, Rotterdam, Antwerp) reach the chart.
+  const areaHotspots = useMemo(
+    () => analysis.areaHotspots.filter(a => isAllowedAreaLabel(a.name)),
+    [analysis.areaHotspots],
+  );
 
   if (areaHotspots.length === 0) {
     return (

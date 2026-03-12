@@ -352,27 +352,6 @@ export function runAnalysis(
   // in a dedicated review panel in CustomerPage.
   // This prevents 'Unknown' from dominating the top customer chart.
 
-  // ── 4a. Dataset frequency pre-scan ──────────────────────────────
-  // Count how many records each candidate customer name appears in.
-  // Used to apply a minimum confidence threshold: names that appear only
-  // once AND have low issue confidence AND don't look like a proper
-  // company structure are likely noise from bad data — route to unresolved.
-  //
-  // Rules:
-  //   - count >= 2: always include (repeated occurrence = probably real)
-  //   - count == 1 AND confidence >= 0.70: include (strong issue match)
-  //   - count == 1 AND confidence < 0.70 AND !hasCompanyNameStructure: unresolved
-  //
-  // Note: confidence here is the ISSUE classification confidence from the
-  // classifier, used as a proxy for overall record quality.
-  const customerFrequency: Record<string, number> = {};
-  for (const r of records) {
-    const name = r.resolvedCustomer;
-    if (name && !isBlockedFromCustomerRole(name)) {
-      customerFrequency[name] = (customerFrequency[name] ?? 0) + 1;
-    }
-  }
-
   const custMap: Record<string, CustomerBurdenItem> = {};
   // Collect matching records per customer for evidence drilldown
   const custRecordsMap: Record<string, EnrichedRecord[]> = {};
@@ -397,19 +376,10 @@ export function runAnalysis(
     // "Not blocked" alone is not sufficient to reach Customer Burden.
     // A name must also LOOK LIKE a real company/business account.
     //
-    // Acceptance tiers:
-    //   - isPositiveCustomerCandidate: passes company-name structure check → accepted
-    //   - freq >= 3: seen 3+ times in dataset → trusted on recurrence alone
-    //   - freq >= 2 AND confidence >= 0.70: twice-seen with strong issue classification
-    //
-    // Names failing all three tiers are routed to unresolved tracking.
-    const freq = customerFrequency[name] ?? 0;
-    const meetsPositiveGate =
-      isPositiveCustomerCandidate(name) ||
-      freq >= 3 ||
-      (freq >= 2 && r.confidence >= 0.70);
-
-    if (!meetsPositiveGate) {
+    // isPositiveCustomerCandidate: requires legal suffix OR at least one
+    // non-junk word. Frequency bypasses are removed — a name that fails
+    // this check is structurally junk regardless of recurrence.
+    if (!isPositiveCustomerCandidate(name)) {
       unknownCustomerCaseCount++;
       continue;
     }
