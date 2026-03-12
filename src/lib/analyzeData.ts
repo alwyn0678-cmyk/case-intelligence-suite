@@ -220,14 +220,13 @@ export function runAnalysis(
       unknownEntities:      cls.unknownEntities,
       evidence:             cls.evidence,
       sourceFieldsUsed:     cls.sourceFieldsUsed,
-      // Override raw transporter/customer with resolved canonical names.
-      // For customer: only fall back to raw r.customer if it is NOT a hard-blocked
-      // operational entity (depot / terminal / approved haulier).
-      // KNOWN_CARRIERS ('carrier' type) are allowed as customers.
+      // Strict resolved-only model: only use the canonical name produced by
+      // the classification engine. If resolution failed (null), the row is
+      // unresolved — never fall back to raw r.customer, as that may hold
+      // carriers, internal ISR labels, junk placeholders, or partial names
+      // that would corrupt Customer Burden reporting.
       transporter: cls.resolvedTransporter ?? r.transporter,
-      customer: cls.resolvedCustomer ?? (
-        r.customer && !isKnownOperationalEntity(r.customer) ? r.customer : undefined
-      ),
+      customer: cls.resolvedCustomer ?? undefined,
     };
   });
 

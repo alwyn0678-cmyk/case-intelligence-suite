@@ -11,7 +11,7 @@
 // These dual-role entities appear in BOTH transporter and depot reporting.
 //
 // Priority for customer-blocking: deepsea_terminal > depot > transporter > carrier
-// Only 'carrier' entities can appear in Customer Burden charts.
+// NO operational entity (terminal / depot / transporter / carrier) may appear in Customer Burden.
 // ─────────────────────────────────────────────────────────────────
 
 export type EntityType = 'transporter' | 'depot' | 'deepsea_terminal' | 'customer' | 'carrier' | 'unknown_entity';
@@ -119,7 +119,8 @@ export const APPROVED_TRANSPORTERS: EntityEntry[] = [
 // Recognised for entity disambiguation only.
 // entityType = 'carrier' — these are NOT operational entities:
 //   - They do NOT appear in Transporter Performance
-//   - They do NOT block customer inference
+//   - They DO block customer inference via isBlockedFromCustomerRole()
+//     (a logistics carrier in the customer column is a data-quality issue, not a real account)
 // Note: HGK has been moved to INLAND_DEPOTS (dual-role depot+transporter).
 // ─────────────────────────────────────────────────────────────────
 export const KNOWN_CARRIERS: EntityEntry[] = [
@@ -208,8 +209,9 @@ export function lookupEntity(text: string): { entry: EntityEntry; matchedAlias: 
 // OPERATIONAL = deepsea_terminal + depot + transporter (approved hauliers ONLY).
 // KNOWN_CARRIERS ('carrier' type) are EXCLUDED from operational sets
 // (they do NOT appear in Transporter Performance, as they are not approved hauliers).
-// They DO block customer inference — a known logistics carrier appearing in the customer
-// column is more likely a data-quality issue than a genuine customer account.
+// Carriers are blocked from customer inference — a known logistics company in the
+// customer column is a data-quality issue, not a genuine customer account.
+// Use isBlockedFromCustomerRole() for all customer-assignment guard points.
 // ─────────────────────────────────────────────────────────────────
 
 /** Canonical names of true operational entities (terminal / depot / approved haulier).
