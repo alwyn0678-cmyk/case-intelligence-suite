@@ -23,6 +23,7 @@ import { classifyByRules }              from './issueRules';
 import { fallbackClassify, operationalClueScan } from './fallbackIssueRules';
 import { resolveZipToArea, extractZipsFromText } from '../config/zipAreaRules';
 import { normalizeText }                from './textNormalization';
+import { textProvidesRef }              from './loadRefGuards';
 import type { IssueState, IssueMatch }  from './issueRules';
 import type { ExtractedEntity }         from './entityExtraction';
 import type { RoutingAlignment }        from '../config/zipAreaRules';
@@ -346,19 +347,7 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
       // This happens when the subject says "Missing Load Ref" (driving state=missing)
       // but the email body actually contains the ref value. Body wins.
       const descText = fields.description ?? '';
-      const BODY_PROVIDES_REF = [
-        // "ref is BKG12345", "load ref: BKG12345", "reference: BKG12345"
-        /(?:load\s*ref(?:erence)?|booking\s*ref(?:erence)?|ref(?:erence)?)\s*(?:is|:)\s*[A-Z0-9]{4,}/i,
-        // "see below ... ref", "find below ... load"
-        /(?:see|find)\s+below.{0,60}(?:ref(?:erence)?|load|booking)/i,
-        // "ref ... see below"
-        /(?:ref(?:erence)?|load|booking).{0,40}(?:see|find)\s+below/i,
-        // "attached / herewith ... ref"
-        /(?:attached|herewith|find\s+enclosed).{0,60}(?:ref(?:erence)?|load|booking|reference)/i,
-        // "reference no BKG1234", "ref # BKG1234"
-        /(?:reference|load\s*ref|booking\s*ref)\s*(?:no\.?\s*|#\s*|:\s*)[A-Z0-9]{4,}/i,
-      ];
-      if (descText.trim().length > 10 && BODY_PROVIDES_REF.some(p => p.test(descText))) {
+      if (textProvidesRef(descText)) {
         issues = issues.map(i => i === 'load_ref' ? 'ref_provided' : i);
         issueState = 'provided';
         evidence.push('[description] body provides explicit ref — overrides subject missing-signal → ref_provided');

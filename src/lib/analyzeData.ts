@@ -10,6 +10,7 @@ import type {
 } from '../types/analysis';
 import { buildForecast } from './forecast';
 import { isKnownOperationalEntity, isApprovedTransporter, isBlockedFromCustomerRole, isInternalISRLabel, isAllowedAreaLabel, validateOutputGuards, isPositiveCustomerCandidate } from '../config/referenceData';
+import { PROVIDED_REF_PATTERNS } from './loadRefGuards';
 import {} from './textNormalization';
 
 const MAX_CHART_WEEKS = 16;
@@ -897,19 +898,11 @@ export function runAnalysis(
     // contradiction guard), any remaining load_ref(missing) case whose description
     // contains an explicit provided-ref pattern is a classifier false positive.
     // Flag these so they can be investigated and the classifier improved.
-    const PROVIDED_REF_SCAN = [
-      /(?:load\s*ref(?:erence)?|booking\s*ref(?:erence)?|ref(?:erence)?)\s*(?:is|:)\s*[A-Z0-9]{4,}/i,
-      /(?:see|find)\s+below.{0,60}(?:ref(?:erence)?|load|booking)/i,
-      /(?:ref(?:erence)?|load|booking).{0,40}(?:see|find)\s+below/i,
-      /(?:attached|herewith|find\s+enclosed).{0,60}(?:ref(?:erence)?|load|booking)/i,
-      /(?:reference|load\s*ref|booking\s*ref)\s*(?:no\.?\s*|#\s*|:\s*)[A-Z0-9]{4,}/i,
-      /\bref(?:erence)?\s+no\.?\s*[A-Z0-9]{4,}/i,
-    ];
     const loadRefFalsePositives = records.filter(r =>
       r.primaryIssue === 'load_ref' &&
       r.issueState  !== 'provided' &&
       r.description  &&
-      PROVIDED_REF_SCAN.some(p => p.test(r.description ?? ''))
+      PROVIDED_REF_PATTERNS.some(p => p.test(r.description ?? ''))
     );
     if (loadRefFalsePositives.length > 0) {
       console.error(
