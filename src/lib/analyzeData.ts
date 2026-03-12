@@ -8,7 +8,7 @@ import type {
   WeeklySnapshot, Actions, UnknownEntityItem,
 } from '../types/analysis';
 import { buildForecast } from './forecast';
-import { isKnownOperationalEntity, isApprovedTransporter, isInternalISRLabel, isCustomerJunkLabel } from '../config/referenceData';
+import { isKnownOperationalEntity, isApprovedTransporter, isBlockedFromCustomerRole } from '../config/referenceData';
 
 function trend2(a: number, b: number): 'up' | 'down' | 'stable' {
   if (b > a * 1.2) return 'up';
@@ -244,7 +244,7 @@ export function runAnalysis(
     // Only add RESOLVED, non-operational customers to weekly history.
     // 'Unknown' / null is excluded — it skews trend lines without adding insight.
     const custName = r.resolvedCustomer;
-    if (custName && !isKnownOperationalEntity(custName) && !isInternalISRLabel(custName) && !isCustomerJunkLabel(custName)) {
+    if (custName && !isBlockedFromCustomerRole(custName)) {
       wk.customers[custName] = (wk.customers[custName] ?? 0) + 1;
     }
     if (r.resolvedTransporter) wk.transporters[r.resolvedTransporter] = (wk.transporters[r.resolvedTransporter] ?? 0) + 1;
@@ -298,7 +298,7 @@ export function runAnalysis(
 
     // Hard guard: operational entities, internal ISR labels, and junk placeholders
     // must never appear in customer reporting.
-    if (name && (isKnownOperationalEntity(name) || isInternalISRLabel(name) || isCustomerJunkLabel(name))) continue;
+    if (name && isBlockedFromCustomerRole(name)) continue;
 
     // No resolved customer → count as unresolved, exclude from main chart.
     if (!name) {

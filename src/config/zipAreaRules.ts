@@ -162,10 +162,10 @@ export function resolveZipToArea(rawZip: string, contextText = ''): { area: stri
     const isLikelyNL = /^\d{4}[A-Z]{2}/.test(zip) || /^\d{4}$/.test(zip);
     const isLikelyBE = /^\d{4}$/.test(zip) && parseInt(zip, 10) >= 1000 && parseInt(zip, 10) <= 9999;
 
-    if (isLikelyDE) ruleSets.push(DE_DEPOT_ROUTING_RULES, DE_RULES);
-    else if (isLikelyNL) ruleSets.push(NL_RULES, DE_RULES);
-    else if (isLikelyBE) ruleSets.push(BE_RULES, CH_RULES, AT_RULES, DE_RULES);
-    else ruleSets.push(DE_DEPOT_ROUTING_RULES, DE_RULES, NL_RULES, BE_RULES, CH_RULES, AT_RULES);
+    if (isLikelyDE) ruleSets.push(DE_DEPOT_ROUTING_RULES);
+    else if (isLikelyNL) ruleSets.push(NL_RULES);
+    else if (isLikelyBE) ruleSets.push(BE_RULES, CH_RULES, AT_RULES);
+    else ruleSets.push(DE_DEPOT_ROUTING_RULES, NL_RULES, BE_RULES, CH_RULES, AT_RULES);
   }
 
   for (const ruleSet of ruleSets) {

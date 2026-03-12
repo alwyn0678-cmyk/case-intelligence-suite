@@ -206,11 +206,15 @@ export function lookupEntity(text: string): { entry: EntityEntry; matchedAlias: 
 // ─────────────────────────────────────────────────────────────────
 // Hard-guard utility sets  (used by analyzeData.ts)
 // OPERATIONAL = deepsea_terminal + depot + transporter (approved hauliers ONLY).
-// KNOWN_CARRIERS ('carrier' type) are intentionally EXCLUDED from operational
-// sets so they do NOT block customer inference or customer-level reporting.
+// KNOWN_CARRIERS ('carrier' type) are EXCLUDED from operational sets
+// (they do NOT appear in Transporter Performance, as they are not approved hauliers).
+// They DO block customer inference — a known logistics carrier appearing in the customer
+// column is more likely a data-quality issue than a genuine customer account.
 // ─────────────────────────────────────────────────────────────────
 
-/** Canonical names of true operational entities (terminal / depot / approved haulier) */
+/** Canonical names of true operational entities (terminal / depot / approved haulier).
+ *  Note: KNOWN_CARRIERS are excluded from this set (not operational) but are separately
+ *  blocked from customer inference via isBlockedFromCustomerRole(). */
 export const OPERATIONAL_CANONICAL_NAMES: Set<string> = new Set(
   [...DEEPSEA_TERMINALS, ...INLAND_DEPOTS, ...APPROVED_TRANSPORTERS].map(e => e.canonicalName.toLowerCase())
 );
@@ -287,6 +291,28 @@ export function isApprovedTransporter(name: string): boolean {
   for (const alias of TRANSPORTER_ROLE_ALIASES) {
     if (lower.includes(alias)) return true;
   }
+  return false;
+}
+
+/**
+ * Returns true if the name should be BLOCKED from appearing as a resolved customer.
+ *
+ * Blocked categories:
+ *   - Operational entities: deepsea_terminal, depot, approved transporter
+ *   - Recognised external carriers (KNOWN_CARRIERS) — logistics cos, not customers
+ *   - Internal ISR / Maersk address-book entries
+ *   - Generic junk placeholder labels
+ *
+ * Use this function at every customer-assignment decision point.
+ */
+export function isBlockedFromCustomerRole(name: string): boolean {
+  if (!name) return false;
+  if (isKnownOperationalEntity(name)) return true;
+  if (isInternalISRLabel(name)) return true;
+  if (isCustomerJunkLabel(name)) return true;
+  // Also block recognized carrier entities
+  const hit = lookupEntity(name);
+  if (hit && hit.entry.entityType === 'carrier') return true;
   return false;
 }
 
@@ -397,29 +423,33 @@ export interface ValidationViolation {
   severity: 'ERROR' | 'WARN';
 }
 
+/** Expected operational area labels for German ZIPs */
+const OPERATIONAL_AREA_LABELS = new Set(['Mainz / Germersheim', 'Duisburg / Rhine-Ruhr']);
+
+/** Area label patterns that look like they came from DE_RULES generic geography */
+const GENERIC_DE_AREA_PATTERN = /^(Berlin|Brandenburg|Hamburg|Hannover|Bremen|Saxony|Rhine-Ruhr|NRW|Münster|Köln|Saarland|Stuttgart|Bavaria|Nuremberg|Thüringen|Brunswick)/i;
+
 /**
  * Scan aggregated dashboard output for rule violations.
  *
  * Checks enforced:
- *  1. No operational entity (depot/terminal/transporter) in Customer Burden
+ *  1. No operational entity (depot/terminal/transporter/carrier) in Customer Burden
  *  2. No internal ISR label in Customer Burden
  *  3. No junk placeholder in Customer Burden
  *  4. Only approved transporters in Transporter Performance
- *  5. All expected new approved transporters are resolvable
+ *  5. Area Hotspots for German corridors uses operational labels only
+ *  6. All expected approved transporters are resolvable
  */
 export function validateOutputGuards(
-  customerBurden:        Array<{ name: string }>,
+  customerBurden:         Array<{ name: string }>,
   transporterPerformance: Array<{ name: string }>,
+  areaHotspots?:          Array<{ name: string }>,
 ): ValidationViolation[] {
   const v: ValidationViolation[] = [];
 
   for (const c of customerBurden) {
-    if (isKnownOperationalEntity(c.name))
-      v.push({ rule: 'OPERATIONAL_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
-    if (isInternalISRLabel(c.name))
-      v.push({ rule: 'ISR_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
-    if (isCustomerJunkLabel(c.name))
-      v.push({ rule: 'JUNK_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
+    if (isBlockedFromCustomerRole(c.name))
+      v.push({ rule: 'BLOCKED_ENTITY_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
   }
 
   for (const t of transporterPerformance) {
@@ -427,7 +457,16 @@ export function validateOutputGuards(
       v.push({ rule: 'NON_APPROVED_IN_TRANSPORTER', offender: t.name, severity: 'ERROR' });
   }
 
-  // Verify new approved transporters are in the dictionary
+  if (areaHotspots) {
+    for (const a of areaHotspots) {
+      // Flag area names that look like DE_RULES generic geography leaked through
+      if (GENERIC_DE_AREA_PATTERN.test(a.name) && !OPERATIONAL_AREA_LABELS.has(a.name)) {
+        v.push({ rule: 'GENERIC_DE_AREA_IN_HOTSPOTS', offender: a.name, severity: 'WARN' });
+      }
+    }
+  }
+
+  // Verify approved transporters are in the dictionary
   const requiredTransporters = [
     'optimodal nederland bv', 'kiem transport',
     'dch duesseldorfer container-hafen',

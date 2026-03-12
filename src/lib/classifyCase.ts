@@ -141,7 +141,8 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
       rawCustLookup !== null &&
       (rawCustLookup.entry.entityType === 'deepsea_terminal' ||
        rawCustLookup.entry.entityType === 'depot' ||
-       rawCustLookup.entry.entityType === 'transporter');
+       rawCustLookup.entry.entityType === 'transporter' ||
+       rawCustLookup.entry.entityType === 'carrier');  // carriers not customers
     if (!isOperationalBlock) {
       resolvedCustomer = rawCustLookup ? rawCustLookup.entry.canonicalName : record.customer.trim();
     }

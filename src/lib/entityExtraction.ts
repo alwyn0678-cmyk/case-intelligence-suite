@@ -178,11 +178,11 @@ export function extractEntities(
       knownMatch !== null &&
       (knownMatch.entry.entityType === 'deepsea_terminal' ||
        knownMatch.entry.entityType === 'depot' ||
-       knownMatch.entry.entityType === 'transporter');
+       knownMatch.entry.entityType === 'transporter' ||
+       knownMatch.entry.entityType === 'carrier');  // recognised logistics cos — not customers on this dashboard
 
     if (!isOperationalBlock) {
-      // Not an operational entity — safe to treat as customer
-      // (includes unrecognised names AND carrier-type entities)
+      // Not a known entity, OR an unrecognised name — safe to treat as customer
       const canonicalName = knownMatch ? knownMatch.entry.canonicalName : custText;
       customer = {
         rawValue: custText,
@@ -221,7 +221,8 @@ export function extractEntities(
           knownMatch !== null &&
           (knownMatch.entry.entityType === 'deepsea_terminal' ||
            knownMatch.entry.entityType === 'depot' ||
-           knownMatch.entry.entityType === 'transporter');
+           knownMatch.entry.entityType === 'transporter' ||
+           knownMatch.entry.entityType === 'carrier');  // carriers not customers
 
         if (!isOperationalBlock) {
           customer = {
