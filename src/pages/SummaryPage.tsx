@@ -11,14 +11,18 @@ function trendArrow(a: number, b: number) {
 
 interface Props { analysis: AnalysisResult }
 
+const TREND_ICON: Record<string, string> = { up: '↑', down: '↓', stable: '→' };
+const TREND_CLR: Record<string, string>  = { up: '#dc6d7d', down: '#52c7c7', stable: '#a6aec4' };
+
 export function SummaryPage({ analysis }: Props) {
-  const { summary, issueBreakdown, weeklyHistory, sortedWeeks, isrVsExternal } = analysis;
+  const { summary, issueBreakdown, weeklyHistory, chartWeeks, isrVsExternal, weekOnWeek } = analysis;
 
   const donutData = issueBreakdown.slice(0, 8).map(i => ({
     name: i.label, value: i.count, color: i.color,
   }));
 
-  const weekLineData = sortedWeeks.map(wk => ({
+  // chartWeeks caps at last 16 weeks so trend charts don't get overcrowded
+  const weekLineData = chartWeeks.map(wk => ({
     week: wk.replace(/^\d{4}-/, ''),
     Cases: weeklyHistory[wk]?.total ?? 0,
   }));
@@ -72,11 +76,14 @@ export function SummaryPage({ analysis }: Props) {
 
       {/* ISR vs External */}
       {(isrVsExternal.totalIsr > 0 || isrVsExternal.totalExternal > 0) && (() => {
-        const wkData = isrVsExternal.weeklyBreakdown.map(w => ({
-          week: w.week.replace(/^\d{4}-/, ''),
-          External: w.external,
-          ISR: w.isr,
-        }));
+        const chartWeekSet = new Set(chartWeeks);
+        const wkData = isrVsExternal.weeklyBreakdown
+          .filter(w => chartWeekSet.has(w.week))
+          .map(w => ({
+            week: w.week.replace(/^\d{4}-/, ''),
+            External: w.external,
+            ISR: w.isr,
+          }));
         const lastTwo = isrVsExternal.weeklyBreakdown.slice(-2);
         const isrTrend = lastTwo.length === 2 ? trendArrow(lastTwo[0].isrPct, lastTwo[1].isrPct) : null;
         return (
@@ -144,6 +151,58 @@ export function SummaryPage({ analysis }: Props) {
               <p className="text-xs text-[#a6aec4] mt-1">Cases with no identifiable customer — see Customer page</p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Week-on-week movement */}
+      {weekOnWeek.available && (
+        <div className="bg-[#171922] border border-[#2a2f3f] rounded-lg overflow-hidden">
+          <div className="px-5 py-4 border-b border-[#2a2f3f] flex items-center gap-3">
+            <p className="text-sm font-semibold text-[#eceff7]">Week-on-Week Changes</p>
+            <span className="text-xs text-[#a6aec4]">
+              {weekOnWeek.priorWeek.replace('-W', ' W')} → {weekOnWeek.currentWeek.replace('-W', ' W')}
+            </span>
+            {weekOnWeek.totalVolume && (
+              <span
+                className="ml-auto text-xs font-semibold px-2 py-0.5 rounded"
+                style={{
+                  color: TREND_CLR[weekOnWeek.totalVolume.direction],
+                  background: TREND_CLR[weekOnWeek.totalVolume.direction] + '20',
+                }}
+              >
+                {TREND_ICON[weekOnWeek.totalVolume.direction]} Total volume {weekOnWeek.totalVolume.pctChange > 0 ? '+' : ''}{weekOnWeek.totalVolume.pctChange.toFixed(0)}%
+              </span>
+            )}
+          </div>
+          <div className="p-5">
+            {weekOnWeek.issueChanges.length === 0 ? (
+              <p className="text-sm text-[#a6aec4]">No significant changes detected between the two most recent weeks.</p>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                {weekOnWeek.issueChanges.map(c => (
+                  <div
+                    key={c.label}
+                    className={`px-3 py-2.5 rounded-lg border ${
+                      c.isSpike && c.direction === 'up'
+                        ? 'bg-[#dc6d7d]/6 border-[#dc6d7d]/20'
+                        : c.isSpike && c.direction === 'down'
+                          ? 'bg-[#52c7c7]/6 border-[#52c7c7]/20'
+                          : 'bg-[#1d2030] border-[#2a2f3f]'
+                    }`}
+                  >
+                    <p className="text-[10px] text-[#a6aec4] truncate">{c.label}</p>
+                    <div className="flex items-baseline gap-1.5 mt-1">
+                      <span className="text-sm font-semibold text-[#eceff7]">{c.current}</span>
+                      <span style={{ color: TREND_CLR[c.direction] }} className="text-xs font-medium">
+                        {TREND_ICON[c.direction]} {c.direction !== 'stable' ? (c.pctChange > 0 ? '+' : '') + c.pctChange.toFixed(0) + '%' : ''}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-[#a6aec4]/60 mt-0.5">was {c.prior}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

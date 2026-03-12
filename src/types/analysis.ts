@@ -202,6 +202,65 @@ export interface AnalysisSummary {
   unknownCustomerCount: number;
 }
 
+// ── Root-cause drilldown ──────────────────────────────────────────
+export interface IssueDriverItem {
+  name: string;
+  count: number;
+  pct: number;   // percent of this issue's total cases
+}
+
+export interface IssueDrilldown {
+  issueId: string;
+  issueLabel: string;
+  color: string;
+  totalCount: number;
+  topCustomers: IssueDriverItem[];
+  topTransporters: IssueDriverItem[];
+  topAreas: IssueDriverItem[];
+  externalCount: number;
+  isrCount: number;
+}
+
+// ── Week-on-week change ──────────────────────────────────────────
+export interface WowChange {
+  label: string;
+  current: number;
+  prior: number;
+  pctChange: number;
+  direction: 'up' | 'down' | 'stable';
+  isSpike: boolean;   // >=20% change AND current >= 3 (avoids noise on tiny numbers)
+}
+
+export interface WeekOnWeek {
+  available: boolean;
+  currentWeek: string;
+  priorWeek: string;
+  totalVolume: WowChange | null;
+  issueChanges: WowChange[];
+  customerChanges: WowChange[];
+  transporterChanges: WowChange[];
+  areaChanges: WowChange[];
+  isrMovement: WowChange | null;
+}
+
+// ── Repeat offenders ──────────────────────────────────────────────
+export interface RepeatOffenderItem {
+  name: string;
+  entityType: 'customer' | 'transporter' | 'area';
+  topIssueId: string;
+  topIssueLabel: string;
+  repeatCount: number;   // count of their dominant issue
+  totalCount: number;
+  repeatPct: number;     // % of their cases that are this issue
+}
+
+// ── Operational action insights ──────────────────────────────────
+export interface ActionInsight {
+  priority: 'HIGH' | 'MEDIUM' | 'LOW';
+  category: 'customer' | 'transporter' | 'area' | 'isr' | 'issue' | 'trend';
+  text: string;
+}
+
 export interface AnalysisResult {
   meta: {
     filename: string;
@@ -213,6 +272,8 @@ export interface AnalysisResult {
   issueBreakdown: IssueBreakdownItem[];
   weeklyHistory: Record<string, WeeklySnapshot>;
   sortedWeeks: string[];
+  /** Last ≤16 weeks — use for trend charts to avoid overcrowded axes */
+  chartWeeks: string[];
   customerBurden: CustomerBurdenItem[];
   transporterPerformance: TransporterItem[];
   depotPerformance: DepotItem[];
@@ -222,6 +283,14 @@ export interface AnalysisResult {
   loadRefIntelligence: LoadRefIntelligence;
   areaHotspots: AreaHotspot[];
   isrVsExternal: IsrVsExternal;
+  /** Root-cause drilldown — top contributors per issue */
+  issueDrilldowns: IssueDrilldown[];
+  /** Week-on-week comparison, spikes, and movement */
+  weekOnWeek: WeekOnWeek;
+  /** Entities with a dominant recurring issue pattern */
+  repeatOffenders: RepeatOffenderItem[];
+  /** Generated operational insights for the action board */
+  actionInsights: ActionInsight[];
   forecast: Forecast;
   actions: Actions;
   records: EnrichedRecord[];

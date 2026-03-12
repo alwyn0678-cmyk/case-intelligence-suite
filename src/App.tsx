@@ -9,6 +9,7 @@ import { CustomsPage } from './pages/CustomsPage';
 import { AreaPage } from './pages/AreaPage';
 import { PredictivePage } from './pages/PredictivePage';
 import { ActionPage } from './pages/ActionPage';
+import { DrilldownPage } from './pages/DrilldownPage';
 import { ExplorerPage } from './pages/ExplorerPage';
 import { runAnalysis } from './lib/analyzeData';
 import { exportToExcel } from './lib/exportExcel';
@@ -50,6 +51,7 @@ export default function App() {
       case 'areas':        return analysis ? <AreaPage analysis={analysis} />         : null;
       case 'predictive':   return analysis ? <PredictivePage analysis={analysis} />   : null;
       case 'actions':      return analysis ? <ActionPage analysis={analysis} />       : null;
+      case 'drilldown':    return analysis ? <DrilldownPage analysis={analysis} />    : null;
       case 'explorer':     return analysis ? <ExplorerPage analysis={analysis} />     : null;
       default:             return <UploadPage onAnalyze={handleAnalyze} />;
     }

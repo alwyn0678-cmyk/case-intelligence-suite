@@ -49,4 +49,5 @@ export type ViewId =
   | 'areas'
   | 'predictive'
   | 'actions'
+  | 'drilldown'
   | 'explorer';

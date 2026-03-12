@@ -8,13 +8,13 @@ const TREND_ICON: Record<string, string> = { up: '↑', down: '↓', stable: '�
 const TREND_CLR: Record<string, string>  = { up: '#dc6d7d', down: '#52c7c7', stable: '#a6aec4' };
 
 export function IssuePage({ analysis }: Props) {
-  const { issueBreakdown, weeklyHistory, sortedWeeks } = analysis;
+  const { issueBreakdown, weeklyHistory, chartWeeks, sortedWeeks } = analysis;
 
   const rising = issueBreakdown.filter(i => i.trend === 'up');
 
-  // Stacked weekly chart — top 6 issues
+  // Stacked weekly chart — top 6 issues, capped at last 16 weeks
   const top6 = issueBreakdown.slice(0, 6);
-  const weeklyChartData = sortedWeeks.map(wk => {
+  const weeklyChartData = chartWeeks.map(wk => {
     const row: Record<string, unknown> = { week: wk.replace(/^\d{4}-/, '') };
     for (const iss of top6) row[iss.id] = weeklyHistory[wk]?.issues[iss.id] ?? 0;
     return row;

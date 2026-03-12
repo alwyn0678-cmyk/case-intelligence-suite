@@ -2,7 +2,7 @@ import React from 'react';
 import {
   Upload, LayoutDashboard, AlertTriangle, Users, Truck,
   FileCheck, MapPin, TrendingUp, CheckSquare, Search,
-  FileSpreadsheet, FileText,
+  FileSpreadsheet, FileText, GitBranch,
 } from 'lucide-react';
 import type { ViewId } from '../../types';
 
@@ -23,6 +23,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'areas',        label: 'Area Hotspots',          icon: <MapPin size={15} />,          requiresData: true  },
   { id: 'predictive',   label: 'Predictive Intelligence',icon: <TrendingUp size={15} />,      requiresData: true  },
   { id: 'actions',      label: 'Action Register',        icon: <CheckSquare size={15} />,     requiresData: true  },
+  { id: 'drilldown',    label: 'Root-Cause Drilldown',   icon: <GitBranch size={15} />,       requiresData: true  },
   { id: 'explorer',     label: 'Case Explorer',          icon: <Search size={15} />,          requiresData: true  },
 ];
 

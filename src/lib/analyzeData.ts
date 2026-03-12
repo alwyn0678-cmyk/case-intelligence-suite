@@ -6,9 +6,12 @@ import type {
   CustomerBurdenItem, TransporterItem, DepotItem, DeepseaTerminalItem,
   CustomsCompliance, LoadRefIntelligence, AreaHotspot,
   WeeklySnapshot, Actions, UnknownEntityItem, IsrVsExternal,
+  IssueDrilldown, WeekOnWeek, WowChange, RepeatOffenderItem, ActionInsight,
 } from '../types/analysis';
 import { buildForecast } from './forecast';
 import { isKnownOperationalEntity, isApprovedTransporter, isBlockedFromCustomerRole, isInternalISRLabel } from '../config/referenceData';
+
+const MAX_CHART_WEEKS = 16;
 
 // ─────────────────────────────────────────────────────────────────
 // Non-operational area labels to suppress from Area Hotspots.
@@ -513,7 +516,239 @@ export function runAnalysis(
     }),
   };
 
-  // ─── 13. Summary ──────────────────────────────────────────────
+  // ─── 13. Issue drilldowns ─────────────────────────────────────
+  const issueDrilldowns: IssueDrilldown[] = issueBreakdown.slice(0, 8).map(iss => {
+    const issRecs = records.filter(r => r.issues.includes(iss.id));
+
+    const topN = <T extends string>(counts: Record<T, number>, total: number): Array<{ name: T; count: number; pct: number }> =>
+      (Object.entries(counts) as Array<[T, number]>)
+        .sort((a, b) => b[1] - a[1]).slice(0, 5)
+        .map(([name, count]) => ({ name, count, pct: total > 0 ? (count / total) * 100 : 0 }));
+
+    const custCounts: Record<string, number> = {};
+    for (const r of issRecs) {
+      const name = r.resolvedCustomer;
+      if (name && !isBlockedFromCustomerRole(name)) custCounts[name] = (custCounts[name] ?? 0) + 1;
+    }
+
+    const transCounts: Record<string, number> = {};
+    for (const r of issRecs) {
+      const name = r.resolvedTransporter;
+      if (name && isApprovedTransporter(name)) transCounts[name] = (transCounts[name] ?? 0) + 1;
+    }
+
+    const areaCounts: Record<string, number> = {};
+    for (const r of issRecs) {
+      const area = r.resolvedArea;
+      if (area && !EXCLUDED_AREA_LABELS.has(area)) areaCounts[area] = (areaCounts[area] ?? 0) + 1;
+    }
+
+    const isrCount = issRecs.filter(isIsrRecord).length;
+
+    return {
+      issueId:         iss.id,
+      issueLabel:      iss.label,
+      color:           iss.color,
+      totalCount:      iss.count,
+      topCustomers:    topN(custCounts,  iss.count),
+      topTransporters: topN(transCounts, iss.count),
+      topAreas:        topN(areaCounts,  iss.count),
+      externalCount:   issRecs.length - isrCount,
+      isrCount,
+    };
+  });
+
+  // ─── 14. Week-on-week comparison ──────────────────────────────
+  const makeWowChange = (label: string, current: number, prior: number): WowChange => {
+    const pctChange = prior > 0 ? ((current - prior) / prior) * 100 : current > 0 ? 100 : 0;
+    const direction: 'up' | 'down' | 'stable' = pctChange > 10 ? 'up' : pctChange < -10 ? 'down' : 'stable';
+    return { label, current, prior, pctChange, direction, isSpike: Math.abs(pctChange) >= 20 && current >= 3 };
+  };
+
+  let weekOnWeek: WeekOnWeek;
+  if (sortedWeeks.length >= 2) {
+    const curWk  = sortedWeeks[sortedWeeks.length - 1];
+    const prvWk  = sortedWeeks[sortedWeeks.length - 2];
+    const curSnap = weeklyHistory[curWk];
+    const prvSnap = weeklyHistory[prvWk];
+
+    const allIssueIds     = new Set([...Object.keys(curSnap.issues),      ...Object.keys(prvSnap.issues)]);
+    const allCustNames    = new Set([...Object.keys(curSnap.customers),    ...Object.keys(prvSnap.customers)]);
+    const allTransNames   = new Set([...Object.keys(curSnap.transporters), ...Object.keys(prvSnap.transporters)]);
+    const allAreaNames    = new Set([...Object.keys(curSnap.areas),        ...Object.keys(prvSnap.areas)]);
+
+    const issueChanges = Array.from(allIssueIds)
+      .map(id => makeWowChange(TAXONOMY_MAP[id]?.label ?? id, curSnap.issues[id] ?? 0, prvSnap.issues[id] ?? 0))
+      .filter(c => c.current >= 2 || c.prior >= 2)
+      .sort((a, b) => Math.abs(b.pctChange) - Math.abs(a.pctChange)).slice(0, 8);
+
+    const customerChanges = Array.from(allCustNames)
+      .map(name => makeWowChange(name, curSnap.customers[name] ?? 0, prvSnap.customers[name] ?? 0))
+      .filter(c => c.current >= 2 || c.prior >= 2)
+      .sort((a, b) => Math.abs(b.pctChange) - Math.abs(a.pctChange)).slice(0, 5);
+
+    const transporterChanges = Array.from(allTransNames)
+      .map(name => makeWowChange(name, curSnap.transporters[name] ?? 0, prvSnap.transporters[name] ?? 0))
+      .filter(c => c.current >= 2 || c.prior >= 2)
+      .sort((a, b) => Math.abs(b.pctChange) - Math.abs(a.pctChange)).slice(0, 5);
+
+    const areaChanges = Array.from(allAreaNames)
+      .map(name => makeWowChange(name, curSnap.areas[name] ?? 0, prvSnap.areas[name] ?? 0))
+      .filter(c => c.current >= 2 || c.prior >= 2)
+      .sort((a, b) => Math.abs(b.pctChange) - Math.abs(a.pctChange)).slice(0, 5);
+
+    const curIsrCount = records.filter(r => r.weekKey === curWk && isIsrRecord(r)).length;
+    const prvIsrCount = records.filter(r => r.weekKey === prvWk && isIsrRecord(r)).length;
+
+    weekOnWeek = {
+      available: true,
+      currentWeek: curWk,
+      priorWeek:   prvWk,
+      totalVolume: makeWowChange('Total Cases', curSnap.total, prvSnap.total),
+      issueChanges,
+      customerChanges,
+      transporterChanges,
+      areaChanges,
+      isrMovement: makeWowChange('ISR Internal Cases', curIsrCount, prvIsrCount),
+    };
+  } else {
+    weekOnWeek = {
+      available:   false,
+      currentWeek: sortedWeeks[sortedWeeks.length - 1] ?? '',
+      priorWeek:   '',
+      totalVolume: null,
+      issueChanges: [], customerChanges: [], transporterChanges: [], areaChanges: [],
+      isrMovement: null,
+    };
+  }
+
+  // ─── 15. Repeat offenders ─────────────────────────────────────
+  const repeatOffenders: RepeatOffenderItem[] = [];
+
+  const buildRepeatOffenders = (
+    items: Array<{ name: string; count: number }>,
+    entityType: RepeatOffenderItem['entityType'],
+    filterFn: (r: EnrichedRecord, name: string) => boolean,
+  ) => {
+    for (const item of items) {
+      if (item.count < 4) continue;
+      const recs = records.filter(r => filterFn(r, item.name));
+      const ic: Record<string, number> = {};
+      for (const r of recs) for (const iss of r.issues) ic[iss] = (ic[iss] ?? 0) + 1;
+      const top = Object.entries(ic).sort((a, b) => b[1] - a[1])[0];
+      if (!top) continue;
+      const [topId, topCount] = top;
+      if (topCount >= 3 && (topCount / item.count) >= 0.35) {
+        repeatOffenders.push({
+          name: item.name, entityType,
+          topIssueId: topId, topIssueLabel: TAXONOMY_MAP[topId]?.label ?? topId,
+          repeatCount: topCount, totalCount: item.count,
+          repeatPct: (topCount / item.count) * 100,
+        });
+      }
+    }
+  };
+
+  buildRepeatOffenders(customerBurden,          'customer',    (r, n) => r.resolvedCustomer    === n);
+  buildRepeatOffenders(transporterPerformance,   'transporter', (r, n) => r.resolvedTransporter === n);
+  buildRepeatOffenders(areaHotspots,             'area',        (r, n) => r.resolvedArea        === n);
+  repeatOffenders.sort((a, b) => b.repeatCount - a.repeatCount);
+
+  // ─── 16. Operational action insights ─────────────────────────
+  const PRIORITY_ORDER: Record<ActionInsight['priority'], number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+  const actionInsights: ActionInsight[] = [];
+
+  const addInsight = (priority: ActionInsight['priority'], category: ActionInsight['category'], text: string) =>
+    actionInsights.push({ priority, category, text });
+
+  // Total volume spike
+  if (weekOnWeek.totalVolume?.isSpike && weekOnWeek.totalVolume.direction === 'up') {
+    const v = weekOnWeek.totalVolume;
+    addInsight('HIGH', 'trend', `Total case volume rose ${v.pctChange.toFixed(0)}% week-on-week (${v.prior} → ${v.current} cases). Investigate root cause before management escalation.`);
+  }
+
+  // Issue spikes
+  for (const c of weekOnWeek.issueChanges.filter(x => x.isSpike && x.direction === 'up').slice(0, 2)) {
+    addInsight('HIGH', 'issue', `${c.label} cases rose ${c.pctChange.toFixed(0)}% this week (${c.prior} → ${c.current}). Review contributing accounts and areas.`);
+  }
+
+  // Top customer by load ref
+  const topLoadRefCust = customerBurden.filter(c => c.missingLoadRef >= 3).sort((a, b) => b.missingLoadRef - a.missingLoadRef)[0];
+  if (topLoadRefCust) {
+    addInsight('HIGH', 'customer', `${topLoadRefCust.name} generated the most missing load reference cases — ${topLoadRefCust.missingLoadRef} cases. Mandatory reference enforcement recommended.`);
+  }
+
+  // Top customer overall
+  if (customerBurden[0]?.count >= 5) {
+    const c = customerBurden[0];
+    addInsight(c.risk === 'HIGH' ? 'HIGH' : 'MEDIUM', 'customer', `${c.name} is the highest-burden account — ${c.count} cases, ${c.hoursLost.toFixed(1)} hours. Risk level: ${c.risk}.`);
+  }
+
+  // ISR movement or high ISR share
+  if (weekOnWeek.isrMovement && weekOnWeek.isrMovement.direction !== 'stable') {
+    const m = weekOnWeek.isrMovement;
+    const dir = m.direction === 'up' ? 'increased' : 'decreased';
+    addInsight('MEDIUM', 'isr', `Internal ISR case volume ${dir} ${Math.abs(m.pctChange).toFixed(0)}% week-on-week (${m.prior} → ${m.current}). Review ISR workflow throughput.`);
+  } else if (isrVsExternal.isrPct > 30) {
+    addInsight('MEDIUM', 'isr', `Internal ISR cases represent ${isrVsExternal.isrPct.toFixed(1)}% of total caseload — elevated internal workflow volume. Confirm routing logic is correct.`);
+  }
+
+  // Top transporter by delays
+  const topDelayTrans = [...transporterPerformance].sort((a, b) => b.delays - a.delays)[0];
+  if (topDelayTrans?.delays >= 3) {
+    addInsight(topDelayTrans.risk === 'HIGH' ? 'HIGH' : 'MEDIUM', 'transporter',
+      `${topDelayTrans.name} recorded the most delay cases — ${topDelayTrans.delays} delays, punctuality issue rate ${topDelayTrans.punctualityScore.toFixed(0)}%. SLA review recommended.`);
+  }
+
+  // Transporter spike
+  for (const c of weekOnWeek.transporterChanges.filter(x => x.isSpike && x.direction === 'up').slice(0, 1)) {
+    addInsight('MEDIUM', 'transporter', `${c.label} saw a sharp increase in cases this week (${c.prior} → ${c.current}, +${c.pctChange.toFixed(0)}%). Investigate delay or documentation pattern.`);
+  }
+
+  // Top area hotspot
+  if (areaHotspots[0]?.count >= 5) {
+    const a = areaHotspots[0];
+    addInsight('MEDIUM', 'area', `${a.name} is the dominant operational area with ${a.count} cases. Top issue: ${a.topIssue}.`);
+  }
+
+  // Area spike
+  for (const c of weekOnWeek.areaChanges.filter(x => x.isSpike && x.direction === 'up').slice(0, 1)) {
+    addInsight('MEDIUM', 'area', `${c.label} saw a sharp increase in cases this week (+${c.pctChange.toFixed(0)}%). Review operational capacity in this zone.`);
+  }
+
+  // Customs area pressure
+  if (customsCompliance.totalCases >= 5) {
+    const topCustomsArea = areaHotspots.find(a => {
+      const n = records.filter(r => r.resolvedArea === a.name && r.issues.some(i => ['customs','portbase','bl','t1'].includes(i))).length;
+      return n >= 3;
+    });
+    if (topCustomsArea) {
+      addInsight('MEDIUM', 'area', `${topCustomsArea.name} has elevated customs and documentation pressure. Pre-shipment document checks recommended for this zone.`);
+    }
+  }
+
+  // Amendment spike
+  const amendChange = weekOnWeek.issueChanges.find(c => c.label.toLowerCase().includes('amendment') && c.direction === 'up');
+  if (amendChange) {
+    addInsight('MEDIUM', 'issue', `Amendment and correction cases are rising this week (${amendChange.prior} → ${amendChange.current}). Review booking quality controls to reduce rework.`);
+  }
+
+  // Top repeat offender
+  if (repeatOffenders[0]) {
+    const ro = repeatOffenders[0];
+    const cat: ActionInsight['category'] = ro.entityType === 'customer' ? 'customer' : ro.entityType === 'transporter' ? 'transporter' : 'area';
+    addInsight('MEDIUM', cat, `${ro.name} is a repeat friction source — ${ro.repeatPct.toFixed(0)}% of their cases are ${ro.topIssueLabel} (${ro.repeatCount} of ${ro.totalCount}). Structural fix needed.`);
+  }
+
+  actionInsights.sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
+  const finalActionInsights = actionInsights.slice(0, 10);
+
+  // ─── 17. Chart display window ─────────────────────────────────
+  const chartWeeks = sortedWeeks.length > MAX_CHART_WEEKS
+    ? sortedWeeks.slice(sortedWeeks.length - MAX_CHART_WEEKS)
+    : sortedWeeks;
+
+  // ─── 18. Summary ─────────────────────────────────────────────
   const topIssue      = issueBreakdown.find(i => i.id !== 'other');
   const topCustomer   = customerBurden[0];
   const topTransporter= [...transporterPerformance].sort((a, b) => b.delays - a.delays)[0];
@@ -550,7 +785,7 @@ export function runAnalysis(
     unknownCustomerCount,
   };
 
-  // ─── 13. Forecast & actions ───────────────────────────────────
+  // ─── 19. Forecast & actions ───────────────────────────────────
   const forecast = buildForecast(weeklyHistory, sortedWeeks, customerBurden, transporterPerformance);
   const actions  = generateActions(issueBreakdown, customerBurden, transporterPerformance);
 
@@ -560,6 +795,7 @@ export function runAnalysis(
     issueBreakdown,
     weeklyHistory,
     sortedWeeks,
+    chartWeeks,
     customerBurden,
     transporterPerformance,
     depotPerformance,
@@ -569,6 +805,10 @@ export function runAnalysis(
     loadRefIntelligence,
     areaHotspots,
     isrVsExternal,
+    issueDrilldowns,
+    weekOnWeek,
+    repeatOffenders,
+    actionInsights: finalActionInsights,
     forecast,
     actions,
     records,
