@@ -486,10 +486,14 @@ export function runAnalysis(
     .sort((a, b) => b.count - a.count);
 
   // ─── 12. ISR vs External ──────────────────────────────────────
-  // An "ISR case" is one where the raw customer column held an internal
-  // Maersk/MSL address-book entry, indicating it was routed through the
-  // internal ISR workflow rather than submitted by an external customer.
-  const isrRecords     = records.filter(r => isInternalISRLabel(r.customer ?? ''));
+  // Primary signal: isr_details field being populated (content > 5 chars)
+  // indicates the case was handled via the ISR internal workflow.
+  // Fallback: customer column matches a known Maersk internal address-book label.
+  const isIsrRecord = (r: EnrichedRecord): boolean =>
+    (r.isr_details?.trim().length ?? 0) > 5 ||
+    isInternalISRLabel(r.customer ?? '');
+
+  const isrRecords     = records.filter(isIsrRecord);
   const externalCount  = records.length - isrRecords.length;
 
   const isrVsExternal: IsrVsExternal = {
@@ -499,7 +503,7 @@ export function runAnalysis(
     externalPct:   totalCases > 0 ? (externalCount / totalCases) * 100 : 0,
     weeklyBreakdown: sortedWeeks.map(wk => {
       const weekRecs = records.filter(r => r.weekKey === wk);
-      const weekIsr  = weekRecs.filter(r => isInternalISRLabel(r.customer ?? '')).length;
+      const weekIsr  = weekRecs.filter(isIsrRecord).length;
       return {
         week: wk,
         isr: weekIsr,
