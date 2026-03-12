@@ -27,6 +27,29 @@ export interface IssueMatch {
   evidence: string[]; // phrases that triggered this match
 }
 
+// ─── Classification confidence constants ─────────────────────────
+// Named thresholds make the scoring model explicit and testable.
+// All callers (classifyCase.ts, tests) should import these rather
+// than hardcoding the same numbers independently.
+
+/** Confidence assigned when a strongSignal fires (exact keyword match). */
+export const STRONG_SIGNAL_CONFIDENCE = 0.85;
+
+/** Confidence assigned when only weakSignals fire. */
+export const WEAK_SIGNAL_CONFIDENCE = 0.55;
+
+/** Added to confidence when issue intent/state can be determined. */
+export const STATE_DETECTION_BONUS = 0.10;
+
+/** Maximum confidence cap — keeps 1.0 reserved for "human verified". */
+export const MAX_CONFIDENCE = 0.98;
+
+/** Characters before the first matching keyword included in the per-topic context window. */
+export const CONTEXT_WINDOW_BEFORE = 120;
+
+/** Characters after the first matching keyword included in the per-topic context window. */
+export const CONTEXT_WINDOW_AFTER = 160;
+
 // ─── Intent phrase lists ──────────────────────────────────────────
 // "MISSING" signals — the subject item is absent or being requested
 const MISSING_SIGNALS = [
@@ -522,16 +545,16 @@ export function classifyByRules(text: string): IssueMatch[] {
       const pos = t.indexOf(sig);
       if (pos !== -1) {
         topicEvidence.push(`"${sig}"`);
-        baseConfidence = Math.max(baseConfidence, 0.85);
+        baseConfidence = Math.max(baseConfidence, STRONG_SIGNAL_CONFIDENCE);
         if (firstMatchPos === -1) firstMatchPos = pos;
       }
     }
-    if (baseConfidence < 0.85) {
+    if (baseConfidence < STRONG_SIGNAL_CONFIDENCE) {
       for (const sig of rule.weakSignals) {
         const pos = t.indexOf(sig);
         if (pos !== -1) {
           topicEvidence.push(`"${sig}" (weak)`);
-          baseConfidence = Math.max(baseConfidence, 0.55);
+          baseConfidence = Math.max(baseConfidence, WEAK_SIGNAL_CONFIDENCE);
           if (firstMatchPos === -1) firstMatchPos = pos;
         }
       }
@@ -540,18 +563,18 @@ export function classifyByRules(text: string): IssueMatch[] {
     if (topicEvidence.length === 0) continue;
 
     // Per-topic context-window state detection:
-    // Slice a 280-char window (120 before + 160 after the first keyword match)
-    // and run detectState only on that context. This isolates intent detection
-    // to the relevant sentence rather than the whole field.
-    const winStart = Math.max(0, firstMatchPos - 120);
-    const winEnd   = Math.min(text.length, firstMatchPos + 160);
+    // Slice a window (CONTEXT_WINDOW_BEFORE + CONTEXT_WINDOW_AFTER chars around first keyword)
+    // and run detectState only on that context. This isolates intent detection to the
+    // relevant sentence — prevents mixed-content fields from conflating intent across topics.
+    const winStart = Math.max(0, firstMatchPos - CONTEXT_WINDOW_BEFORE);
+    const winEnd   = Math.min(text.length, firstMatchPos + CONTEXT_WINDOW_AFTER);
     const contextWindow = text.slice(winStart, winEnd);
 
     const { state, evidence: stateEvidence } = detectState(contextWindow);
 
     // State bonus: knowing the intent increases confidence
-    const confidenceBonus = state !== 'unknown' ? 0.10 : 0;
-    const finalConfidence = Math.min(baseConfidence + confidenceBonus, 0.98);
+    const confidenceBonus = state !== 'unknown' ? STATE_DETECTION_BONUS : 0;
+    const finalConfidence = Math.min(baseConfidence + confidenceBonus, MAX_CONFIDENCE);
 
     const issueId = resolveIssueId(rule.topic, state);
 

@@ -66,6 +66,7 @@ Every row is classified in a fixed pipeline:
 |----|-------|-------------|
 | `load_ref` | Missing Load Reference | Yes |
 | `ref_provided` | Reference Update / Info Provided | No |
+| `transport_order` | Transport Order Request | Yes |
 | `customs` | Customs / Documentation | Yes |
 | `portbase` | Portbase / Port Notification | Yes |
 | `bl` | Bill of Lading (B/L) | No |
@@ -87,6 +88,8 @@ Every row is classified in a fixed pipeline:
 
 `other` is a last-resort failure state. The engine runs a recovery pass before assigning it.
 
+`transport_order` captures cases requesting or providing a transport instruction document (TRO) sent to the haulier. It is distinct from a missing load reference number — cases like "Please send us the transport order for BL MAEU262065895" belong here, not under `load_ref`.
+
 ---
 
 ## Customer vs transporter rules
@@ -105,11 +108,10 @@ The entity model enforces strict role separation. An entity may not appear in mo
 
 A name appears in Customer Burden only if it passes ALL of:
 
-1. **Not blocked** — not an operational entity, not a carrier, not an internal ISR label, not a junk placeholder
-2. **Positive gate** — looks like a real company name (has a legal suffix, OR has at least one word that is not in the logistics junk vocabulary)
-3. **Recurrence or confidence** — seen 3+ times, OR seen 2+ times with confidence ≥ 0.70, OR passes the company name structure check
+1. **Not blocked** — not an operational entity, not a carrier, not an internal ISR label, not a junk placeholder, not an IBAN or alphanumeric reference code
+2. **Positive gate** — looks like a real company name (has a recognised legal suffix, OR has at least one word that is not in the logistics junk vocabulary)
 
-A final post-aggregation filter re-applies both gates before the Customer Burden chart is rendered.
+A final pre-render filter re-applies both gates before the Customer Burden chart is rendered. Use `auditCustomerAcceptance(name)` from `src/lib/validators.ts` to inspect why a specific name was accepted or excluded.
 
 ### Why a name might be excluded as unresolved
 
@@ -191,12 +193,15 @@ npm run lint     # ESLint
 
 | File | Purpose |
 |------|---------|
-| `src/config/referenceData.ts` | Entity dictionaries, customer gates, area allowlist, validation |
+| `src/config/referenceData.ts` | Entity dictionaries, customer gates, area allowlist, output validation |
 | `src/config/zipAreaRules.ts` | ZIP → area mapping rules |
-| `src/lib/classifyCase.ts` | Per-row classification pipeline |
-| `src/lib/issueRules.ts` | Intent-aware topic rules |
+| `src/lib/classifyCase.ts` | Per-row classification pipeline; confidence scoring constants |
+| `src/lib/issueRules.ts` | Intent-aware topic rules; confidence constants (STRONG_SIGNAL_CONFIDENCE etc.) |
 | `src/lib/fallbackIssueRules.ts` | Recovery pass before Other |
+| `src/lib/loadRefGuards.ts` | Shared provided-reference detection patterns (textProvidesRef, PROVIDED_REF_PATTERNS) |
+| `src/lib/validators.ts` | Testable helpers: drilldown integrity, false-positive detection, customer audit |
 | `src/lib/entityExtraction.ts` | Entity candidate extraction |
+| `src/lib/textNormalization.ts` | Text cleaning, legal suffix stripping, company name structure check |
 | `src/lib/analyzeData.ts` | Aggregation — all dashboard outputs |
 | `src/lib/taxonomy.ts` | Issue taxonomy with hours and preventable flags |
 | `src/lib/parseFile.ts` | Excel column mapping and normalisation |
@@ -204,12 +209,40 @@ npm run lint     # ESLint
 
 ## Output validation
 
-In development mode (`npm run dev`), the app runs `validateOutputGuards()` after every analysis and logs any violations to the browser console:
+In development mode (`npm run dev`), the app runs structural checks after every analysis and logs any violations to the browser console.
 
-- `BLOCKED_ENTITY_IN_CUSTOMER_BURDEN` — operational entity leaked into customer charts
-- `JUNK_LABEL_IN_CUSTOMER_BURDEN` — generic placeholder in customer charts
-- `NON_COMPANY_NAME_IN_CUSTOMER_BURDEN` — value failed positive company name gate
-- `NON_APPROVED_IN_TRANSPORTER` — unapproved entity in transporter performance
-- `DISALLOWED_AREA_IN_HOTSPOTS` — non-operational area in hotspot chart
-- `NO_CASE_NUMBERS_IN_DATASET` — dataset has no Case Number column (drilldown limited)
-- `NAMED_ENTITY_IN_CUSTOMER_BURDEN` — hardcoded entity (Maersk, MSC, etc.) appeared in customer charts
+### Row-level classification checks
+
+| Rule | Description |
+|------|-------------|
+| `LOAD_REF_FALSE_POSITIVE` | Case classified as Missing Load Ref but description contains a provided-ref pattern |
+| `TRANSPORT_ORDER_AS_LOAD_REF` | Case with "transport order" phrasing that landed in load_ref |
+| `NO_CASE_NUMBERS_IN_DATASET` | No Case Number column found — drilldown links will show "—" |
+| `LOW_CASE_NUMBER_COVERAGE` | Fewer than 50% of records have a Case Number |
+
+### Aggregation output guards (`validateOutputGuards`)
+
+| Rule | Severity | Description |
+|------|----------|-------------|
+| `OPERATIONAL_ENTITY_IN_CUSTOMER_BURDEN` | ERROR | Depot/terminal/approved haulier appeared in Customer Burden |
+| `ISR_LABEL_IN_CUSTOMER_BURDEN` | ERROR | Internal ISR/Maersk address-book entry in Customer Burden |
+| `CARRIER_IN_CUSTOMER_BURDEN` | ERROR | Recognised carrier (DB Schenker, DHL, etc.) in Customer Burden |
+| `OCEAN_CARRIER_IN_CUSTOMER_BURDEN` | ERROR | Ocean carrier name (MSC, Maersk, etc.) in Customer Burden |
+| `JUNK_LABEL_IN_CUSTOMER_BURDEN` | ERROR | Generic junk placeholder in Customer Burden |
+| `NON_COMPANY_NAME_IN_CUSTOMER_BURDEN` | ERROR | Value failed positive company name gate |
+| `NON_APPROVED_IN_TRANSPORTER` | ERROR | Unapproved entity in Transporter Performance |
+| `DISALLOWED_AREA_IN_HOTSPOTS` | ERROR | Non-operational area label in Area Hotspot chart |
+| `NAMED_ENTITY_IN_CUSTOMER_BURDEN` | ERROR | Hardcoded entity (Maersk, MSC, etc.) in Customer Burden |
+
+### Testable helpers
+
+`src/lib/validators.ts` exports pure functions for each key invariant:
+
+```ts
+isLoadRefFalsePositive(primaryIssue, issueState, description)
+detectsTransportOrder(text)
+validateDrilldownIntegrity(records, expectedCategory)
+validateCaseNumberPreservation(records)
+auditCustomerAcceptance(name)
+auditHotspotLabels(labels)
+```

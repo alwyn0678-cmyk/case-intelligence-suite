@@ -25,6 +25,33 @@ import { resolveZipToArea, extractZipsFromText } from '../config/zipAreaRules';
 import { normalizeText }                from './textNormalization';
 import { textProvidesRef }              from './loadRefGuards';
 import type { IssueState, IssueMatch }  from './issueRules';
+
+// ─── Confidence scoring constants ────────────────────────────────
+// Imported-by-name constants keep the scoring model readable and testable.
+// The base signal confidence tiers (STRONG/WEAK) live in issueRules.ts
+// because that is where the per-topic confidence is first assigned.
+// Post-classification adjustments are defined here.
+
+/** Confidence threshold below which a case is flagged for manual review. */
+export const REVIEW_FLAG_THRESHOLD = 0.60;
+
+/**
+ * Penalty subtracted from confidence when the description field is substantive
+ * (>30 chars) but contributed NO matching evidence to the classification.
+ * This means the primary classification was driven entirely by the subject
+ * or category fields — which are less operationally reliable than the body.
+ */
+export const SUBJECT_ONLY_PENALTY = 0.18;
+
+/** Minimum confidence after the subject-only penalty is applied. */
+export const SUBJECT_ONLY_FLOOR = 0.48;
+
+/**
+ * Minimum description length (chars, trimmed) that qualifies as "substantive".
+ * Below this threshold the description is considered too sparse to penalise
+ * subject-only classifications.
+ */
+export const SUBSTANTIVE_DESC_MIN_LENGTH = 30;
 import type { ExtractedEntity }         from './entityExtraction';
 import type { RoutingAlignment }        from '../config/zipAreaRules';
 import type { NormalisedRecord }        from '../types';
@@ -365,14 +392,14 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   }
 
   // ── Subject-only classification penalty ───────────────────────
-  // When description is substantive (>30 chars) but contributed no classification
-  // evidence, the primary classification was driven only by subject/category fields.
+  // When description is substantive but contributed no classification evidence,
+  // the classification was driven only by subject/category fields.
   // Subject is less operationally reliable than body text — apply a confidence
-  // penalty and flag for review.
-  const hasSubstantiveDesc  = (fields.description ?? '').trim().length > 30;
-  const descHasEvidence     = evidence.some(e => e.startsWith('[description]'));
-  if (hasSubstantiveDesc && !descHasEvidence && confidence > 0.60) {
-    confidence = Math.max(confidence - 0.18, 0.48);
+  // penalty and flag for review. Constants defined at top of this file.
+  const hasSubstantiveDesc = (fields.description ?? '').trim().length > SUBSTANTIVE_DESC_MIN_LENGTH;
+  const descHasEvidence    = evidence.some(e => e.startsWith('[description]'));
+  if (hasSubstantiveDesc && !descHasEvidence && confidence > REVIEW_FLAG_THRESHOLD) {
+    confidence = Math.max(confidence - SUBJECT_ONLY_PENALTY, SUBJECT_ONLY_FLOOR);
     if (!reviewFlag) {
       reviewFlag = true;
       unresolvedReason = 'Subject-only classification — description present but provided no matching evidence. Verify manually.';
@@ -380,9 +407,9 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   }
 
   // ── Flag low confidence ───────────────────────────────────────
-  // Threshold raised from 0.50 to 0.60 to catch weak-signal-only classifications
-  // (weak + state bonus = 0.65 → after field weight may be below 0.60).
-  if (confidence < 0.60 && !reviewFlag) {
+  // REVIEW_FLAG_THRESHOLD catches weak-signal-only classifications.
+  // (weak signal 0.55 + state bonus 0.10 = 0.65 × field weight 0.88 = 0.57 → below threshold)
+  if (confidence < REVIEW_FLAG_THRESHOLD && !reviewFlag) {
     reviewFlag = true;
     unresolvedReason = unresolvedReason ?? `Low confidence (${(confidence * 100).toFixed(0)}%) — classified by weak signal.`;
   }

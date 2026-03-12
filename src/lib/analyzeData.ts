@@ -11,6 +11,7 @@ import type {
 import { buildForecast } from './forecast';
 import { isKnownOperationalEntity, isApprovedTransporter, isBlockedFromCustomerRole, isInternalISRLabel, isAllowedAreaLabel, validateOutputGuards, isPositiveCustomerCandidate } from '../config/referenceData';
 import { PROVIDED_REF_PATTERNS } from './loadRefGuards';
+import { isLoadRefFalsePositive, detectsTransportOrder, validateCaseNumberPreservation } from './validators';
 import {} from './textNormalization';
 
 const MAX_CHART_WEEKS = 16;
@@ -891,53 +892,52 @@ export function runAnalysis(
   // splitting ERROR (data integrity failures) from WARN (quality issues).
   // Does not throw — violations are logged for investigation without crashing.
   if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-    const casesWithNumbers = records.filter(r => r.case_number).length;
-    if (casesWithNumbers === 0 && records.length > 0) {
+    // ── Case number preservation check ────────────────────────────
+    const cnReport = validateCaseNumberPreservation(records);
+    if (!cnReport.hasAny && records.length > 0) {
       console.warn(
-        '[CIS validation] No Case Number values found — evidence drilldown will lack Case No. links.',
+        '[CIS validation] NO_CASE_NUMBERS_IN_DATASET — evidence drilldown will lack Case No. links.',
         'Add a "Case Number" or "Case No." column to the Excel.',
+      );
+    } else if (cnReport.pct < 0.5 && records.length > 0) {
+      console.warn(
+        `[CIS validation] LOW_CASE_NUMBER_COVERAGE — only ${(cnReport.pct * 100).toFixed(0)}% of records have a Case Number (${cnReport.preserved}/${cnReport.total}).`,
       );
     }
 
-    // ── Row-level load-ref contradiction scan ─────────────────────
-    // Any remaining load_ref(missing) case whose description contains an explicit
-    // provided-ref pattern is a classifier false positive.
+    // ── Load-ref false-positive scan ───────────────────────────────
+    // Uses validators.isLoadRefFalsePositive() — same logic, single source of truth.
     const loadRefFalsePositives = records.filter(r =>
-      r.primaryIssue === 'load_ref' &&
-      r.issueState  !== 'provided' &&
-      r.description  &&
-      PROVIDED_REF_PATTERNS.some(p => p.test(r.description ?? ''))
+      isLoadRefFalsePositive(r.primaryIssue, r.issueState, r.description ?? '')
     );
     if (loadRefFalsePositives.length > 0) {
       console.error(
         `[CIS validation] LOAD_REF_FALSE_POSITIVE: ${loadRefFalsePositives.length} case(s) classified as Missing Load Ref but description contains provided-ref pattern.`,
         loadRefFalsePositives.map(r => ({
-          caseNumber: r.case_number ?? '—',
-          subject:    r.subject?.slice(0, 80) ?? '—',
+          caseNumber:  r.case_number ?? '—',
+          subject:     r.subject?.slice(0, 80) ?? '—',
           descSnippet: r.description?.slice(0, 120) ?? '—',
-          confidence: r.confidence,
-          evidence:   r.evidence,
+          confidence:  r.confidence,
+          evidence:    r.evidence,
         })),
       );
     }
 
-    // ── Transport-order-as-load-ref misclassification scan ─────────
-    // Cases containing "transport order" phrasing that ended up as load_ref
-    // are a known false-positive type (the trigger phrase was previously in
-    // load_ref strongSignals). Flag any that survive as a regression check.
-    const TRANSPORT_ORDER_PHRASES = /\btransport\s+order\b/i;
+    // ── Transport-order-as-load-ref regression scan ────────────────
+    // Uses validators.detectsTransportOrder() — guards against re-introduction
+    // of 'transport order' into load_ref signals.
     const transportOrderMisclassified = records.filter(r =>
       r.primaryIssue === 'load_ref' &&
-      TRANSPORT_ORDER_PHRASES.test((r.subject ?? '') + ' ' + (r.description ?? ''))
+      detectsTransportOrder((r.subject ?? '') + ' ' + (r.description ?? ''))
     );
     if (transportOrderMisclassified.length > 0) {
       console.error(
-        `[CIS validation] TRANSPORT_ORDER_AS_LOAD_REF: ${transportOrderMisclassified.length} case(s) with "transport order" phrasing classified as Missing Load Ref.`,
+        `[CIS validation] TRANSPORT_ORDER_AS_LOAD_REF: ${transportOrderMisclassified.length} case(s) with transport order phrasing classified as Missing Load Ref.`,
         transportOrderMisclassified.map(r => ({
-          caseNumber: r.case_number ?? '—',
-          subject:    r.subject?.slice(0, 80) ?? '—',
+          caseNumber:  r.case_number ?? '—',
+          subject:     r.subject?.slice(0, 80) ?? '—',
           primaryIssue: r.primaryIssue,
-          evidence:   r.evidence,
+          evidence:    r.evidence,
         })),
       );
     }
