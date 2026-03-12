@@ -18,6 +18,7 @@
 // ─────────────────────────────────────────────────────────────────
 
 import { extractEntities }              from './entityExtraction';
+import { lookupEntity }                 from '../config/referenceData';
 import { classifyByRules }              from './issueRules';
 import { fallbackClassify, operationalClueScan } from './fallbackIssueRules';
 import { resolveZipToArea, extractZipsFromText } from '../config/zipAreaRules';
@@ -105,7 +106,18 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   const resolvedTransporter    = entityResult.transporter?.canonicalName ?? null;
   const resolvedDepot          = entityResult.depot?.canonicalName ?? null;
   const resolvedDeepseaTerminal= entityResult.deepseaTerminal?.canonicalName ?? null;
-  const resolvedCustomer       = entityResult.customer?.canonicalName ?? record.customer ?? null;
+  // Only use the raw record.customer value as customer if it is NOT a known operational entity.
+  // If it resolves to a depot/terminal/transporter, leave resolvedCustomer as null so it stays
+  // in the correct entity bucket and never enters customer-level reporting.
+  let resolvedCustomer: string | null = entityResult.customer?.canonicalName ?? null;
+  if (!resolvedCustomer && record.customer?.trim()) {
+    const rawCustLookup = lookupEntity(record.customer.trim());
+    if (!rawCustLookup) {
+      // Not in any dictionary — safe to use as customer
+      resolvedCustomer = record.customer.trim();
+    }
+    // If rawCustLookup exists, it is a transporter/depot/terminal. Leave resolvedCustomer null.
+  }
 
   // ── 6. Extract references ─────────────────────────────────────
   const refs = extractReferences(normalizedText);

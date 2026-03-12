@@ -8,7 +8,7 @@
 // Every extraction stores the evidence trail required by CLAUDE.md.
 // ─────────────────────────────────────────────────────────────────
 
-import { lookupEntity, type EntityType } from '../config/referenceData';
+import { lookupEntity, ENTITY_ALIAS_MAP, type EntityType } from '../config/referenceData';
 
 export interface ExtractedEntity {
   rawValue: string;
@@ -49,40 +49,43 @@ function buildSnippet(text: string, alias: string, windowChars = 60): string {
   return (start > 0 ? '…' : '') + text.substring(start, end) + (end < text.length ? '…' : '');
 }
 
+
 /**
- * Attempt to find a known entity in a piece of text.
- * Returns the best match (highest priority entity type).
+ * Scan text for ALL entity matches (not just the first/highest-priority one).
+ * Returns every distinct canonical match found, sorted by priority.
  */
-function findEntityInText(
+function findAllEntitiesInText(
   text: string,
   sourceField: FieldName,
   baseConfidence: number,
-): ExtractedEntity | null {
-  if (!text.trim()) return null;
-  const result = lookupEntity(text);
-  if (!result) return null;
+): ExtractedEntity[] {
+  if (!text.trim()) return [];
+  const lower = text.toLowerCase();
+  const results: ExtractedEntity[] = [];
+  const seenCanonicals = new Set<string>();
 
-  return {
-    rawValue: text,
-    normalizedValue: result.entry.canonicalName,
-    entityType: result.entry.entityType,
-    canonicalName: result.entry.canonicalName,
-    matchedAlias: result.matchedAlias,
-    sourceField,
-    confidence: baseConfidence,
-    snippet: buildSnippet(text, result.matchedAlias),
-  };
+  const sortedAliases = Array.from(ENTITY_ALIAS_MAP.keys()).sort((a, b) => b.length - a.length);
+  for (const alias of sortedAliases) {
+    if (lower.includes(alias)) {
+      const entry = ENTITY_ALIAS_MAP.get(alias)!;
+      if (!seenCanonicals.has(entry.canonicalName)) {
+        seenCanonicals.add(entry.canonicalName);
+        results.push({
+          rawValue: text,
+          normalizedValue: entry.canonicalName,
+          entityType: entry.entityType,
+          canonicalName: entry.canonicalName,
+          matchedAlias: alias,
+          sourceField,
+          confidence: baseConfidence,
+          snippet: buildSnippet(text, alias),
+        });
+      }
+    }
+  }
+  return results;
 }
 
-/**
- * Main entity extraction function.
- *
- * @param transporterCol  Value of the dedicated "Transporter / Haulier" column (if present)
- * @param customerCol     Value of the "Customer / Account" column
- * @param subject         Email/case subject line
- * @param description     Email body / case description
- * @param isrDetails      ISR details field
- */
 export function extractEntities(
   transporterCol: string | undefined,
   customerCol: string | undefined,
@@ -101,7 +104,6 @@ export function extractEntities(
 
   const allEntities: ExtractedEntity[] = [];
 
-  // Confidence weights per source field
   const confidenceByField: Record<FieldName, number> = {
     transporter_col: 0.95,
     customer_col: 0.85,
@@ -110,12 +112,11 @@ export function extractEntities(
     description: 0.60,
   };
 
-  // Extract from each field
+  // ── Extract ALL known entities from every field ───────────────
   for (const field of fields) {
     if (!field.text) continue;
-    const hit = findEntityInText(field.text, field.name, confidenceByField[field.name]);
-    if (hit) {
-      // Avoid duplicate canonical names across fields
+    const hits = findAllEntitiesInText(field.text, field.name, confidenceByField[field.name]);
+    for (const hit of hits) {
       const alreadyFound = allEntities.find(e => e.canonicalName === hit.canonicalName);
       if (!alreadyFound) allEntities.push(hit);
     }
@@ -132,15 +133,15 @@ export function extractEntities(
   const transporter     = byType('transporter');
 
   // ── Customer inference ────────────────────────────────────────
-  // Only use the customerCol value as customer if it didn't resolve to
-  // a known transporter / depot / terminal.
+  // Customer is inferred only AFTER all operational entities are identified.
+  // Customer col raw value is used ONLY if it does NOT resolve to any known entity.
   let customer: ExtractedEntity | null = null;
   const custText = customerCol?.trim() ?? '';
 
   if (custText) {
     const knownMatch = lookupEntity(custText);
     if (!knownMatch) {
-      // It's an actual customer name — not in any known dictionary
+      // Not a known entity — safe to treat as customer
       customer = {
         rawValue: custText,
         normalizedValue: custText,
@@ -151,30 +152,51 @@ export function extractEntities(
         confidence: 0.85,
         snippet: custText,
       };
-    } else if (knownMatch.entry.entityType === 'transporter' && !transporter) {
-      // Customer col contained a transporter name — promote it
-      const promoted: ExtractedEntity = {
-        rawValue: custText,
-        normalizedValue: knownMatch.entry.canonicalName,
-        entityType: 'transporter',
-        canonicalName: knownMatch.entry.canonicalName,
-        matchedAlias: knownMatch.matchedAlias,
-        sourceField: 'customer_col',
-        confidence: 0.85,
-        snippet: custText,
-      };
-      allEntities.push(promoted);
+    }
+    // If knownMatch exists, the entity is already in allEntities under its correct type.
+    // Do NOT add it as a customer. Leave customer as null.
+  }
+
+  // ── Deep entity recovery pass ────────────────────────────────
+  // If customer is still null, scan all text fields for a company name
+  // that looks like a customer (not an operational entity).
+  // Strategy: extract company-like tokens from text that don't match any known entity.
+  if (!customer) {
+    const allText = fields.map(f => f.text).join(' ');
+    // Match patterns: "Account: XYZ", "Customer: XYZ", "client: XYZ", or standalone company names
+    const accountPatterns = [
+      /\baccount[:\s]+([A-Z][A-Za-z0-9 &\-\.]{2,40})/i,
+      /\bcustomer[:\s]+([A-Z][A-Za-z0-9 &\-\.]{2,40})/i,
+      /\bclient[:\s]+([A-Z][A-Za-z0-9 &\-\.]{2,40})/i,
+      /\bkunde[:\s]+([A-Z][A-Za-z0-9 &\-\.]{2,40})/i,
+    ];
+    for (const pattern of accountPatterns) {
+      const m = allText.match(pattern);
+      if (m && m[1]) {
+        const candidate = m[1].trim();
+        const knownMatch = lookupEntity(candidate);
+        if (!knownMatch) {
+          customer = {
+            rawValue: candidate,
+            normalizedValue: candidate,
+            entityType: 'customer',
+            canonicalName: candidate,
+            matchedAlias: '',
+            sourceField: 'description',
+            confidence: 0.55,
+            snippet: candidate,
+          };
+          break;
+        }
+      }
     }
   }
 
   // ── Unknown entity detection ──────────────────────────────────
-  // Flag names in the customer column that look like company names
-  // but don't resolve to any known entity.
   const unknownEntities: string[] = [];
+  // Flag logistics-sounding names from the customer column that don't match any dictionary
   if (custText && !lookupEntity(custText) && custText.length > 3) {
-    // Nothing to flag — this is the expected customer case
-    // We only flag if it LOOKS like it could be a logistics entity
-    const logisticsHint = /\b(transport|logistics|freight|cargo|barge|shipping|spedition|spediteur|haulage|container|terminal|depot|express|forwarding)\b/i.test(custText);
+    const logisticsHint = /\b(transport|logistics|freight|cargo|barge|shipping|spedition|spediteur|haulage|container|terminal|depot|express|forwarding|spedition|hafen|port)\b/i.test(custText);
     if (logisticsHint) {
       unknownEntities.push(custText);
     }

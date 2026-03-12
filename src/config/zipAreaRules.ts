@@ -14,6 +14,36 @@ export interface ZipRule {
   typicalRouting?: string;
 }
 
+// ─── Business-specific depot routing rules (HIGHEST PRIORITY for DE ZIPs) ────
+// These rules override the generic DE_RULES ranges.
+// Priority order: H&S overrides AZS BONN/TRIER for 54000-56999
+const DE_DEPOT_ROUTING_RULES: ZipRule[] = [
+  // AZS TRIER — 54000-54999
+  { test: z => /^54\d{3}$/.test(z), area: 'Trier / Eifel', typicalRouting: 'AZS TRIER (DETREAZ)' },
+  // H&S ANDERNACH priority range 55000-58999 within the 54000-56999 corridor
+  { test: z => /^55\d{3}$/.test(z), area: 'Mainz / Bingen area', typicalRouting: 'FRANKENBACH / MAINZ (DEMNZ01)' },
+  // AZS BONN — 56000-56999
+  { test: z => /^56\d{3}$/.test(z), area: 'Koblenz / Neuwied area', typicalRouting: 'AZS BONN — H&S ANDERNACH (DEBNX01 / DEAJHRA)' },
+  // H&S ANDERNACH covers full corridor 57000-58999 (Sauerland / Siegerland → Rhine entry)
+  { test: z => /^5[78]\d{3}$/.test(z), area: 'Sauerland / Siegerland', typicalRouting: 'H&S ANDERNACH (DEAJHRA)' },
+  // FRANKENBACH / MAINZ — 35000-36999
+  { test: z => /^3[56]\d{3}$/.test(z), area: 'Kassel / Hessen North', typicalRouting: 'FRANKENBACH / MAINZ (DEMNZ01) — H&S ANDERNACH alt.' },
+  // FRANKENBACH / MAINZ — 60000-65999
+  { test: z => /^6[0-5]\d{3}$/.test(z), area: 'Frankfurt / Rhine-Main', typicalRouting: 'FRANKENBACH / MAINZ (DEMNZ01) — Contargo Gustavsburg (DE9G4TG) alt.' },
+  // GERMERSHEIM DP World — 66000-79999
+  { test: z => /^6[6-9]\d{3}$/.test(z), area: 'Saarland / Mannheim / Karlsruhe', typicalRouting: 'GERMERSHEIM DP World (DEGRH01)' },
+  { test: z => /^7\d{4}$/.test(z), area: 'Stuttgart / Baden-Württemberg', typicalRouting: 'GERMERSHEIM DP World (DEGRH01)' },
+  // GERMERSHEIM DP World — 80000-89999
+  { test: z => /^8\d{4}$/.test(z), area: 'Bavaria (Munich / Augsburg)', typicalRouting: 'GERMERSHEIM DP World (DEGRH01)' },
+  // FRANKENBACH / MAINZ — 95000-97999 (priority over EGS for this sub-range)
+  { test: z => /^9[5-7]\d{3}$/.test(z), area: 'Würzburg / Bavaria North', typicalRouting: 'FRANKENBACH / MAINZ (DEMNZ01) — EGS (DENUE02) alt.' },
+  // EGS — 90000-94999 and 98000-99999
+  { test: z => /^9[0-4]\d{3}$/.test(z), area: 'Nuremberg / Bavaria North', typicalRouting: 'EGS (DENUE02)' },
+  { test: z => /^9[89]\d{3}$/.test(z), area: 'Nuremberg East / Oberpfalz', typicalRouting: 'EGS (DENUE02)' },
+  // Default German fallback → Duisburg corridor
+  { test: z => /^\d{5}$/.test(z), area: 'Duisburg / Rhine-Ruhr corridor', typicalRouting: 'Rhine barge — Duisburg / RRT / DIT' },
+];
+
 // ─── German postal codes (5 digits) ──────────────────────────────
 // Source: Germany postal code regional breakdown
 const DE_RULES: ZipRule[] = [
@@ -90,6 +120,7 @@ const AT_RULES: ZipRule[] = [
 
 // ─── All rules combined ────────────────────────────────────────
 const ALL_ZIP_RULES: ZipRule[] = [
+  ...DE_DEPOT_ROUTING_RULES,
   ...DE_RULES,
   ...NL_RULES,
   ...BE_RULES,
@@ -138,10 +169,10 @@ export function resolveZipToArea(rawZip: string, contextText = ''): { area: stri
     const isLikelyNL = /^\d{4}[A-Z]{2}/.test(zip) || /^\d{4}$/.test(zip);
     const isLikelyBE = /^\d{4}$/.test(zip) && parseInt(zip, 10) >= 1000 && parseInt(zip, 10) <= 9999;
 
-    if (isLikelyDE) ruleSets.push(DE_RULES);
+    if (isLikelyDE) ruleSets.push(DE_DEPOT_ROUTING_RULES, DE_RULES);
     else if (isLikelyNL) ruleSets.push(NL_RULES, DE_RULES);
     else if (isLikelyBE) ruleSets.push(BE_RULES, CH_RULES, AT_RULES, DE_RULES);
-    else ruleSets.push(DE_RULES, NL_RULES, BE_RULES, CH_RULES, AT_RULES);
+    else ruleSets.push(DE_DEPOT_ROUTING_RULES, DE_RULES, NL_RULES, BE_RULES, CH_RULES, AT_RULES);
   }
 
   for (const ruleSet of ruleSets) {

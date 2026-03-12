@@ -8,6 +8,7 @@ import type {
   WeeklySnapshot, Actions, UnknownEntityItem,
 } from '../types/analysis';
 import { buildForecast } from './forecast';
+import { isKnownOperationalEntity, isApprovedTransporter } from '../config/referenceData';
 
 function trend2(a: number, b: number): 'up' | 'down' | 'stable' {
   if (b > a * 1.2) return 'up';
@@ -219,9 +220,12 @@ export function runAnalysis(
       unknownEntities:      cls.unknownEntities,
       evidence:             cls.evidence,
       sourceFieldsUsed:     cls.sourceFieldsUsed,
-      // Override raw transporter/customer with resolved canonical names
+      // Override raw transporter/customer with resolved canonical names.
+      // For customer: only fall back to raw r.customer if it is NOT a known operational entity.
       transporter: cls.resolvedTransporter ?? r.transporter,
-      customer:    cls.resolvedCustomer ?? r.customer,
+      customer: cls.resolvedCustomer ?? (
+        r.customer && !isKnownOperationalEntity(r.customer) ? r.customer : undefined
+      ),
     };
   });
 
@@ -235,8 +239,10 @@ export function runAnalysis(
     const wk = weeklyHistory[r.weekKey];
     wk.total++;
     for (const iss of r.issues) wk.issues[iss] = (wk.issues[iss] ?? 0) + 1;
-    const custName = r.resolvedCustomer ?? r.customer ?? 'Unknown';
-    wk.customers[custName] = (wk.customers[custName] ?? 0) + 1;
+    const custName = r.resolvedCustomer ?? 'Unknown';
+    if (custName === 'Unknown' || !isKnownOperationalEntity(custName)) {
+      wk.customers[custName] = (wk.customers[custName] ?? 0) + 1;
+    }
     if (r.resolvedTransporter) wk.transporters[r.resolvedTransporter] = (wk.transporters[r.resolvedTransporter] ?? 0) + 1;
     if (r.resolvedArea) wk.areas[r.resolvedArea] = (wk.areas[r.resolvedArea] ?? 0) + 1;
   }
@@ -276,7 +282,12 @@ export function runAnalysis(
   // ─── 4. Customer burden ────────────────────────────────────────
   const custMap: Record<string, CustomerBurdenItem> = {};
   for (const r of records) {
-    const name = r.resolvedCustomer ?? r.customer ?? 'Unknown';
+    // Hard guard: use only resolvedCustomer (never raw r.customer).
+    // resolvedCustomer is null when the customer column held a depot/transporter — skip those.
+    const name = r.resolvedCustomer ?? 'Unknown';
+    // Hard guard: known operational entities (transporters, depots, terminals) must never
+    // appear in customer-level reporting.
+    if (name !== 'Unknown' && isKnownOperationalEntity(name)) continue;
     if (!custMap[name]) {
       custMap[name] = { name, count: 0, hoursLost: 0, preventablePct: 0, missingLoadRef: 0, refProvided: 0, missingCustomsDocs: 0, amendments: 0, delays: 0, topIssue: '', trend: 'stable', risk: 'LOW', riskScore: 0, weekCounts: {} };
     }
@@ -299,7 +310,7 @@ export function runAnalysis(
 
   const customerBurden: CustomerBurdenItem[] = Object.values(custMap)
     .map(c => {
-      const recs = records.filter(r => (r.resolvedCustomer ?? r.customer ?? 'Unknown') === c.name);
+      const recs = records.filter(r => (r.resolvedCustomer ?? 'Unknown') === c.name);
       const topIssue = topIssueForGroup(recs);
       const trend = getWeekTrend(c.weekCounts, sortedWeeks);
       const riskScore = c.count * 0.4 + c.missingLoadRef * 2 + c.missingCustomsDocs * 1.5 + c.delays * 1.5 + (trend === 'up' ? 10 : 0);
@@ -313,6 +324,8 @@ export function runAnalysis(
   for (const r of records) {
     const name = r.resolvedTransporter;
     if (!name) continue;
+    // Hard guard: only approved transporters may appear in Transporter Performance.
+    if (!isApprovedTransporter(name)) continue;
     if (!transMap[name]) {
       transMap[name] = { name, count: 0, delays: 0, notOnTime: 0, waitingTime: 0, punctualityScore: 0, trend: 'stable', risk: 'LOW', weekCounts: {} };
     }
@@ -394,7 +407,8 @@ export function runAnalysis(
   const customsRecords = records.filter(r => r.issues.some(i => ['customs','portbase','bl','t1'].includes(i)));
   const customsOffenders: Record<string, number> = {};
   for (const r of customsRecords) {
-    const name = r.resolvedCustomer ?? r.customer ?? 'Unknown';
+    const name = r.resolvedCustomer ?? 'Unknown';
+    if (name !== 'Unknown' && isKnownOperationalEntity(name)) continue;
     customsOffenders[name] = (customsOffenders[name] ?? 0) + 1;
   }
   const customsCompliance: CustomsCompliance = {
@@ -411,7 +425,8 @@ export function runAnalysis(
   const refProvidedRecords = records.filter(r => r.issues.includes('ref_provided'));
   const loadRefByCustomer: Record<string, number> = {};
   for (const r of loadRefRecords) {
-    const name = r.resolvedCustomer ?? r.customer ?? 'Unknown';
+    const name = r.resolvedCustomer ?? 'Unknown';
+    if (name !== 'Unknown' && isKnownOperationalEntity(name)) continue;
     loadRefByCustomer[name] = (loadRefByCustomer[name] ?? 0) + 1;
   }
   const loadRefIntelligence: LoadRefIntelligence = {

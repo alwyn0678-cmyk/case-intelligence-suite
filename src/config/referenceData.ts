@@ -52,9 +52,11 @@ export const INLAND_DEPOTS: EntityEntry[] = [
   { canonicalName: 'Contargo Trimodal',      entityType: 'depot', aliases: ['contargo trimodal','contargo köln','contargo cologne','contargo neuss'] },
   { canonicalName: 'Contargo',               entityType: 'depot', aliases: ['contargo'] },
   { canonicalName: 'ZSK am Zehnhoff',        entityType: 'depot', aliases: ['am zehnhoff','zehnhoff','zsk','andernach zehnhoff'] },
-  { canonicalName: 'Bonn AZS',               entityType: 'depot', aliases: ['bonn azs','azs bonn'] },
-  { canonicalName: 'Trier AZS',              entityType: 'depot', aliases: ['trier azs','azs trier'] },
-  { canonicalName: 'Germersheim DPW',        entityType: 'depot', aliases: ['germersheim dpw','dpw germersheim','germersheim'] },
+  { canonicalName: 'H&S Andernach',          entityType: 'depot', aliases: ['h&s andernach','h s andernach','hs andernach','deajhra','h&s schiffahrts andernach','h+s andernach'] },
+  { canonicalName: 'Bonn AZS',               entityType: 'depot', aliases: ['bonn azs','azs bonn','debnx01','bon depot'] },
+  { canonicalName: 'Trier AZS',              entityType: 'depot', aliases: ['trier azs','azs trier','detreaz'] },
+  { canonicalName: 'EGS Nuremberg',          entityType: 'depot', aliases: ['egs nuremberg','egs nürnberg','egs','denue02'] },
+  { canonicalName: 'Germersheim DPW',        entityType: 'depot', aliases: ['germersheim dpw','dpw germersheim','germersheim','dp world germersheim','degrh01','dpw germersheim'] },
   { canonicalName: 'Rheinhafen Andernach',   entityType: 'depot', aliases: ['rheinhafen andernach','andernach depot'] },
   { canonicalName: 'Gustavsburg Contargo',   entityType: 'depot', aliases: ['gustavsburg contargo','gustavsburg','contargo gustavsburg'] },
   { canonicalName: 'Mainz Frankenbach',      entityType: 'depot', aliases: ['mainz frankenbach','frankenbach','mainz depot'] },
@@ -164,4 +166,50 @@ export function lookupEntity(text: string): { entry: EntityEntry; matchedAlias: 
     }
   }
   return null;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Hard-guard utility sets  (used by analyzeData.ts)
+// ─────────────────────────────────────────────────────────────────
+
+/** All canonical names of known operational entities (depot / terminal / transporter) */
+export const OPERATIONAL_CANONICAL_NAMES: Set<string> = new Set(
+  [...DEEPSEA_TERMINALS, ...INLAND_DEPOTS, ...TRANSPORTERS].map(e => e.canonicalName.toLowerCase())
+);
+
+/** All aliases of known operational entities */
+export const OPERATIONAL_ALIAS_SET: Set<string> = new Set(
+  [...DEEPSEA_TERMINALS, ...INLAND_DEPOTS, ...TRANSPORTERS].flatMap(e => e.aliases)
+);
+
+/** Approved transporter canonical names */
+export const APPROVED_TRANSPORTER_CANONICAL: Set<string> = new Set(
+  TRANSPORTERS.map(e => e.canonicalName.toLowerCase())
+);
+
+/**
+ * Returns true if the name (canonical or alias) belongs to any known
+ * operational entity (transporter, depot, deepsea_terminal).
+ * A known operational entity must NEVER enter customer-level reporting.
+ */
+export function isKnownOperationalEntity(name: string): boolean {
+  if (!name) return false;
+  const lower = name.toLowerCase().trim();
+  if (OPERATIONAL_CANONICAL_NAMES.has(lower)) return true;
+  if (OPERATIONAL_ALIAS_SET.has(lower)) return true;
+  // Also run through lookupEntity to catch partial alias matches
+  const hit = lookupEntity(name);
+  return hit !== null && hit.entry.entityType !== 'customer';
+}
+
+/**
+ * Returns true only if the name matches an approved transporter canonical name or alias.
+ * Only approved transporters may appear in Transporter Performance reporting.
+ */
+export function isApprovedTransporter(name: string): boolean {
+  if (!name) return false;
+  const lower = name.toLowerCase().trim();
+  if (APPROVED_TRANSPORTER_CANONICAL.has(lower)) return true;
+  const hit = lookupEntity(name);
+  return hit !== null && hit.entry.entityType === 'transporter';
 }
