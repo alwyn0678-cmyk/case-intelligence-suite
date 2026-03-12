@@ -444,6 +444,8 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   //
   // Audit trail: on both accept and reject, the exact trigger phrase and source
   // field are stored in evidence for inspection in the full classified export.
+  let loadRefGateRejected = false;
+
   if (issues.includes('load_ref')) {
     const gateResult = validateLoadRefMissing(
       fields.subject    ?? '',
@@ -452,6 +454,7 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     );
 
     if (!gateResult.valid) {
+      loadRefGateRejected = true;
       const wasPrimary = issues[0] === 'load_ref';
       issues = issues.filter(i => i !== 'load_ref');
       evidence.push(`[load_ref-gate] REJECTED: ${gateResult.rejectReason}`);
@@ -493,9 +496,11 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
 
   // ── Recovery pass re-check after gate rejection ───────────────────
   // If the load_ref gate left issues empty, re-run the recovery pass.
+  // HARD ENFORCEMENT: if gate rejected load_ref, neither fallback nor clue
+  // scan may reintroduce it — filter it out before adopting any result.
   if (issues.length === 0 && confidence < 0.50) {
     const fallback = fallbackClassify(normalizedText);
-    if (fallback) {
+    if (fallback && (!loadRefGateRejected || fallback.issueId !== 'load_ref')) {
       issues     = [fallback.issueId];
       issueState = fallback.state;
       confidence = fallback.confidence;
@@ -503,7 +508,7 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     }
     if (issues.length === 0) {
       const clue = operationalClueScan(normalizedText);
-      if (clue) {
+      if (clue && (!loadRefGateRejected || clue.issueId !== 'load_ref')) {
         issues     = [clue.issueId];
         issueState = clue.state;
         confidence = clue.confidence;
@@ -537,7 +542,11 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   // topic against the overall primary topic. If they differ and the description
   // match is at least WEAK_SIGNAL confidence, promote the description's result.
   if ((fields.description ?? '').trim().length > SUBSTANTIVE_DESC_MIN_LENGTH) {
-    const descOnlyMatches = classifyByRules(fields.description);
+    const rawDescMatches = classifyByRules(fields.description);
+    // HARD ENFORCEMENT: gate-rejected load_ref may never re-enter via description override
+    const descOnlyMatches = loadRefGateRejected
+      ? rawDescMatches.filter(m => m.issueId !== 'load_ref')
+      : rawDescMatches;
     if (descOnlyMatches.length > 0) {
       const descPrimary = descOnlyMatches[0];
       const overallPrimary = issues[0];
@@ -590,6 +599,18 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   // Enrich evidence with reference context
   for (const [key, val] of Object.entries(refs)) {
     evidence.push(`ref[${key}]=${val}`);
+  }
+
+  // ── Final safety net: gate-rejected load_ref must not survive ─────
+  if (loadRefGateRejected) {
+    issues = issues.filter(i => i !== 'load_ref');
+    if (issues.length === 0) {
+      issues           = ['other'];
+      issueState       = 'unknown';
+      confidence       = 0.10;
+      reviewFlag       = true;
+      unresolvedReason = unresolvedReason ?? 'load_ref gate rejected; safety net applied — no remaining classification.';
+    }
   }
 
   const primaryIssue   = issues[0];

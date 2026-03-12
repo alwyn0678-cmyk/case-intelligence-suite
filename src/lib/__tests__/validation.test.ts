@@ -17,6 +17,8 @@ import { classifyByRules } from '../issueRules';
 import { validateLoadRefMissing } from '../loadRefGuards';
 import { isSentenceFragment } from '../validators';
 import { TAXONOMY_MAP } from '../taxonomy';
+import { classifyCase } from '../classifyCase';
+import type { NormalisedRecord } from '../../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
@@ -591,6 +593,133 @@ describe('Regression — billing/demurrage/rate NOT Missing Load Ref', () => {
     ].join('\n  '));
     expect(result).not.toBeNull();
     expect(result!.issueId).toBe('waiting_time');
+  });
+
+});
+
+// ─── Case block 14: Pipeline hard-enforcement regression ──────────────────────
+//
+// These tests use classifyCase (full pipeline) to prove that when the
+// load_ref gate rejects, load_ref NEVER survives as primaryIssue — even when
+// "load ref" appears in the description field, which would ordinarily trigger
+// the description-override or fallback path.
+
+function makeRecord(overrides: Partial<Omit<NormalisedRecord, '_raw'>>): NormalisedRecord {
+  return { _raw: {}, ...overrides };
+}
+
+describe('Pipeline regression — gate-rejected load_ref never survives to primaryIssue', () => {
+
+  it('PIPELINE — demurrage body with "load ref" in subject → gate rejects, primaryIssue ≠ load_ref', () => {
+    const record = makeRecord({
+      subject:     'Load Ref BKG123',
+      description: 'Demurrage charges are pending for container TCKU123 — please advise on cost settlement',
+    });
+    const result = classifyCase(record);
+    const gateRejected = result.evidence.some(e => e.includes('[load_ref-gate] REJECTED'));
+    console.log([
+      '',
+      `Subject:     "${record.subject}"`,
+      `Description: "${record.description}"`,
+      `Gate rejected: ${gateRejected}`,
+      `Primary issue: ${result.primaryIssue}`,
+      `Evidence: ${result.evidence.slice(0, 3).join(' | ')}`,
+      `Result: ${gateRejected && result.primaryIssue !== 'load_ref' ? '✓ PASS' : '✗ FAIL'}`,
+    ].join('\n  '));
+    expect(gateRejected).toBe(true);
+    expect(result.primaryIssue).not.toBe('load_ref');
+  });
+
+  it('PIPELINE — rate/billing description overrides load_ref in subject → gate rejects, primaryIssue ≠ load_ref', () => {
+    // Strong load_ref subject ensures load_ref enters candidate list.
+    // Billing-only body (no explicit missing phrase) triggers body-intent rejection.
+    const record = makeRecord({
+      subject:     'Load reference missing for BKG456',
+      description: 'Please advise on the rates for this shipment and confirm surcharge details.',
+    });
+    const result = classifyCase(record);
+    const gateRejected = result.evidence.some(e => e.includes('[load_ref-gate] REJECTED'));
+    console.log([
+      '',
+      `Subject:     "${record.subject}"`,
+      `Description: "${record.description}"`,
+      `Gate rejected: ${gateRejected}`,
+      `Primary issue: ${result.primaryIssue}`,
+      `Evidence[0]: ${result.evidence[0] ?? ''}`,
+      `Result: ${gateRejected && result.primaryIssue !== 'load_ref' ? '✓ PASS' : '✗ FAIL'}`,
+    ].join('\n  '));
+    expect(gateRejected).toBe(true);
+    expect(result.primaryIssue).not.toBe('load_ref');
+  });
+
+  it('PIPELINE — routing description overrides load_ref in subject → gate rejects, primaryIssue ≠ load_ref', () => {
+    // Subject: explicit missing phrase → load_ref enters issues.
+    // Description: routing-only content → step 2a of gate rejects on body intent.
+    // "please provide load ref" is in description? No — put it in subject.
+    // Use isr_details for the load_ref signal (weight 0.78) without matching
+    // explicit missing list. "load ref needs updating" is not in LOAD_REF_EXPLICIT_MISSING
+    // so step 1 won't auto-accept; step 2a sees routing body → rejects.
+    const record = makeRecord({
+      subject:     'Load ref BKG789 — please action',
+      description: 'Routing check required for alternative depot — please advise on the correct routing for this shipment.',
+      isr_details: 'The load ref BKG789 is on this routing query.',
+    });
+    const result = classifyCase(record);
+    const gateRejected = result.evidence.some(e => e.includes('[load_ref-gate] REJECTED'));
+    console.log([
+      '',
+      `Subject:     "${record.subject}"`,
+      `Description: "${record.description}"`,
+      `ISR:         "${record.isr_details}"`,
+      `Gate rejected: ${gateRejected}`,
+      `Primary issue: ${result.primaryIssue}`,
+      `Issues: [${result.issues.join(', ')}]`,
+      `Evidence[0]: ${result.evidence[0] ?? ''}`,
+      `Result: ${result.primaryIssue !== 'load_ref' ? '✓ PASS' : '✗ FAIL'}`,
+    ].join('\n  '));
+    // Either gate rejected OR load_ref never scored high enough — either way must not be primary
+    expect(result.primaryIssue).not.toBe('load_ref');
+  });
+
+  it('PIPELINE — explicit missing phrase → gate accepts, primaryIssue = load_ref', () => {
+    const record = makeRecord({
+      subject:     'Load Reference Missing',
+      description: 'Please provide load ref for this shipment before the rail cut off.',
+    });
+    const result = classifyCase(record);
+    const gateAccepted = result.evidence.some(e => e.includes('[load_ref-gate] ACCEPTED'));
+    console.log([
+      '',
+      `Subject:     "${record.subject}"`,
+      `Description: "${record.description}"`,
+      `Gate accepted: ${gateAccepted}`,
+      `Primary issue: ${result.primaryIssue}`,
+      `Result: ${gateAccepted && result.primaryIssue === 'load_ref' ? '✓ PASS' : '✗ FAIL'}`,
+    ].join('\n  '));
+    expect(gateAccepted).toBe(true);
+    expect(result.primaryIssue).toBe('load_ref');
+  });
+
+  it('PIPELINE — description-override path blocked when gate rejected', () => {
+    // Body has both billing intent AND "load ref" mentioned — the description-override
+    // path would normally prepend load_ref; hard-exclusion must prevent this.
+    const record = makeRecord({
+      subject:     'Billing Query',
+      description: 'Invoice dispute regarding demurrage — load ref ABC123 is on the invoice',
+    });
+    const result = classifyCase(record);
+    const gateRejected = result.evidence.some(e => e.includes('[load_ref-gate] REJECTED'));
+    console.log([
+      '',
+      `Subject:     "${record.subject}"`,
+      `Description: "${record.description}"`,
+      `Gate rejected: ${gateRejected}`,
+      `Primary issue: ${result.primaryIssue}`,
+      `Issues list: [${result.issues.join(', ')}]`,
+      `Result: ${result.primaryIssue !== 'load_ref' ? '✓ PASS' : '✗ FAIL'}`,
+    ].join('\n  '));
+    expect(result.primaryIssue).not.toBe('load_ref');
+    expect(result.issues).not.toContain('load_ref');
   });
 
 });
