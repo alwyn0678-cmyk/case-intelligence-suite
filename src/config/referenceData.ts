@@ -346,12 +346,40 @@ export function isApprovedTransporter(name: string): boolean {
   return false;
 }
 
+// ─────────────────────────────────────────────────────────────────
+// OCEAN CARRIER NAME PATTERNS
+//
+// Ocean/deepsea carrier names that may appear in the Account Name column
+// but are NOT in the KNOWN_CARRIERS entity dictionary (or need belt-and-
+// suspenders protection). These are shipping line counterparties, not
+// customer accounts, and must never appear in Customer Burden reporting.
+// ─────────────────────────────────────────────────────────────────
+const OCEAN_CARRIER_PATTERNS: RegExp[] = [
+  /\bmaersk\s*(line|shipping|sealand|logistics|air|supply)?\b/i,
+  /\bcma\s*cgm\b/i,
+  /\bhapag[\s-]*lloyd\b/i,
+  /\bmediterranean\s*shipping\b/i,
+  /\bmsco?\b/i,                // MSC / MSCO
+  /\bevergreen\s*(line|marine|shipping)?\b/i,
+  /\bcosco\s*(shipping|container|logistics)?\b/i,
+  /\byang\s*ming\b/i,
+  /\bhanjin\b/i,
+  /\bone\s*(ocean\s*network)?\b/i,   // Ocean Network Express
+  /\bzim\s*(integrated)?\b/i,
+  /\bpil\b/i,                  // Pacific International Lines
+  /\bwanhai\b/i,
+  /\bseagate\s*container\b/i,
+  /\bturkon\b/i,
+  /\bkmtc\b/i,
+];
+
 /**
  * Returns true if the name should be BLOCKED from appearing as a resolved customer.
  *
  * Blocked categories:
  *   - Operational entities: deepsea_terminal, depot, approved transporter
  *   - Recognised external carriers (KNOWN_CARRIERS) — logistics cos, not customers
+ *   - Ocean carrier names (shipping lines — counterparties, not customers)
  *   - Internal ISR / Maersk address-book entries
  *   - Generic junk placeholder labels
  *
@@ -362,10 +390,63 @@ export function isBlockedFromCustomerRole(name: string): boolean {
   if (isKnownOperationalEntity(name)) return true;
   if (isInternalISRLabel(name)) return true;
   if (isCustomerJunkLabel(name)) return true;
-  // Also block recognized carrier entities
+  // Block recognized carrier entities from entity dictionary
   const hit = lookupEntity(name);
   if (hit && hit.entry.entityType === 'carrier') return true;
+  // Block ocean carrier names not explicitly in the entity dictionary
+  if (OCEAN_CARRIER_PATTERNS.some(p => p.test(name))) return true;
   return false;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// POSITIVE CUSTOMER CANDIDATE GATE
+//
+// isPositiveCustomerCandidate() implements the strict positive acceptance
+// rule: a name must LOOK LIKE a real business/company to appear in
+// Customer Burden reporting. "Not blocked" alone is insufficient.
+//
+// Acceptance criteria (any one of):
+//   1. Contains a recognised company legal suffix (GmbH, B.V., Ltd, etc.)
+//   2. After stripping legal suffixes, at least one remaining word is NOT
+//      in the logistics junk vocabulary (JUNK_SINGLE_WORDS)
+//
+// This rejects values like:
+//   - "Logistics"           → only junk words
+//   - "Transport GmbH"      → "transport" is junk, but suffix → accepted
+//     (this is slightly lenient; real company "Transport GmbH" is accepted)
+//   - "Service"             → only junk words, no suffix → rejected
+//   - "BASF"                → not in junk → accepted
+//   - "Volkswagen AG"       → has suffix → accepted
+// ─────────────────────────────────────────────────────────────────
+
+// Company legal suffix regex — strong positive signal
+const COMPANY_SUFFIX_RE = /\b(g\.?m\.?b\.?h\.?|b\.?v\.?|n\.?v\.?|ltd\.?|llc|inc\.?|s\.?a\.?|a\.?g\.?|plc|corp\.?|s\.?r\.?l\.?|sarl|bvba|aps|a\.?s\.?|s\.?e\.?|k\.?g\.?|u\.?g\.?|p\.?t\.?e\.?|pvt\.?|bhd\.?|o\.?y\.?|a\.?b\.?)\b/i;
+
+/**
+ * Returns true if the name passes the positive customer acceptance gate.
+ *
+ * A value may appear in Customer Burden only if:
+ *   - It has a recognised company legal suffix, OR
+ *   - After stripping suffixes, at least one word is not in the logistics
+ *     junk vocabulary (meaning it has real company-name substance)
+ *
+ * This is always evaluated AFTER isBlockedFromCustomerRole() has passed.
+ * "Not blocked" alone is not enough — this positive gate must also pass.
+ */
+export function isPositiveCustomerCandidate(name: string): boolean {
+  if (!name || name.trim().length < 2) return false;
+  const t = name.trim();
+
+  // Strong positive: has a company legal suffix
+  if (COMPANY_SUFFIX_RE.test(t)) return true;
+
+  // Normalize: strip legal suffixes, lowercase, split into words
+  const stripped = normalizeForMatching(t);
+  const words = stripped.split(/\s+/).filter(w => w.length >= 2);
+  if (words.length === 0) return false;
+
+  // At least one word must NOT be in the logistics junk vocabulary
+  return words.some(w => !JUNK_SINGLE_WORDS.has(w));
 }
 
 /**
@@ -688,26 +769,37 @@ export interface ValidationViolation {
   severity: 'ERROR' | 'WARN';
 }
 
-/** Expected operational area labels for German ZIPs */
-const OPERATIONAL_AREA_LABELS = new Set(['Mainz / Germersheim', 'Duisburg / Rhine-Ruhr']);
+// ─────────────────────────────────────────────────────────────────
+// AREA HOTSPOT ALLOWLIST — STRICT POSITIVE GATE
+//
+// Only the operational inland routing areas and the two approved
+// deepsea port clusters may appear in the Area Hotspots chart.
+//
+// ALL other geographic labels (generic DE cities, NL/BE cities,
+// raw ZIP codes, etc.) are suppressed from chart output.
+// If a new operational area needs to be added, it must be explicitly
+// included in this allowlist.
+// ─────────────────────────────────────────────────────────────────
 
-/** Area label patterns that indicate a non-operational or generic geography leaked through */
-const GENERIC_DE_AREA_PATTERN = /^(Berlin|Brandenburg|Hamburg|Hannover|Bremen|Saxony|Rhine-Ruhr|NRW|Münster|Köln|Saarland|Stuttgart|Bavaria|Nuremberg|Thüringen|Brunswick)/i;
-
-/** Raw ZIP code area label pattern — these should be resolved or excluded, not shown on charts */
-const RAW_ZIP_AREA_PATTERN = /^ZIP\s+\d{4,}/i;
+/** Exact area label names that are allowed in the Area Hotspot chart */
+const ALLOWED_AREA_LABELS = new Set<string>([
+  // Inland routing clusters
+  'Mainz / Germersheim',
+  'Duisburg / Rhine-Ruhr',
+  // Deepsea port visibility (optional — retain for terminal context)
+  'Rotterdam',
+  'Rotterdam / Dordrecht',
+  'Antwerp',
+]);
 
 /**
  * Returns true if an area name is safe to show in the Area Hotspot chart.
- * Rejects: raw ZIP codes, generic DE geography labels, and known excluded areas.
- * Accepts: operational area names ("Mainz / Germersheim", "Duisburg / Rhine-Ruhr")
- *          and deepsea port names (Rotterdam, Antwerp, etc.).
+ * Uses a strict positive allowlist — only explicitly approved area labels pass.
+ * All other geographic labels (raw ZIPs, generic cities, NL/BE areas) are suppressed.
  */
 export function isAllowedAreaLabel(name: string): boolean {
   if (!name) return false;
-  if (RAW_ZIP_AREA_PATTERN.test(name)) return false;
-  if (GENERIC_DE_AREA_PATTERN.test(name) && !OPERATIONAL_AREA_LABELS.has(name)) return false;
-  return true;
+  return ALLOWED_AREA_LABELS.has(name);
 }
 
 /**
@@ -717,14 +809,18 @@ export function isAllowedAreaLabel(name: string): boolean {
  *  1. No operational entity (depot/terminal/transporter/carrier) in Customer Burden
  *  2. No internal ISR label in Customer Burden
  *  3. No junk placeholder in Customer Burden
- *  4. Only approved transporters in Transporter Performance
- *  5. Area Hotspots for German corridors uses operational labels only
- *  6. All expected approved transporters are resolvable
+ *  4. No ocean carrier / counterparty name in Customer Burden
+ *  5. Positive company name gate — non-company-looking names flagged
+ *  6. Only approved transporters in Transporter Performance
+ *  7. Area Hotspots uses only allowlisted operational area labels
+ *  8. All expected approved transporters are resolvable
+ *  9. Named hardcoded entities that must never appear in Customer Burden
  */
 export function validateOutputGuards(
   customerBurden:         Array<{ name: string }>,
   transporterPerformance: Array<{ name: string }>,
   areaHotspots?:          Array<{ name: string }>,
+  caseNumberPreservation?: { totalRecords: number; recordsWithCaseNumber: number },
 ): ValidationViolation[] {
   const v: ValidationViolation[] = [];
 
@@ -733,6 +829,8 @@ export function validateOutputGuards(
       v.push({ rule: 'BLOCKED_ENTITY_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
     else if (isCustomerJunkLabel(c.name))
       v.push({ rule: 'JUNK_LABEL_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
+    else if (!isPositiveCustomerCandidate(c.name))
+      v.push({ rule: 'NON_COMPANY_NAME_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'WARN' });
   }
 
   for (const t of transporterPerformance) {
@@ -748,6 +846,13 @@ export function validateOutputGuards(
     }
   }
 
+  // Case number preservation check
+  if (caseNumberPreservation && caseNumberPreservation.totalRecords > 0) {
+    if (caseNumberPreservation.recordsWithCaseNumber === 0) {
+      v.push({ rule: 'NO_CASE_NUMBERS_IN_DATASET', offender: '(all records)', severity: 'WARN' });
+    }
+  }
+
   // Explicit named entities that must never appear in Customer Burden
   const neverInCustomer = [
     'hutchison ports duisburg', 'hp duisburg',
@@ -755,6 +860,7 @@ export function validateOutputGuards(
     'european gateway services',
     'dp world intermodal b.v.', 'dp world',
     'cts container-terminal gmbh', 'cts container terminal',
+    'maersk line', 'maersk', 'msc', 'cma cgm',
   ];
   for (const name of neverInCustomer) {
     const hit = customerBurden.find(c => c.name.toLowerCase() === name.toLowerCase());

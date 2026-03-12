@@ -9,8 +9,8 @@ import type {
   IssueDrilldown, WeekOnWeek, WowChange, RepeatOffenderItem, ActionInsight,
 } from '../types/analysis';
 import { buildForecast } from './forecast';
-import { isKnownOperationalEntity, isApprovedTransporter, isBlockedFromCustomerRole, isInternalISRLabel, isAllowedAreaLabel, validateOutputGuards } from '../config/referenceData';
-import { hasCompanyNameStructure } from './textNormalization';
+import { isKnownOperationalEntity, isApprovedTransporter, isBlockedFromCustomerRole, isInternalISRLabel, isAllowedAreaLabel, validateOutputGuards, isPositiveCustomerCandidate } from '../config/referenceData';
+import {} from './textNormalization';
 
 const MAX_CHART_WEEKS = 16;
 
@@ -393,11 +393,23 @@ export function runAnalysis(
       continue;
     }
 
-    // Frequency + confidence noise filter:
-    // Single-occurrence names with low confidence that don't look like real
-    // company names are treated as noise and routed to unresolved tracking.
+    // Positive acceptance gate:
+    // "Not blocked" alone is not sufficient to reach Customer Burden.
+    // A name must also LOOK LIKE a real company/business account.
+    //
+    // Acceptance tiers:
+    //   - isPositiveCustomerCandidate: passes company-name structure check → accepted
+    //   - freq >= 3: seen 3+ times in dataset → trusted on recurrence alone
+    //   - freq >= 2 AND confidence >= 0.70: twice-seen with strong issue classification
+    //
+    // Names failing all three tiers are routed to unresolved tracking.
     const freq = customerFrequency[name] ?? 0;
-    if (freq === 1 && r.confidence < 0.70 && !hasCompanyNameStructure(name)) {
+    const meetsPositiveGate =
+      isPositiveCustomerCandidate(name) ||
+      freq >= 3 ||
+      (freq >= 2 && r.confidence >= 0.70);
+
+    if (!meetsPositiveGate) {
       unknownCustomerCaseCount++;
       continue;
     }
@@ -892,16 +904,33 @@ export function runAnalysis(
   const actions  = generateActions(issueBreakdown, customerBurden, transporterPerformance);
 
   // ─── 20. Final chart guards ───────────────────────────────────
-  // Last-resort post-aggregation filter: even if upstream guards missed something,
-  // block any name that isBlockedFromCustomerRole() catches from reaching the UI.
-  // This is belt-and-suspenders — the primary guards in sections 4 and 5 should
-  // have already excluded all such names.
-  const cleanCustomerBurden = customerBurden.filter(c => !isBlockedFromCustomerRole(c.name));
+  // Belt-and-suspenders post-aggregation filter:
+  //   NEGATIVE gate — any name that isBlockedFromCustomerRole() catches is removed.
+  //   POSITIVE gate — any name that fails isPositiveCustomerCandidate() is removed.
+  // Both gates must pass. This is the last line of defence before the UI receives data.
+  // The primary gates in sections 4 and 5 should have already excluded all violations;
+  // this final filter catches any edge cases that slipped through.
+  const cleanCustomerBurden = customerBurden.filter(
+    c => !isBlockedFromCustomerRole(c.name) && isPositiveCustomerCandidate(c.name),
+  );
 
-  // Development-mode validation: log any violations to console so they can be investigated.
+  // Development-mode validation: log violations so they can be investigated.
   // Does not throw — violations do not crash the dashboard.
   if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-    const violations = validateOutputGuards(cleanCustomerBurden, transporterPerformance, areaHotspots);
+    // Case number preservation check
+    const casesWithNumbers = records.filter(r => r.case_number).length;
+    if (casesWithNumbers === 0 && records.length > 0) {
+      console.warn(
+        '[CIS validation] No Case Number values found in dataset — evidence drilldown will lack Case No. links.',
+        'Ensure the Excel includes a "Case Number" or "Case No." column.',
+      );
+    }
+    const violations = validateOutputGuards(
+      cleanCustomerBurden,
+      transporterPerformance,
+      areaHotspots,
+      { totalRecords: records.length, recordsWithCaseNumber: casesWithNumbers },
+    );
     if (violations.length > 0) {
       console.warn('[CIS validation]', violations);
     }
