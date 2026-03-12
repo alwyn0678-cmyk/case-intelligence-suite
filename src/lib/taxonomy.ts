@@ -301,6 +301,18 @@ export const ISSUE_TAXONOMY: TaxonomyItem[] = [
     hours: 0.5, preventable: true, color: '#7aa2ff',
   },
   {
+    id: 'capacity',
+    label: 'Capacity / Feasibility',
+    keywords: [
+      'no capacity', 'not feasible', 'feasibility', 'capacity issue', 'at capacity',
+      'no space', 'no slots', 'fully booked', 'cannot accept', 'cannot accommodate',
+      'unable to accommodate', 'capacity constraint', 'capacity limitation',
+      'capacity problem', 'overloaded', 'overbooking', 'no availability',
+      'maximum capacity', 'capacity not available', 'no room', 'no slot available',
+    ],
+    hours: 0.5, preventable: false, color: '#a6aec4',
+  },
+  {
     id: 'other',
     label: 'Other / Unclassified',
     keywords: [],

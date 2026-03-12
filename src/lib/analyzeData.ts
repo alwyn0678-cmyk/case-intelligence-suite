@@ -580,9 +580,23 @@ export function runAnalysis(
   // Primary signal: isr_details field being populated (content > 5 chars)
   // indicates the case was handled via the ISR internal workflow.
   // Fallback: customer column matches a known Maersk internal address-book label.
-  const isIsrRecord = (r: EnrichedRecord): boolean =>
-    (r.isr_details?.trim().length ?? 0) > 5 ||
-    isInternalISRLabel(r.customer ?? '');
+  // isIsrRecord: checks isr_details content AND raw account columns.
+  // resolvedCustomer may already be null for ISR rows (blocked by isInternalISRLabel
+  // during classification), so we must also scan the raw field values directly.
+  const ISR_RAW_ACCOUNT_KEYS = new Set([
+    'account name', 'account', 'customer', 'customer name', 'klant', 'debtor', 'client',
+  ]);
+  const isIsrRecord = (r: EnrichedRecord): boolean => {
+    if ((r.isr_details?.trim().length ?? 0) > 5) return true;
+    if (isInternalISRLabel(r.customer ?? '')) return true;
+    // Scan raw fields for ISR labels (catches rows where resolvedCustomer was already nulled)
+    for (const [k, v] of Object.entries(r._raw)) {
+      if (v && typeof v === 'string' && ISR_RAW_ACCOUNT_KEYS.has(k.toLowerCase().trim())) {
+        if (isInternalISRLabel(v)) return true;
+      }
+    }
+    return false;
+  };
 
   const isrRecords     = records.filter(isIsrRecord);
   const externalCount  = records.length - isrRecords.length;

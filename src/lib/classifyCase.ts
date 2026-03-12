@@ -23,7 +23,7 @@ import { classifyByRules }              from './issueRules';
 import { fallbackClassify, operationalClueScan } from './fallbackIssueRules';
 import { resolveZipToArea, extractZipsFromText } from '../config/zipAreaRules';
 import { normalizeText }                from './textNormalization';
-import type { IssueState }              from './issueRules';
+import type { IssueState, IssueMatch }  from './issueRules';
 import type { ExtractedEntity }         from './entityExtraction';
 import type { RoutingAlignment }        from '../config/zipAreaRules';
 import type { NormalisedRecord }        from '../types';
@@ -165,12 +165,17 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   // ── 6. Extract references ─────────────────────────────────────
   const refs = extractReferences(normalizedText);
 
-  // ── 7. ZIP → area mapping ─────────────────────────────────────
+  // ── 7. ZIP → area mapping (field-priority: subject → description → isr) ──
+  // ZIPs in Subject are operationally most reliable (entered by case author).
+  // Fall through to Description then ISR Details if not found in Subject.
   let extractedZip: string | null = record.zip ?? null;
 
   if (!extractedZip) {
-    const zipsInText = extractZipsFromText(normalizedText);
-    extractedZip = zipsInText[0] ?? null;
+    extractedZip =
+      extractZipsFromText(fields.subject)[0] ??
+      extractZipsFromText(fields.description)[0] ??
+      extractZipsFromText(fields.isr_details)[0] ??
+      null;
   }
 
   let resolvedArea: string | null = record.area ?? null;
@@ -220,8 +225,46 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     }
   }
 
-  // ── 8. Issue classification (primary pass) ────────────────────
-  const ruleMatches = classifyByRules(normalizedText);
+  // ── 8. Issue classification — per-field weighted pass ─────────
+  // Each field is classified independently with a confidence multiplier
+  // reflecting its operational reliability for issue detection.
+  // description is primary (most detailed), subject is secondary (structured
+  // and authored), isr_details and category carry lower weight.
+  const FIELD_WEIGHTS: Array<{ key: string; weight: number }> = [
+    { key: 'description', weight: 1.00 },
+    { key: 'subject',     weight: 0.88 },
+    { key: 'isr_details', weight: 0.78 },
+    { key: 'category',    weight: 0.70 },
+  ];
+
+  // Accumulate matches keyed by issueId; keep highest weighted confidence per issue.
+  const matchMap = new Map<string, IssueMatch>();
+
+  for (const { key, weight } of FIELD_WEIGHTS) {
+    const fieldText = fields[key];
+    if (!fieldText?.trim()) continue;
+    const fieldMatches = classifyByRules(fieldText);
+    for (const m of fieldMatches) {
+      const weightedConf = Math.min(m.confidence * weight, 0.98);
+      const existing = matchMap.get(m.issueId);
+      if (!existing || weightedConf > existing.confidence) {
+        matchMap.set(m.issueId, {
+          ...m,
+          confidence: weightedConf,
+          evidence: m.evidence.map(e => `[${key}] ${e}`),
+        });
+      }
+    }
+  }
+
+  // Fall back to combined text if no field-level matches (e.g. very short rows)
+  if (matchMap.size === 0) {
+    for (const m of classifyByRules(normalizedText)) {
+      matchMap.set(m.issueId, m);
+    }
+  }
+
+  const ruleMatches = Array.from(matchMap.values());
 
   // Sort by confidence descending
   ruleMatches.sort((a, b) => b.confidence - a.confidence);

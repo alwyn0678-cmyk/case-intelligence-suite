@@ -390,6 +390,8 @@ export function getEntityRoles(canonicalName: string): EntityType[] {
 // ─────────────────────────────────────────────────────────────────
 const INTERNAL_ISR_PATTERNS: RegExp[] = [
   /internal global address book/i,
+  /\bglobal\s+address\s+book\b/i,       // "Global Address Book Europe" etc.
+  /\binternal\s*[-–]\s*global\b/i,      // "Internal - Global Address Book"
   /maersk\s+line.*do not use/i,
   /msl.*internal/i,
   /do not use/i,

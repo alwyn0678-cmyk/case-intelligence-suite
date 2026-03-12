@@ -427,6 +427,20 @@ const TOPIC_RULES: TopicRule[] = [
       'collection planning', 'route planning',
     ],
   },
+  {
+    topic: 'capacity',
+    strongSignals: [
+      'no capacity', 'not feasible', 'no space available', 'fully booked',
+      'cannot accept this shipment', 'capacity not available', 'no slots available',
+      'capacity constraint', 'at capacity', 'overbooked',
+      'unable to accommodate', 'capacity limitation', 'capacity problem',
+      'maximum capacity', 'no room available', 'no slot available',
+    ],
+    weakSignals: [
+      'capacity', 'feasibility', 'feasible', 'no slots', 'no availability',
+      'cannot accommodate', 'overloaded', 'no space', 'overbooking',
+    ],
+  },
 ];
 
 // ─── Resolve final issueId based on topic + state ──────────────────
