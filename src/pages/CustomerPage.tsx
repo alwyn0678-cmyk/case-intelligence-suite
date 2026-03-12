@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { HBarChart } from '../components/ui/ChartWrapper';
-import type { AnalysisResult } from '../types/analysis';
+import { ExampleCasesPanel } from '../components/ui/ExampleCasesPanel';
+import type { AnalysisResult, CustomerBurdenItem } from '../types/analysis';
 
 interface Props { analysis: AnalysisResult }
 
@@ -12,6 +14,8 @@ export function CustomerPage({ analysis }: Props) {
   const { customerBurden, loadRefIntelligence, summary } = analysis;
   // customerBurden already excludes 'Unknown' and all operational entities (guards in analyzeData.ts)
   const top15 = customerBurden.slice(0, 15);
+
+  const [selected, setSelected] = useState<CustomerBurdenItem | null>(null);
 
   const chartData = top15.map(c => ({ name: c.name, count: c.count }));
 
@@ -25,6 +29,16 @@ export function CustomerPage({ analysis }: Props) {
   return (
     <div className="p-8 space-y-8">
       <SectionHeader title="Customer Burden" subtitle="Workload, preventable cases, and risk score per account" />
+
+      {/* Example cases modal */}
+      {selected && (
+        <ExampleCasesPanel
+          title={`Example Cases — ${selected.name}`}
+          subtitle={`${selected.count} case${selected.count !== 1 ? 's' : ''} · Top issue: ${selected.topIssue} · Risk: ${selected.risk}`}
+          cases={selected.exampleCases}
+          onClose={() => setSelected(null)}
+        />
+      )}
 
       {/* Unresolved customer alert */}
       {unresolvedCount > 0 && (
@@ -71,10 +85,10 @@ export function CustomerPage({ analysis }: Props) {
 
           {/* Customer table */}
           <div className="bg-[#171922] border border-[#2a2f3f] rounded-lg overflow-x-auto">
-            <table className="w-full text-sm min-w-[900px]">
+            <table className="w-full text-sm min-w-[980px]">
               <thead>
                 <tr className="bg-[#1d2030] border-b border-[#2a2f3f]">
-                  {['#','Customer','Cases','Hours','Prev %','Load Refs','Customs','Top Issue','Trend','Risk'].map(h => (
+                  {['#','Customer','Cases','Hours','Prev %','Load Refs','Customs','Top Issue','Trend','Risk',''].map(h => (
                     <th key={h} className="px-3 py-3 text-xs font-medium text-[#a6aec4] uppercase tracking-wide text-left first:text-center">{h}</th>
                   ))}
                 </tr>
@@ -103,6 +117,17 @@ export function CustomerPage({ analysis }: Props) {
                     </td>
                     <td className="px-3 py-2.5">
                       <span className="text-xs font-medium px-1.5 py-0.5 rounded" style={{ color: RISK_CLR[c.risk], background: RISK_CLR[c.risk] + '20' }}>{c.risk}</span>
+                    </td>
+                    {/* Examples button */}
+                    <td className="px-3 py-2.5">
+                      {c.exampleCases.length > 0 && (
+                        <button
+                          onClick={() => setSelected(c)}
+                          className="text-xs text-[#7aa2ff] hover:text-[#8fb3ff] font-medium whitespace-nowrap"
+                        >
+                          View {c.exampleCases.length}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

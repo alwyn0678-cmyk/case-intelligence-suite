@@ -16,6 +16,8 @@ const COLUMN_ALIASES: Record<string, string[]> = {
   priority:    ['priority', 'urgency', 'severity'],
   category:    ['category', 'type', 'case type', 'issue type', 'categorie'],
   hours:       ['hours', 'time spent', 'duration', 'effort', 'uren'],
+  case_number: ['case number', 'case no', 'case no.', 'case #', 'case id', 'ticket number', 'ticket id', 'incident number', 'case ref', 'case_number', 'casenumber', 'case nr', 'case_nr'],
+  booking_ref: ['booking', 'booking ref', 'booking reference', 'booking no', 'booking number', 'bkg', 'bkg ref', 'booking_ref', 'reservation', 'res no'],
 };
 
 function normaliseHeaderName(header: string): string | null {

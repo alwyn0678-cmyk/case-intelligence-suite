@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { VBarChart, HBarChart } from '../components/ui/ChartWrapper';
-import type { AnalysisResult } from '../types/analysis';
+import { ExampleCasesPanel } from '../components/ui/ExampleCasesPanel';
+import type { AnalysisResult, IssueBreakdownItem } from '../types/analysis';
 
 interface Props { analysis: AnalysisResult }
 
@@ -9,6 +11,8 @@ const TREND_CLR: Record<string, string>  = { up: '#dc6d7d', down: '#52c7c7', sta
 
 export function IssuePage({ analysis }: Props) {
   const { issueBreakdown, weeklyHistory, chartWeeks, sortedWeeks } = analysis;
+
+  const [selected, setSelected] = useState<IssueBreakdownItem | null>(null);
 
   const rising = issueBreakdown.filter(i => i.trend === 'up');
 
@@ -26,16 +30,34 @@ export function IssuePage({ analysis }: Props) {
     <div className="p-8 space-y-8">
       <SectionHeader title="Issue Intelligence" subtitle="Full-text analysis of Subject, Description and ISR Details" />
 
+      {/* Example cases modal */}
+      {selected && (
+        <ExampleCasesPanel
+          title={`Example Cases — ${selected.label}`}
+          subtitle={`${selected.count} case${selected.count !== 1 ? 's' : ''} · ${selected.percent.toFixed(1)}% of total · ${selected.hoursLost.toFixed(1)}h lost`}
+          cases={selected.exampleCases}
+          onClose={() => setSelected(null)}
+        />
+      )}
+
       {/* Rising alerts */}
       {rising.length > 0 && (
         <div className="space-y-2">
           {rising.map(i => (
             <div key={i.id} className="bg-[#dc6d7d]/8 border border-[#dc6d7d]/20 rounded-lg px-4 py-2.5 flex items-center gap-3">
               <span className="text-[#dc6d7d]">↑</span>
-              <span className="text-sm text-[#eceff7]">
+              <span className="text-sm text-[#eceff7] flex-1">
                 <span className="font-medium">{i.label}</span>
                 <span className="text-[#a6aec4] ml-2">rising week-on-week — {i.count.toLocaleString()} total cases ({i.percent.toFixed(1)}%)</span>
               </span>
+              {i.exampleCases.length > 0 && (
+                <button
+                  onClick={() => setSelected(i)}
+                  className="text-xs text-[#dc6d7d] hover:text-[#e07d8b] font-medium shrink-0"
+                >
+                  View cases
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -53,6 +75,7 @@ export function IssuePage({ analysis }: Props) {
               <th className="text-right px-4 py-3 text-xs font-medium text-[#a6aec4] uppercase tracking-wide">Hours Lost</th>
               <th className="text-center px-4 py-3 text-xs font-medium text-[#a6aec4] uppercase tracking-wide">Preventable</th>
               <th className="text-center px-4 py-3 text-xs font-medium text-[#a6aec4] uppercase tracking-wide">Trend</th>
+              <th className="px-4 py-3 text-xs font-medium text-[#a6aec4] uppercase tracking-wide"></th>
             </tr>
           </thead>
           <tbody>
@@ -77,6 +100,17 @@ export function IssuePage({ analysis }: Props) {
                   <span style={{ color: TREND_CLR[iss.trend] }} className="text-sm font-medium">
                     {TREND_ICON[iss.trend]}
                   </span>
+                </td>
+                {/* Examples button */}
+                <td className="px-4 py-3 text-right">
+                  {iss.exampleCases.length > 0 && (
+                    <button
+                      onClick={() => setSelected(iss)}
+                      className="text-xs text-[#7aa2ff] hover:text-[#8fb3ff] font-medium whitespace-nowrap"
+                    >
+                      View {iss.exampleCases.length}
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

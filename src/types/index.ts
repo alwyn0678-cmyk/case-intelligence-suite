@@ -17,6 +17,10 @@ export interface NormalisedRecord {
   priority?: string;
   category?: string;
   hours?: number;
+  /** Case number / ticket ID from the source Excel (e.g. "CSE-12345") */
+  case_number?: string;
+  /** Booking reference from the source Excel */
+  booking_ref?: string;
   // Keep all original fields too
   _raw: RawRecord;
 }

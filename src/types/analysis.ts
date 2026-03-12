@@ -37,6 +37,24 @@ export interface EnrichedRecord extends NormalisedRecord {
   sourceFieldsUsed: string[];
 }
 
+// ── Example case drilldown ────────────────────────────────────────
+// One representative row from the source Excel, extracted during
+// aggregation and retained so the UI can show real case evidence
+// behind any chart metric without re-scanning records at render time.
+export interface ExampleCase {
+  caseNumber: string | null;     // case number / ticket ID from source
+  bookingRef: string | null;     // booking reference from source or classifier
+  primaryIssue: string;          // taxonomy id
+  issueLabel: string;            // human-readable label
+  subject: string | null;        // case subject (truncated to 120 chars)
+  date: string | null;           // formatted date string (dd Mon yyyy)
+  customer: string | null;       // resolvedCustomer
+  transporter: string | null;    // resolvedTransporter
+  loadRef: string | null;        // extracted from classifier evidence
+  containerNumber: string | null; // extracted from classifier evidence
+  confidence: number;            // 0–1 classification confidence
+}
+
 export interface IssueBreakdownItem {
   id: string;
   label: string;
@@ -46,6 +64,8 @@ export interface IssueBreakdownItem {
   hoursLost: number;
   preventable: boolean;
   trend: 'up' | 'down' | 'stable';
+  /** Top 10 example cases for this issue, sorted by confidence desc */
+  exampleCases: ExampleCase[];
 }
 
 export interface CustomerBurdenItem {
@@ -63,6 +83,8 @@ export interface CustomerBurdenItem {
   risk: 'HIGH' | 'MEDIUM' | 'LOW';
   riskScore: number;
   weekCounts: Record<string, number>;
+  /** Top 10 example cases for this customer, sorted by confidence desc */
+  exampleCases: ExampleCase[];
 }
 
 export interface TransporterItem {
@@ -75,6 +97,8 @@ export interface TransporterItem {
   trend: 'up' | 'down' | 'stable';
   risk: 'HIGH' | 'MEDIUM' | 'LOW';
   weekCounts: Record<string, number>;
+  /** Top 10 example cases for this transporter, sorted by confidence desc */
+  exampleCases: ExampleCase[];
 }
 
 export interface DepotItem {

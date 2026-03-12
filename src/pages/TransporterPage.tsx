@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { HBarChart } from '../components/ui/ChartWrapper';
-import type { AnalysisResult } from '../types/analysis';
+import { ExampleCasesPanel } from '../components/ui/ExampleCasesPanel';
+import type { AnalysisResult, TransporterItem } from '../types/analysis';
 
 interface Props { analysis: AnalysisResult }
 
@@ -10,6 +12,8 @@ const TREND_CLR: Record<string, string>  = { up: '#dc6d7d', down: '#52c7c7', sta
 
 export function TransporterPage({ analysis }: Props) {
   const { transporterPerformance } = analysis;
+
+  const [selected, setSelected] = useState<TransporterItem | null>(null);
 
   if (transporterPerformance.length === 0) {
     return (
@@ -34,6 +38,16 @@ export function TransporterPage({ analysis }: Props) {
     <div className="p-8 space-y-8">
       <SectionHeader title="Transporter Performance" subtitle="Delay, punctuality, and waiting time per haulier" />
 
+      {/* Example cases modal */}
+      {selected && (
+        <ExampleCasesPanel
+          title={`Example Cases — ${selected.name}`}
+          subtitle={`${selected.count} case${selected.count !== 1 ? 's' : ''} · ${selected.delays} delay${selected.delays !== 1 ? 's' : ''} · Punctuality issue rate ${selected.punctualityScore.toFixed(0)}% · Risk: ${selected.risk}`}
+          cases={selected.exampleCases}
+          onClose={() => setSelected(null)}
+        />
+      )}
+
       {/* KPI row */}
       <div className="grid grid-cols-3 gap-4">
         {[
@@ -56,10 +70,10 @@ export function TransporterPage({ analysis }: Props) {
 
       {/* Table */}
       <div className="bg-[#171922] border border-[#2a2f3f] rounded-lg overflow-x-auto">
-        <table className="w-full text-sm min-w-[750px]">
+        <table className="w-full text-sm min-w-[820px]">
           <thead>
             <tr className="bg-[#1d2030] border-b border-[#2a2f3f]">
-              {['#','Transporter','Total Cases','Delays','Not On Time','Waiting Time','Punctuality Score','Trend','Risk'].map(h => (
+              {['#','Transporter','Total Cases','Delays','Not On Time','Waiting Time','Punctuality Score','Trend','Risk',''].map(h => (
                 <th key={h} className="px-3 py-3 text-xs font-medium text-[#a6aec4] uppercase tracking-wide text-left first:text-center">{h}</th>
               ))}
             </tr>
@@ -89,6 +103,17 @@ export function TransporterPage({ analysis }: Props) {
                 <td className="px-3 py-2.5">
                   <span className="text-xs font-medium px-1.5 py-0.5 rounded" style={{ color: RISK_CLR[t.risk], background: RISK_CLR[t.risk] + '20' }}>{t.risk}</span>
                 </td>
+                {/* Examples button */}
+                <td className="px-3 py-2.5">
+                  {t.exampleCases.length > 0 && (
+                    <button
+                      onClick={() => setSelected(t)}
+                      className="text-xs text-[#7aa2ff] hover:text-[#8fb3ff] font-medium whitespace-nowrap"
+                    >
+                      View {t.exampleCases.length}
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -103,9 +128,17 @@ export function TransporterPage({ analysis }: Props) {
             {highRisk.map(t => (
               <div key={t.name} className="flex items-center gap-3 px-3 py-2.5 bg-[#dc6d7d]/8 border border-[#dc6d7d]/20 rounded-lg">
                 <span className="text-[#dc6d7d] font-medium text-sm w-32 shrink-0">{t.name}</span>
-                <span className="text-sm text-[#a6aec4]">
+                <span className="text-sm text-[#a6aec4] flex-1">
                   {t.delays} delays · {t.notOnTime} late · punctuality issue rate {t.punctualityScore.toFixed(0)}% — SLA review required
                 </span>
+                {t.exampleCases.length > 0 && (
+                  <button
+                    onClick={() => setSelected(t)}
+                    className="text-xs text-[#dc6d7d] hover:text-[#e07d8b] font-medium shrink-0"
+                  >
+                    View cases
+                  </button>
+                )}
               </div>
             ))}
           </div>

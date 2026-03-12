@@ -2,7 +2,7 @@ import { ISSUE_TAXONOMY, TAXONOMY_MAP } from './taxonomy';
 import { classifyCase } from './classifyCase';
 import type { NormalisedRecord } from '../types';
 import type {
-  AnalysisResult, EnrichedRecord, IssueBreakdownItem,
+  AnalysisResult, EnrichedRecord, IssueBreakdownItem, ExampleCase,
   CustomerBurdenItem, TransporterItem, DepotItem, DeepseaTerminalItem,
   CustomsCompliance, LoadRefIntelligence, AreaHotspot,
   WeeklySnapshot, Actions, UnknownEntityItem, IsrVsExternal,
@@ -197,6 +197,42 @@ function topIssueForGroup(records: EnrichedRecord[]): string {
   return TAXONOMY_MAP[id]?.label ?? 'Other';
 }
 
+// ── Evidence drilldown helper ─────────────────────────────────────
+// Builds the top-10 ExampleCase array from a set of matching records.
+// Records are sorted by confidence descending so the strongest
+// classifications appear first. The caller is responsible for passing
+// only the records that already match the group's filter criteria —
+// this function never re-filters, ensuring strict matching consistency.
+function buildExampleCases(matchingRecords: EnrichedRecord[]): ExampleCase[] {
+  return matchingRecords
+    .slice()
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, 10)
+    .map(r => {
+      const loadRef        = r.evidence.find(e => e.startsWith('ref[load_ref]='))?.slice('ref[load_ref]='.length) ?? null;
+      const containerNumber = r.evidence.find(e => e.startsWith('ref[container]='))?.slice('ref[container]='.length) ?? null;
+      const bookingEvidence = r.evidence.find(e => e.startsWith('ref[booking]='))?.slice('ref[booking]='.length) ?? null;
+
+      const dateStr = r.date instanceof Date && !isNaN(r.date.getTime())
+        ? r.date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+        : null;
+
+      return {
+        caseNumber:      r.case_number ?? null,
+        bookingRef:      r.booking_ref ?? bookingEvidence ?? null,
+        primaryIssue:    r.primaryIssue,
+        issueLabel:      TAXONOMY_MAP[r.primaryIssue]?.label ?? r.primaryIssue,
+        subject:         r.subject ? r.subject.slice(0, 120) : null,
+        date:            dateStr,
+        customer:        r.resolvedCustomer,
+        transporter:     r.resolvedTransporter,
+        loadRef,
+        containerNumber,
+        confidence:      r.confidence,
+      };
+    });
+}
+
 export function runAnalysis(
   rawRecords: NormalisedRecord[],
   zipMap: Record<string, string>,  // external ZIP map (takes precedence over built-in rules)
@@ -273,11 +309,15 @@ export function runAnalysis(
   // ─── 3. Issue breakdown ────────────────────────────────────────
   const issueCounts: Record<string, number> = {};
   const issueHours:  Record<string, number> = {};
+  // Collect matching records per issue id for evidence drilldown
+  const issueRecordsMap: Record<string, EnrichedRecord[]> = {};
   for (const r of records) {
     for (const iss of r.issues) {
       issueCounts[iss] = (issueCounts[iss] ?? 0) + 1;
       const tax = TAXONOMY_MAP[iss];
       issueHours[iss] = (issueHours[iss] ?? 0) + (tax?.hours ?? 0.5);
+      if (!issueRecordsMap[iss]) issueRecordsMap[iss] = [];
+      issueRecordsMap[iss].push(r);
     }
   }
   const totalCases = records.length;
@@ -292,7 +332,12 @@ export function runAnalysis(
         const prev = weeklyHistory[sortedWeeks[sortedWeeks.length - 2]]?.issues[tax.id] ?? 0;
         trend = trend2(prev, last);
       }
-      return { id: tax.id, label: tax.label, color: tax.color, count, percent: totalCases ? (count / totalCases) * 100 : 0, hoursLost, preventable: tax.preventable, trend };
+      return {
+        id: tax.id, label: tax.label, color: tax.color, count,
+        percent: totalCases ? (count / totalCases) * 100 : 0,
+        hoursLost, preventable: tax.preventable, trend,
+        exampleCases: buildExampleCases(issueRecordsMap[tax.id] ?? []),
+      };
     })
     .filter(i => i.count > 0)
     .sort((a, b) => b.count - a.count);
@@ -329,6 +374,8 @@ export function runAnalysis(
   }
 
   const custMap: Record<string, CustomerBurdenItem> = {};
+  // Collect matching records per customer for evidence drilldown
+  const custRecordsMap: Record<string, EnrichedRecord[]> = {};
   let unknownCustomerCaseCount = 0;
 
   for (const r of records) {
@@ -356,8 +403,10 @@ export function runAnalysis(
     }
 
     if (!custMap[name]) {
-      custMap[name] = { name, count: 0, hoursLost: 0, preventablePct: 0, missingLoadRef: 0, refProvided: 0, missingCustomsDocs: 0, amendments: 0, delays: 0, topIssue: '', trend: 'stable', risk: 'LOW', riskScore: 0, weekCounts: {} };
+      custMap[name] = { name, count: 0, hoursLost: 0, preventablePct: 0, missingLoadRef: 0, refProvided: 0, missingCustomsDocs: 0, amendments: 0, delays: 0, topIssue: '', trend: 'stable', risk: 'LOW', riskScore: 0, weekCounts: {}, exampleCases: [] };
     }
+    if (!custRecordsMap[name]) custRecordsMap[name] = [];
+    custRecordsMap[name].push(r);
     const c = custMap[name];
     c.count++;
     c.weekCounts[r.weekKey] = (c.weekCounts[r.weekKey] ?? 0) + 1;
@@ -377,25 +426,29 @@ export function runAnalysis(
 
   const customerBurden: CustomerBurdenItem[] = Object.values(custMap)
     .map(c => {
-      const recs = records.filter(r => r.resolvedCustomer === c.name);
+      const recs = custRecordsMap[c.name] ?? [];
       const topIssue = topIssueForGroup(recs);
       const trend = getWeekTrend(c.weekCounts, sortedWeeks);
       const riskScore = c.count * 0.4 + c.missingLoadRef * 2 + c.missingCustomsDocs * 1.5 + c.delays * 1.5 + (trend === 'up' ? 10 : 0);
       const preventablePctFinal = c.count > 0 ? (c.preventablePct / c.count) * 100 : 0;
-      return { ...c, topIssue, trend, riskScore, risk: riskLabel(riskScore), preventablePct: preventablePctFinal };
+      return { ...c, topIssue, trend, riskScore, risk: riskLabel(riskScore), preventablePct: preventablePctFinal, exampleCases: buildExampleCases(recs) };
     })
     .sort((a, b) => b.count - a.count);
 
   // ─── 5. Transporter performance ────────────────────────────────
   const transMap: Record<string, TransporterItem> = {};
+  // Collect matching records per transporter for evidence drilldown
+  const transRecordsMap: Record<string, EnrichedRecord[]> = {};
   for (const r of records) {
     const name = r.resolvedTransporter;
     if (!name) continue;
     // Hard guard: only approved transporters may appear in Transporter Performance.
     if (!isApprovedTransporter(name)) continue;
     if (!transMap[name]) {
-      transMap[name] = { name, count: 0, delays: 0, notOnTime: 0, waitingTime: 0, punctualityScore: 0, trend: 'stable', risk: 'LOW', weekCounts: {} };
+      transMap[name] = { name, count: 0, delays: 0, notOnTime: 0, waitingTime: 0, punctualityScore: 0, trend: 'stable', risk: 'LOW', weekCounts: {}, exampleCases: [] };
     }
+    if (!transRecordsMap[name]) transRecordsMap[name] = [];
+    transRecordsMap[name].push(r);
     const t = transMap[name];
     t.count++;
     t.weekCounts[r.weekKey] = (t.weekCounts[r.weekKey] ?? 0) + 1;
@@ -411,7 +464,7 @@ export function runAnalysis(
       const punctualityScore  = t.count > 0 ? (punctualityIssues / t.count) * 100 : 0;
       const trend             = getWeekTrend(t.weekCounts, sortedWeeks);
       const riskScore         = punctualityScore + (trend === 'up' ? 20 : 0);
-      return { ...t, punctualityScore, trend, risk: riskLabel(riskScore) };
+      return { ...t, punctualityScore, trend, risk: riskLabel(riskScore), exampleCases: buildExampleCases(transRecordsMap[t.name] ?? []) };
     })
     .sort((a, b) => b.count - a.count);
 
