@@ -420,23 +420,8 @@ export function runAnalysis(
   const unknownEntities: UnknownEntityItem[] = Object.values(unknownEntityMap)
     .sort((a, b) => b.count - a.count);
 
-  // ─── 9. Customs compliance ─────────────────────────────────────
+  // ─── 9. Customs compliance (overall tally only) ────────────────
   const customsRecords = records.filter(r => r.issues.some(i => ['customs','portbase','bl','t1'].includes(i)));
-  const customsOffenders: Record<string, number> = {};
-  for (const r of customsRecords) {
-    const name = r.resolvedCustomer;
-    if (!name) continue;
-    if (isKnownOperationalEntity(name)) continue;
-    customsOffenders[name] = (customsOffenders[name] ?? 0) + 1;
-  }
-  // Transporters who most frequently appear in customs/compliance cases
-  const customsTransporterMap: Record<string, number> = {};
-  for (const r of customsRecords) {
-    const tname = r.resolvedTransporter;
-    if (!tname) continue;
-    if (!isApprovedTransporter(tname)) continue;
-    customsTransporterMap[tname] = (customsTransporterMap[tname] ?? 0) + 1;
-  }
 
   const customsCompliance: CustomsCompliance = {
     totalCases:     customsRecords.length,
@@ -444,8 +429,6 @@ export function runAnalysis(
     portbaseIssues: records.filter(r => r.issues.includes('portbase')).length,
     blIssues:       records.filter(r => r.issues.includes('bl')).length,
     t1Issues:       records.filter(r => r.issues.includes('t1')).length,
-    topOffenders:   Object.entries(customsOffenders).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count })),
-    topTransporterRequests: Object.entries(customsTransporterMap).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count })),
   };
 
   // ─── 10. Load reference intelligence ──────────────────────────

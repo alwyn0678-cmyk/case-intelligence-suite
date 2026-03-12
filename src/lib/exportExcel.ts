@@ -58,10 +58,6 @@ export function exportToExcel(analysis: AnalysisResult): void {
     ['Portbase Issues', cc.portbaseIssues],
     ['Bill of Lading Issues', cc.blIssues],
     ['T1 / Transit Issues', cc.t1Issues],
-    [''],
-    ['Top Compliance Offenders'],
-    ['Customer', 'Cases'],
-    ...cc.topOffenders.map(o => [o.name, o.count]),
   ]), 'Customs & Compliance');
 
   // Sheet 6: Load References

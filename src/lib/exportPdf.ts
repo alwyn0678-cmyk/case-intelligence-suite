@@ -175,13 +175,7 @@ export async function exportToPdf(analysis: AnalysisResult): Promise<void> {
     ...tableDefaults(),
   });
 
-  const afterCC = doc.lastAutoTable?.finalY ?? 80;
-  autoTable(doc, {
-    startY: afterCC + 10,
-    head: [['Customer', 'Compliance Cases']],
-    body: cc.topOffenders.map(o => [o.name, o.count]),
-    ...tableDefaults(TEAL),
-  });
+  // Customs compliance — overall tally only, no customer/transporter breakdown
 
   // ── Load References ──────────────────────────────────────────
   doc.addPage(); pg++;

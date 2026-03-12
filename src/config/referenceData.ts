@@ -57,9 +57,9 @@ export const DEEPSEA_TERMINALS: EntityEntry[] = [
 export const INLAND_DEPOTS: EntityEntry[] = [
   // ── Dual-role: depot + transporter ───────────────────────────────
   // Germersheim: DP World operates both the inland terminal and Rhine barge transport
-  { canonicalName: 'Germersheim DPW',       entityType: 'depot', roles: ['depot','transporter'], aliases: ['germersheim dpw','dpw germersheim','germersheim','dp world germersheim','degrh01'] },
-  // HP Duisburg: Rhine barge company that also operates an inland depot
-  { canonicalName: 'HP Duisburg',           entityType: 'depot', roles: ['depot','transporter'], aliases: ['hp duisburg'] },
+  { canonicalName: 'Germersheim DPW',       entityType: 'depot', roles: ['depot','transporter'], aliases: ['germersheim dpw','dpw germersheim','germersheim','dp world germersheim','degrh01','dp world intermodal b.v.','dp world intermodal bv','dp world intermodal','dpw intermodal','dp world'] },
+  // HP Duisburg / Hutchison Ports Duisburg: Rhine barge company + inland depot
+  { canonicalName: 'HP Duisburg',           entityType: 'depot', roles: ['depot','transporter'], aliases: ['hp duisburg','hutchison ports duisburg','hutchison duisburg','hutchison ports duisburg rhine'] },
   // Contargo variants: Rhine shipping + inland terminal operator
   { canonicalName: 'Contargo Rhine Ruhr',   entityType: 'depot', roles: ['depot','transporter'], aliases: ['contargo rhine ruhr','contargo ruhr','contargo dortmund','contargo duisburg'] },
   { canonicalName: 'Contargo Trimodal',     entityType: 'depot', roles: ['depot','transporter'], aliases: ['contargo trimodal','contargo köln','contargo cologne','contargo neuss'] },
@@ -70,6 +70,10 @@ export const INLAND_DEPOTS: EntityEntry[] = [
   { canonicalName: 'Gustavsburg Contargo',  entityType: 'depot', roles: ['depot','transporter'], aliases: ['gustavsburg contargo','gustavsburg','contargo gustavsburg'] },
   // HGK: Rhine barge shipping company + inland depot operations
   { canonicalName: 'HGK',                   entityType: 'depot', roles: ['depot','transporter'], aliases: ['hgk shipping','hgk','hgk transport','hgk barge'] },
+  // European Gateway Services: inland barge/intermodal operator
+  { canonicalName: 'European Gateway Services', entityType: 'depot', roles: ['depot','transporter'], aliases: ['european gateway services','european gateway','eur gateway services','eurgateway','eurogateways','european gateway services bv'] },
+  // CTS Container-Terminal GmbH: inland container terminal operator
+  { canonicalName: 'CTS Container-Terminal', entityType: 'depot', roles: ['depot','transporter'], aliases: ['cts container-terminal gmbh','cts container terminal gmbh','cts container terminal','cts container-terminal','cts terminal','cts gmbh','cts'] },
   // ── Depot-only ────────────────────────────────────────────────────
   { canonicalName: 'ZSK am Zehnhoff',       entityType: 'depot', roles: ['depot'], aliases: ['am zehnhoff','zehnhoff','zsk','andernach zehnhoff'] },
   { canonicalName: 'H&S Andernach',         entityType: 'depot', roles: ['depot','transporter'], aliases: ['h&s andernach','h s andernach','hs andernach','deajhra','h&s schiffahrts andernach','h+s andernach'] },
@@ -105,7 +109,7 @@ export const INLAND_DEPOTS: EntityEntry[] = [
 export const APPROVED_TRANSPORTERS: EntityEntry[] = [
   { canonicalName: 'Starmans',            entityType: 'transporter', roles: ['transporter'],         aliases: ['starmans'] },
   { canonicalName: 'Henk Dammes',         entityType: 'transporter', roles: ['transporter'],         aliases: ['henk dammes','dammes'] },
-  { canonicalName: 'Falcoline',           entityType: 'transporter', roles: ['transporter'],         aliases: ['falcoline','falcoline gmbh','falcoline transport','falcoline spedition','falcoline belgium','falcoline belgie'] },
+  { canonicalName: 'Falcoline',           entityType: 'transporter', roles: ['transporter'],         aliases: ['falcoline','falcoline gmbh','falcoline transport','falcoline spedition','falcoline belgium','falcoline belgie','falco lines belgium nv','falco lines belgium','falcolines belgium nv','falco lines nv'] },
   { canonicalName: 'GTS Coldchain',       entityType: 'transporter', roles: ['transporter'],         aliases: ['gts coldchain','gts cold','gts truck','gts logistics','gts duisburg','gts transport','gts'] },
   { canonicalName: 'CTV Vrede',           entityType: 'transporter', roles: ['transporter','depot'], aliases: ['ctv vrede','ctv transport','ctv','ctv spedition','ctv gmbh'] },
   { canonicalName: 'EKB Transport',       entityType: 'transporter', roles: ['transporter','depot'], aliases: ['ekb transport','ekb'] },
@@ -468,11 +472,26 @@ export function validateOutputGuards(
     }
   }
 
+  // Explicit named entities that must never appear in Customer Burden
+  const neverInCustomer = [
+    'hutchison ports duisburg', 'hp duisburg',
+    'falco lines belgium nv',
+    'european gateway services',
+    'dp world intermodal b.v.', 'dp world',
+    'cts container-terminal gmbh', 'cts container terminal',
+  ];
+  for (const name of neverInCustomer) {
+    const hit = customerBurden.find(c => c.name.toLowerCase() === name.toLowerCase());
+    if (hit) v.push({ rule: 'NAMED_ENTITY_IN_CUSTOMER_BURDEN', offender: hit.name, severity: 'ERROR' });
+  }
+
   // Verify approved transporters are in the dictionary
   const requiredTransporters = [
     'optimodal nederland bv', 'kiem transport',
     'dch duesseldorfer container-hafen',
     'h&s andernach', 'bonn azs', 'trier azs', 'egs nuremberg',
+    'hutchison ports duisburg', 'european gateway services',
+    'cts container-terminal gmbh',
   ];
   for (const alias of requiredTransporters) {
     if (!isApprovedTransporter(alias))

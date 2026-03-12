@@ -107,10 +107,6 @@ export interface CustomsCompliance {
   portbaseIssues: number;
   blIssues: number;
   t1Issues: number;
-  /** Customers with the most customs/documentation missing cases */
-  topOffenders: Array<{ name: string; count: number }>;
-  /** Transporters who most frequently appear in customs/documentation cases */
-  topTransporterRequests: Array<{ name: string; count: number }>;
 }
 
 export interface LoadRefIntelligence {
