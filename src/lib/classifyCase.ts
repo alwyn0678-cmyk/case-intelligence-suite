@@ -23,7 +23,7 @@ import { classifyByRules }              from './issueRules';
 import { fallbackClassify, operationalClueScan } from './fallbackIssueRules';
 import { resolveZipToArea, extractZipsFromText } from '../config/zipAreaRules';
 import { normalizeText }                from './textNormalization';
-import { textProvidesRef }              from './loadRefGuards';
+import { textProvidesRef, validateLoadRefMissing } from './loadRefGuards';
 import type { IssueState, IssueMatch }  from './issueRules';
 
 // ─── Confidence scoring constants ────────────────────────────────
@@ -393,6 +393,96 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     issues = issues.filter(i => i !== 'load_ref');
     // Lock state to 'provided' — ref_provided always means the ref was given
     issueState = 'provided';
+  }
+
+  // ── Strict load_ref missing gate ─────────────────────────────────
+  //
+  // HIGH-PRECISION RULE: a case may classify as load_ref (Missing Load Reference)
+  // ONLY when there is explicit evidence that a load reference is absent or
+  // being requested. Planning/feasibility/booking-inquiry language does NOT qualify.
+  //
+  // If load_ref is still present after the disambiguation steps above, it means
+  // the state is missing/unknown (provided would have resolved to ref_provided).
+  // Validate against three layers:
+  //   1. Explicit missing phrase in description/ISR → accept
+  //   2. Planning/operational context in description/ISR → reject
+  //   3. Proximity: load-ref keyword + strict missing indicator → accept
+  //   4. Subject-level checks (lower trust) → accept or reject
+  //   5. No signal → reject
+  //
+  // On rejection: remove load_ref from issues. If it was primary, promote the
+  // next-best classification and store the rejection reason in evidence for audit.
+  // If no alternatives exist, reset confidence to trigger the recovery pass.
+  //
+  // Audit trail: on both accept and reject, the exact trigger phrase and source
+  // field are stored in evidence for inspection in the full classified export.
+  if (issues.includes('load_ref')) {
+    const gateResult = validateLoadRefMissing(
+      fields.subject    ?? '',
+      fields.description ?? '',
+      fields.isr_details ?? '',
+    );
+
+    if (!gateResult.valid) {
+      const wasPrimary = issues[0] === 'load_ref';
+      issues = issues.filter(i => i !== 'load_ref');
+      evidence.push(`[load_ref-gate] REJECTED: ${gateResult.rejectReason}`);
+
+      if (wasPrimary) {
+        // Find the next-best match from the already-ranked ruleMatches list
+        const nextBest = ruleMatches.find(
+          m => m.issueId !== 'load_ref' && issues.includes(m.issueId),
+        );
+        if (nextBest) {
+          issueState = nextBest.state;
+          confidence = nextBest.confidence;
+          // Replace evidence: rejection note + new primary's evidence
+          evidence = [
+            `[load_ref-gate] REJECTED: ${gateResult.rejectReason}`,
+            ...nextBest.evidence.map(e => `[promoted-primary] ${e}`),
+          ];
+        } else if (issues.length === 0) {
+          // No alternatives — reset to trigger recovery pass below
+          confidence = 0;
+          issueState = 'unknown';
+        }
+      }
+    } else {
+      // Accepted — store trigger phrase + source field for audit
+      evidence.push(
+        `[load_ref-gate] ACCEPTED: trigger="${gateResult.triggerPhrase}" source=${gateResult.sourceField}`,
+      );
+    }
+  }
+
+  // ── Recovery pass re-check after gate rejection ───────────────────
+  // If the load_ref gate left issues empty, re-run the recovery pass.
+  if (issues.length === 0 && confidence < 0.50) {
+    const fallback = fallbackClassify(normalizedText);
+    if (fallback) {
+      issues     = [fallback.issueId];
+      issueState = fallback.state;
+      confidence = fallback.confidence;
+      evidence   = [...evidence, ...fallback.evidence];
+    }
+    if (issues.length === 0) {
+      const clue = operationalClueScan(normalizedText);
+      if (clue) {
+        issues     = [clue.issueId];
+        issueState = clue.state;
+        confidence = clue.confidence;
+        evidence   = [...evidence, ...clue.evidence];
+        reviewFlag = true;
+        unresolvedReason = 'Classified by operational clue after load_ref gate rejection.';
+      }
+    }
+    if (issues.length === 0) {
+      issues           = ['other'];
+      issueState       = 'unknown';
+      confidence       = 0.10;
+      reviewFlag       = true;
+      unresolvedReason = 'load_ref gate rejected primary; no recovery match found.';
+    }
   }
 
   // ── Description-first override: general topic contradiction guard ──

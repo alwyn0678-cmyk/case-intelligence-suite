@@ -199,23 +199,37 @@ interface TopicRule {
 const TOPIC_RULES: TopicRule[] = [
   {
     topic: 'load_ref',
+    // PRECISION RULE: only explicitly load-reference-specific terms fire as strong signals.
+    // These must be paired with explicit missing/provided intent (via the strict gate in
+    // classifyCase.ts) to become Missing Load Reference. A generic planning email that
+    // mentions "booking ref" in passing does NOT qualify — the gate will reject it.
+    // All other reference terminology (booking number, reference number, order reference,
+    // etc.) has been moved to weakSignals to prevent planning/feasibility emails from
+    // receiving high-confidence (0.85) load_ref scores and winning over the correct topic.
+    // PRECISION: Only the bare "load ref" / "load reference" family fires as strong.
+    // 'booking ref' and 'booking reference' are moved to weakSignals — they appear
+    // in planning/feasibility emails and must NOT override the correct topic (capacity,
+    // closing_time, etc.) at equal confidence. The strict gate in classifyCase.ts
+    // provides the final precision check via validateLoadRefMissing.
     strongSignals: [
-      'load ref', 'loadref', 'load reference', 'booking ref', 'booking reference',
-      'booking number', 'reference number', 'ref number', 'ref no',
-      'order reference', 'order number', 'po number', 'purchase order',
+      'load ref', 'loadref', 'load reference',
       // Note: 'order no' intentionally excluded — at only 8 chars it matches as a substring
       // inside "transport order not received" → causes transport_order to misclassify as load_ref.
-      // "order number" (with full word) covers the same intent without the ambiguity.
-      'job reference', 'job number', 'shipment reference', 'shipment ref',
-      'consignment number', 'consignment ref', 'load number',
       // Note: 'transport order' intentionally excluded — it is a document (see transport_order topic)
     ],
     weakSignals: [
-      // Only specific "missing X" patterns — bare 'reference' and 'booking' are
-      // too broad and cause false positives with booking amendments, transport orders, etc.
+      // Booking reference terminology — weak so planning emails with "booking reference"
+      // don't beat a closing_time or capacity topic that fires at strong (0.85).
+      'booking ref', 'booking reference',
+      // Generic reference terminology — also weak for the same reason.
+      'booking number', 'reference number', 'ref number', 'ref no',
+      'order reference', 'order number', 'po number', 'purchase order',
+      'job reference', 'job number', 'shipment reference', 'shipment ref',
+      'consignment number', 'consignment ref', 'load number',
+      // Explicit "missing X" patterns — meaningful for direct weak-signal detection.
       'ref missing', 'no reference provided', 'without load reference',
       'missing reference', 'ref not received', 'ref not provided',
-      'load number missing', 'number not provided',
+      'load number missing',
     ],
   },
   {

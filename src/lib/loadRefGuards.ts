@@ -78,6 +78,271 @@ export const PROVIDED_REF_PATTERNS: RegExp[] = [
   /(?:load\s*ref|booking\s*ref|ref(?:erence)?)\s+below\b/i,
 ];
 
+// ─── Strict Missing Load Reference Validation ────────────────────
+//
+// A case may classify as load_ref (Missing Load Reference) ONLY when:
+//  1. An explicit missing-load-ref phrase is found in description or ISR, OR
+//  2. A load-ref keyword appears within proximity of a strict missing indicator
+//     AND no planning/operational context dominates the body fields.
+//
+// Description and ISR Details are authoritative (weight 1.0). Subject is
+// lower-trust (weight 0.5) and is checked only after body fields pass.
+//
+// "Please advise", "could you please", "kindly advise" and similar generic
+// planning phrases are intentionally EXCLUDED from the strict missing check —
+// they appear in feasibility/capacity/scheduling emails and must NOT trigger
+// Missing Load Reference.
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Exact phrases that unambiguously indicate a load reference is absent/requested.
+ * Any match in description or ISR → accept immediately as load_ref (missing).
+ */
+export const LOAD_REF_EXPLICIT_MISSING: string[] = [
+  'missing load ref',
+  'missing load reference',
+  'no load ref',
+  'no load reference',
+  'load ref missing',
+  'load reference missing',
+  'please provide load ref',
+  'please provide load reference',
+  'please add load ref',
+  'please add load reference',
+  'please add the load ref',
+  'please add the load reference',
+  'load reference not provided',
+  'load ref not provided',
+  'load ref required',
+  'load reference required',
+  'load ref needed',
+  'load reference needed',
+  'load ref absent',
+  'load ref not received',
+  'load reference not received',
+  'load ref not visible',
+  'load ref not in system',
+  'booking ref missing',
+  'booking reference missing',
+  'booking ref not provided',
+  'booking reference not provided',
+  'booking ref required',
+  'booking reference required',
+  'missing booking ref',
+  'missing booking reference',
+  'please provide booking ref',
+  'please provide booking reference',
+  'please add booking ref',
+  'please add booking reference',
+];
+
+/**
+ * Operational/planning context phrases.
+ * If any of these appear in description or ISR AND no explicit missing-ref phrase
+ * was found first, the case must NOT classify as load_ref (missing).
+ * These represent feasibility, capacity, scheduling or booking-planning inquiries.
+ */
+export const LOAD_REF_PLANNING_BLOCKLIST: string[] = [
+  'feasibility',
+  'intermodal feasibility',
+  'loading feasibility',
+  'booking feasibility',
+  'capacity request',
+  'rail cut',        // covers "rail cut off", "rail cutoff", "rail cut-off"
+  'barge schedule',
+  'preferred load date',
+  'preferred loaddate',
+  'advise load date',
+  'advise loaddate',
+  'advise intermodal',
+  'advise rail',
+  'loading window',
+  'operational planning',
+];
+
+// ─── Proximity check helpers ─────────────────────────────────────
+
+/** Load-reference object keywords for proximity detection. */
+const LOAD_REF_OBJECT_KEYWORDS: string[] = [
+  'load ref', 'loadref', 'load reference', 'booking ref', 'booking reference',
+];
+
+/**
+ * Strict missing indicators used for proximity check.
+ * Intentionally narrower than the general MISSING_SIGNALS list —
+ * excludes "please advise", "could you please", "kindly advise" etc.
+ * which are too generic and appear in planning/feasibility emails.
+ */
+const LOAD_REF_NEARBY_MISSING: string[] = [
+  'missing',
+  'not provided',
+  'not received',
+  'not yet received',
+  'please provide',
+  'please add',
+  'please send the ref',
+  'please share the ref',
+  'required',
+  'needed',
+  'absent',
+  'not visible',
+  'not found',
+  'not in system',
+  'we need',
+  'we require',
+  'have not received',
+  "haven't received",
+  'did not receive',
+  'not been provided',
+  'not been sent',
+  'not been added',
+  'still waiting for the ref',
+  'still waiting for load',
+  'still missing',
+];
+
+/** Characters around each load-ref keyword scanned for strict missing indicators. */
+const LOAD_REF_PROXIMITY_WINDOW = 100;
+
+function findProximityMissingSignal(
+  text: string,
+): { found: boolean; triggerPhrase: string | null } {
+  const lower = text.toLowerCase();
+  for (const keyword of LOAD_REF_OBJECT_KEYWORDS) {
+    let searchFrom = 0;
+    let pos: number;
+    while ((pos = lower.indexOf(keyword, searchFrom)) !== -1) {
+      const wStart = Math.max(0, pos - LOAD_REF_PROXIMITY_WINDOW);
+      const wEnd   = Math.min(lower.length, pos + keyword.length + LOAD_REF_PROXIMITY_WINDOW);
+      const window = lower.slice(wStart, wEnd);
+      for (const indicator of LOAD_REF_NEARBY_MISSING) {
+        if (window.includes(indicator)) {
+          return { found: true, triggerPhrase: `"${keyword}" + "${indicator}"` };
+        }
+      }
+      searchFrom = pos + 1;
+    }
+  }
+  return { found: false, triggerPhrase: null };
+}
+
+// ─── Validation result type ──────────────────────────────────────
+
+export interface LoadRefMissingValidation {
+  /** true  → accept as load_ref (missing); false → reject */
+  valid: boolean;
+  /** Exact phrase / pattern that confirmed the classification (for audit trail). */
+  triggerPhrase: string | null;
+  /** Source field containing the trigger ('description' | 'isr_details' | 'subject' | 'description/isr'). */
+  sourceField: string | null;
+  /** Why it was rejected — stored in evidence for audit. Null when valid. */
+  rejectReason: string | null;
+}
+
+/**
+ * Strict gate for Missing Load Reference classification.
+ *
+ * Returns valid=true ONLY when there is explicit evidence that a load reference
+ * is absent or being requested. Generic planning language ("please advise",
+ * "could you please", "kindly advise") does NOT qualify.
+ *
+ * Checking priority:
+ *  1. Explicit missing phrase in description or ISR (highest trust) → accept
+ *  2. Planning/operational context in description or ISR → reject
+ *  3. Proximity: load-ref keyword + strict missing indicator in description/ISR → accept
+ *  4. Explicit missing phrase in subject (lower trust) → accept
+ *  5. Planning context in subject → reject
+ *  6. Proximity check in subject → accept
+ *  7. No signal found → reject
+ *
+ * @param subject     Subject field text (normalized)
+ * @param description Description / email body field text (normalized)
+ * @param isr         ISR Details field text (normalized)
+ */
+export function validateLoadRefMissing(
+  subject: string,
+  description: string,
+  isr: string,
+): LoadRefMissingValidation {
+  const descLower    = description.toLowerCase();
+  const isrLower     = isr.toLowerCase();
+  const subjectLower = subject.toLowerCase();
+
+  // ── 1. Explicit phrase in description or ISR ─────────────────────
+  for (const phrase of LOAD_REF_EXPLICIT_MISSING) {
+    if (descLower.includes(phrase)) {
+      return { valid: true, triggerPhrase: phrase, sourceField: 'description', rejectReason: null };
+    }
+    if (isrLower.includes(phrase)) {
+      return { valid: true, triggerPhrase: phrase, sourceField: 'isr_details', rejectReason: null };
+    }
+  }
+
+  // ── 2. Planning/operational context in description or ISR ─────────
+  const bodyPlanningTrigger =
+    LOAD_REF_PLANNING_BLOCKLIST.find(p => descLower.includes(p)) ??
+    LOAD_REF_PLANNING_BLOCKLIST.find(p => isrLower.includes(p)) ??
+    null;
+  if (bodyPlanningTrigger) {
+    return {
+      valid: false,
+      triggerPhrase: null,
+      sourceField: null,
+      rejectReason: `Planning/operational context in body ("${bodyPlanningTrigger}") — not a missing load ref case`,
+    };
+  }
+
+  // ── 3. Proximity check in description + ISR ───────────────────────
+  const bodyProximity = findProximityMissingSignal(`${description} ${isr}`);
+  if (bodyProximity.found) {
+    return {
+      valid: true,
+      triggerPhrase: bodyProximity.triggerPhrase,
+      sourceField: 'description/isr',
+      rejectReason: null,
+    };
+  }
+
+  // ── 4. Explicit phrase in subject (lower trust) ───────────────────
+  for (const phrase of LOAD_REF_EXPLICIT_MISSING) {
+    if (subjectLower.includes(phrase)) {
+      return { valid: true, triggerPhrase: phrase, sourceField: 'subject', rejectReason: null };
+    }
+  }
+
+  // ── 5. Planning/operational context in subject ────────────────────
+  const subjectPlanningTrigger = LOAD_REF_PLANNING_BLOCKLIST.find(p => subjectLower.includes(p));
+  if (subjectPlanningTrigger) {
+    return {
+      valid: false,
+      triggerPhrase: null,
+      sourceField: null,
+      rejectReason: `Planning/operational context in subject ("${subjectPlanningTrigger}") — not a missing load ref case`,
+    };
+  }
+
+  // ── 6. Proximity check in subject ─────────────────────────────────
+  const subjectProximity = findProximityMissingSignal(subject);
+  if (subjectProximity.found) {
+    return {
+      valid: true,
+      triggerPhrase: subjectProximity.triggerPhrase,
+      sourceField: 'subject',
+      rejectReason: null,
+    };
+  }
+
+  // ── 7. No explicit missing signal found ───────────────────────────
+  return {
+    valid: false,
+    triggerPhrase: null,
+    sourceField: null,
+    rejectReason: 'No explicit load-reference missing phrase or proximity signal found — generic reference mention only',
+  };
+}
+
+// ─── Provided-reference detection ─────────────────────────────────
+
 /**
  * Returns true if the given text contains an explicit provided-reference signal.
  * A minimum text length check (>10 chars) prevents matching trivially short strings.
