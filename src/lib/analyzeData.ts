@@ -11,7 +11,7 @@ import type {
 import { buildForecast } from './forecast';
 import { isApprovedTransporter, isBlockedFromCustomerRole, isInternalISRLabel, isAllowedAreaLabel, validateOutputGuards, isPositiveCustomerCandidate } from '../config/referenceData';
 
-import { isLoadRefFalsePositive, detectsTransportOrder, validateCaseNumberPreservation, isSentenceFragment } from './validators';
+import { isLoadRefFalsePositive, detectsTransportOrder, validateCaseNumberPreservation, isSentenceFragment, validateDrilldownIntegrity } from './validators';
 import {} from './textNormalization';
 
 const MAX_CHART_WEEKS = 16;
@@ -214,9 +214,13 @@ function buildExampleCases(matchingRecords: EnrichedRecord[]): ExampleCase[] {
     .slice()
     .sort((a, b) => b.confidence - a.confidence)
     .map(r => {
-      const loadRef        = r.evidence.find(e => e.startsWith('ref[load_ref]='))?.slice('ref[load_ref]='.length) ?? null;
+      const loadRef         = r.evidence.find(e => e.startsWith('ref[load_ref]='))?.slice('ref[load_ref]='.length) ?? null;
       const containerNumber = r.evidence.find(e => e.startsWith('ref[container]='))?.slice('ref[container]='.length) ?? null;
       const bookingEvidence = r.evidence.find(e => e.startsWith('ref[booking]='))?.slice('ref[booking]='.length) ?? null;
+      // MRN: customs MRN first, T1 transit MRN as fallback — both render in the same export column
+      const mrnRef          = r.evidence.find(e => e.startsWith('ref[mrn]='))?.slice('ref[mrn]='.length)
+                           ?? r.evidence.find(e => e.startsWith('ref[t1_mrn]='))?.slice('ref[t1_mrn]='.length)
+                           ?? null;
 
       const dateStr = r.date instanceof Date && !isNaN(r.date.getTime())
         ? r.date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -234,6 +238,7 @@ function buildExampleCases(matchingRecords: EnrichedRecord[]): ExampleCase[] {
         transporter:     r.resolvedTransporter,
         loadRef,
         containerNumber,
+        mrnRef,
         confidence:      r.confidence,
       };
     });
@@ -469,10 +474,13 @@ export function runAnalysis(
 
   // ─── 6. Depot performance ──────────────────────────────────────
   const depotMap: Record<string, DepotItem> = {};
+  const depotRecordsMap: Record<string, EnrichedRecord[]> = {};
   for (const r of records) {
     const name = r.resolvedDepot;
     if (!name) continue;
-    if (!depotMap[name]) depotMap[name] = { name, count: 0, hoursLost: 0, topIssue: '', trend: 'stable', weekCounts: {} };
+    if (!depotMap[name]) depotMap[name] = { name, count: 0, hoursLost: 0, topIssue: '', trend: 'stable', weekCounts: {}, exampleCases: [] };
+    if (!depotRecordsMap[name]) depotRecordsMap[name] = [];
+    depotRecordsMap[name].push(r);
     const d = depotMap[name];
     d.count++;
     d.weekCounts[r.weekKey] = (d.weekCounts[r.weekKey] ?? 0) + 1;
@@ -481,19 +489,22 @@ export function runAnalysis(
 
   const depotPerformance: DepotItem[] = Object.values(depotMap)
     .map(d => {
-      const recs = records.filter(r => r.resolvedDepot === d.name);
+      const recs     = depotRecordsMap[d.name] ?? [];
       const topIssue = topIssueForGroup(recs);
       const trend    = getWeekTrend(d.weekCounts, sortedWeeks);
-      return { ...d, topIssue, trend };
+      return { ...d, topIssue, trend, exampleCases: buildExampleCases(recs) };
     })
     .sort((a, b) => b.count - a.count);
 
   // ─── 7. Deepsea terminal data ──────────────────────────────────
   const terminalMap: Record<string, DeepseaTerminalItem> = {};
+  const terminalRecordsMap: Record<string, EnrichedRecord[]> = {};
   for (const r of records) {
     const name = r.resolvedDeepseaTerminal;
     if (!name) continue;
-    if (!terminalMap[name]) terminalMap[name] = { name, count: 0, hoursLost: 0, topIssue: '', trend: 'stable', weekCounts: {} };
+    if (!terminalMap[name]) terminalMap[name] = { name, count: 0, hoursLost: 0, topIssue: '', trend: 'stable', weekCounts: {}, exampleCases: [] };
+    if (!terminalRecordsMap[name]) terminalRecordsMap[name] = [];
+    terminalRecordsMap[name].push(r);
     const t = terminalMap[name];
     t.count++;
     t.weekCounts[r.weekKey] = (t.weekCounts[r.weekKey] ?? 0) + 1;
@@ -502,10 +513,10 @@ export function runAnalysis(
 
   const deepseaTerminalData: DeepseaTerminalItem[] = Object.values(terminalMap)
     .map(t => {
-      const recs = records.filter(r => r.resolvedDeepseaTerminal === t.name);
+      const recs     = terminalRecordsMap[t.name] ?? [];
       const topIssue = topIssueForGroup(recs);
       const trend    = getWeekTrend(t.weekCounts, sortedWeeks);
-      return { ...t, topIssue, trend };
+      return { ...t, topIssue, trend, exampleCases: buildExampleCases(recs) };
     })
     .sort((a, b) => b.count - a.count);
 
@@ -522,15 +533,26 @@ export function runAnalysis(
   const unknownEntities: UnknownEntityItem[] = Object.values(unknownEntityMap)
     .sort((a, b) => b.count - a.count);
 
-  // ─── 9. Customs compliance (overall tally only) ────────────────
-  const customsRecords = records.filter(r => r.issues.some(i => ['customs','portbase','bl','t1'].includes(i)));
+  // ─── 9. Customs compliance ────────────────────────────────────
+  // totalCases uses the union (includes records where a customs issue is secondary).
+  // Per-category counts and exampleCases use primaryIssue only — matching drilldown logic.
+  const customsRecords     = records.filter(r => r.issues.some(i => ['customs','portbase','bl','t1'].includes(i)));
+  const customsDocsRecs    = records.filter(r => r.primaryIssue === 'customs');
+  const portbaseRecs       = records.filter(r => r.primaryIssue === 'portbase');
+  const blRecs             = records.filter(r => r.primaryIssue === 'bl');
+  const t1Recs             = records.filter(r => r.primaryIssue === 't1');
 
   const customsCompliance: CustomsCompliance = {
-    totalCases:     customsRecords.length,
-    customsDocs:    records.filter(r => r.issues.includes('customs')).length,
-    portbaseIssues: records.filter(r => r.issues.includes('portbase')).length,
-    blIssues:       records.filter(r => r.issues.includes('bl')).length,
-    t1Issues:       records.filter(r => r.issues.includes('t1')).length,
+    totalCases:          customsRecords.length,
+    customsDocs:         customsDocsRecs.length,
+    portbaseIssues:      portbaseRecs.length,
+    blIssues:            blRecs.length,
+    t1Issues:            t1Recs.length,
+    exampleCases:        buildExampleCases(customsRecords),
+    customsDocsExamples: buildExampleCases(customsDocsRecs),
+    portbaseExamples:    buildExampleCases(portbaseRecs),
+    blExamples:          buildExampleCases(blRecs),
+    t1Examples:          buildExampleCases(t1Recs),
   };
 
   // ─── 10. Load reference intelligence ──────────────────────────
@@ -555,10 +577,13 @@ export function runAnalysis(
 
   // ─── 11. Area hotspots ────────────────────────────────────────
   const areaMap: Record<string, AreaHotspot> = {};
+  const areaRecordsMap: Record<string, EnrichedRecord[]> = {};
   for (const r of records) {
     const area = r.resolvedArea;
     if (!area) continue;
-    if (!areaMap[area]) areaMap[area] = { name: area, count: 0, hoursLost: 0, topIssue: '', trend: 'stable', weekCounts: {} };
+    if (!areaMap[area]) areaMap[area] = { name: area, count: 0, hoursLost: 0, topIssue: '', trend: 'stable', weekCounts: {}, exampleCases: [] };
+    if (!areaRecordsMap[area]) areaRecordsMap[area] = [];
+    areaRecordsMap[area].push(r);
     const a = areaMap[area];
     a.count++;
     a.weekCounts[r.weekKey] = (a.weekCounts[r.weekKey] ?? 0) + 1;
@@ -571,10 +596,10 @@ export function runAnalysis(
     // 2. isAllowedAreaLabel   — blocks raw ZIP codes + generic DE geography labels
     .filter(a => !EXCLUDED_AREA_LABELS.has(a.name) && isAllowedAreaLabel(a.name))
     .map(a => {
-      const recs = records.filter(r => r.resolvedArea === a.name);
+      const recs     = areaRecordsMap[a.name] ?? [];
       const topIssue = topIssueForGroup(recs);
       const trend    = getWeekTrend(a.weekCounts, sortedWeeks);
-      return { ...a, topIssue, trend };
+      return { ...a, topIssue, trend, exampleCases: buildExampleCases(recs) };
     })
     .sort((a, b) => b.count - a.count);
 
@@ -957,6 +982,23 @@ export function runAnalysis(
         `[CIS validation] SENTENCE_FRAGMENT_IN_CUSTOMER_BURDEN: ${sentenceFragmentLeaks.length} name(s) look like email prose rather than company names.`,
         sentenceFragmentLeaks.map(c => ({ name: c.name, count: c.count })),
       );
+    }
+
+    // ── Issue drilldown integrity scan ─────────────────────────────
+    // Verifies that every record in each issue's drilldown set has that issue
+    // as its primaryIssue. Violations indicate contamination in issueRecordsMap.
+    for (const [issId, recs] of Object.entries(issueRecordsMap)) {
+      const result = validateDrilldownIntegrity(recs, issId);
+      if (!result.valid) {
+        console.error(
+          `[CIS validation] DRILLDOWN_CONTAMINATION — issueId="${issId}" has ${result.violations}/${result.total} records with a different primaryIssue (matchRate=${(result.matchRate * 100).toFixed(1)}%).`,
+          recs.filter(r => r.primaryIssue !== issId).map(r => ({
+            caseNumber:   r.case_number ?? '—',
+            primaryIssue: r.primaryIssue,
+            subject:      r.subject?.slice(0, 80) ?? '—',
+          })),
+        );
+      }
     }
 
     const violations = validateOutputGuards(

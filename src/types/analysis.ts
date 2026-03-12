@@ -53,6 +53,7 @@ export interface ExampleCase {
   transporter: string | null;     // resolvedTransporter
   loadRef: string | null;         // extracted from classifier evidence
   containerNumber: string | null; // extracted from classifier evidence
+  mrnRef: string | null;          // extracted MRN / T1 transit reference from evidence
   confidence: number;             // 0–1 classification confidence
 }
 
@@ -109,6 +110,7 @@ export interface DepotItem {
   topIssue: string;
   trend: 'up' | 'down' | 'stable';
   weekCounts: Record<string, number>;
+  exampleCases: ExampleCase[];
 }
 
 export interface DeepseaTerminalItem {
@@ -118,6 +120,7 @@ export interface DeepseaTerminalItem {
   topIssue: string;
   trend: 'up' | 'down' | 'stable';
   weekCounts: Record<string, number>;
+  exampleCases: ExampleCase[];
 }
 
 export interface UnknownEntityItem {
@@ -132,6 +135,16 @@ export interface CustomsCompliance {
   portbaseIssues: number;
   blIssues: number;
   t1Issues: number;
+  /** All records that touch any customs-family issue (union of the four categories) */
+  exampleCases: ExampleCase[];
+  /** Records whose primaryIssue === 'customs' */
+  customsDocsExamples: ExampleCase[];
+  /** Records whose primaryIssue === 'portbase' */
+  portbaseExamples: ExampleCase[];
+  /** Records whose primaryIssue === 'bl' */
+  blExamples: ExampleCase[];
+  /** Records whose primaryIssue === 't1' */
+  t1Examples: ExampleCase[];
 }
 
 export interface LoadRefIntelligence {
@@ -162,6 +175,7 @@ export interface AreaHotspot {
   topIssue: string;
   trend: 'up' | 'down' | 'stable';
   weekCounts: Record<string, number>;
+  exampleCases: ExampleCase[];
 }
 
 export interface WeeklySnapshot {

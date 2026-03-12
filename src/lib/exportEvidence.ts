@@ -27,6 +27,7 @@ const EXPORT_HEADERS = [
   'Transporter',
   'Load Ref',
   'Container',
+  'MRN / T1 Ref',
   'Confidence %',
 ];
 
@@ -35,16 +36,17 @@ const EXPORT_HEADERS = [
  */
 function caseToRow(c: ExampleCase): (string | number)[] {
   return [
-    c.caseNumber    ?? '',
-    c.bookingRef    ?? '',
-    c.issueLabel    ?? '',
-    c.issueState    ?? '',
-    c.subject       ?? '',
-    c.date          ?? '',
-    c.customer      ?? '',
-    c.transporter   ?? '',
-    c.loadRef       ?? '',
+    c.caseNumber      ?? '',
+    c.bookingRef      ?? '',
+    c.issueLabel      ?? '',
+    c.issueState      ?? '',
+    c.subject         ?? '',
+    c.date            ?? '',
+    c.customer        ?? '',
+    c.transporter     ?? '',
+    c.loadRef         ?? '',
     c.containerNumber ?? '',
+    c.mrnRef          ?? '',
     parseFloat((c.confidence * 100).toFixed(1)),
   ];
 }
@@ -80,6 +82,7 @@ export function exportCasesToXlsx(title: string, cases: ExampleCase[]): void {
     { wch: 24 }, // Transporter
     { wch: 14 }, // Load Ref
     { wch: 14 }, // Container
+    { wch: 18 }, // MRN / T1 Ref
     { wch: 12 }, // Confidence %
   ];
 

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { HBarChart } from '../components/ui/ChartWrapper';
 import { isAllowedAreaLabel } from '../config/referenceData';
+import { exportCasesToXlsx } from '../lib/exportEvidence';
 import type { AnalysisResult } from '../types/analysis';
 
 interface Props { analysis: AnalysisResult }
@@ -51,7 +52,7 @@ export function AreaPage({ analysis }: Props) {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-[#1d2030] border-b border-[#2a2f3f]">
-              {['#','Area','Cases','Hours Lost','Top Issue','Trend'].map(h => (
+              {['#','Area','Cases','Hours Lost','Top Issue','Trend',''].map(h => (
                 <th key={h} className="px-4 py-3 text-xs font-medium text-[#a6aec4] uppercase tracking-wide text-left first:text-center">{h}</th>
               ))}
             </tr>
@@ -66,6 +67,17 @@ export function AreaPage({ analysis }: Props) {
                 <td className="px-4 py-2.5 text-[#a6aec4]">{a.topIssue}</td>
                 <td className="px-4 py-2.5">
                   <span style={{ color: TREND_CLR[a.trend] }}>{TREND_ICON[a.trend]}</span>
+                </td>
+                <td className="px-4 py-2.5">
+                  {a.exampleCases && a.exampleCases.length > 0 && (
+                    <button
+                      onClick={() => exportCasesToXlsx(`Area — ${a.name}`, a.exampleCases)}
+                      className="text-xs text-[#a6aec4] hover:text-[#eceff7] font-medium whitespace-nowrap"
+                      title={`Export all ${a.exampleCases.length} cases for ${a.name}`}
+                    >
+                      ↓ Export
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
