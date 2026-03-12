@@ -8,7 +8,7 @@ import type {
   WeeklySnapshot, Actions, UnknownEntityItem,
 } from '../types/analysis';
 import { buildForecast } from './forecast';
-import { isKnownOperationalEntity, isApprovedTransporter } from '../config/referenceData';
+import { isKnownOperationalEntity, isApprovedTransporter, isInternalISRLabel, isCustomerJunkLabel } from '../config/referenceData';
 
 function trend2(a: number, b: number): 'up' | 'down' | 'stable' {
   if (b > a * 1.2) return 'up';
@@ -244,7 +244,7 @@ export function runAnalysis(
     // Only add RESOLVED, non-operational customers to weekly history.
     // 'Unknown' / null is excluded — it skews trend lines without adding insight.
     const custName = r.resolvedCustomer;
-    if (custName && !isKnownOperationalEntity(custName)) {
+    if (custName && !isKnownOperationalEntity(custName) && !isInternalISRLabel(custName) && !isCustomerJunkLabel(custName)) {
       wk.customers[custName] = (wk.customers[custName] ?? 0) + 1;
     }
     if (r.resolvedTransporter) wk.transporters[r.resolvedTransporter] = (wk.transporters[r.resolvedTransporter] ?? 0) + 1;
@@ -296,8 +296,9 @@ export function runAnalysis(
     // resolvedCustomer is null when the customer column held a depot/transporter.
     const name = r.resolvedCustomer;
 
-    // Hard guard: operational entities must never appear in customer reporting.
-    if (name && isKnownOperationalEntity(name)) continue;
+    // Hard guard: operational entities, internal ISR labels, and junk placeholders
+    // must never appear in customer reporting.
+    if (name && (isKnownOperationalEntity(name) || isInternalISRLabel(name) || isCustomerJunkLabel(name))) continue;
 
     // No resolved customer → count as unresolved, exclude from main chart.
     if (!name) {
@@ -429,6 +430,15 @@ export function runAnalysis(
     if (isKnownOperationalEntity(name)) continue;
     customsOffenders[name] = (customsOffenders[name] ?? 0) + 1;
   }
+  // Transporters who most frequently appear in customs/compliance cases
+  const customsTransporterMap: Record<string, number> = {};
+  for (const r of customsRecords) {
+    const tname = r.resolvedTransporter;
+    if (!tname) continue;
+    if (!isApprovedTransporter(tname)) continue;
+    customsTransporterMap[tname] = (customsTransporterMap[tname] ?? 0) + 1;
+  }
+
   const customsCompliance: CustomsCompliance = {
     totalCases:     customsRecords.length,
     customsDocs:    records.filter(r => r.issues.includes('customs')).length,
@@ -436,6 +446,7 @@ export function runAnalysis(
     blIssues:       records.filter(r => r.issues.includes('bl')).length,
     t1Issues:       records.filter(r => r.issues.includes('t1')).length,
     topOffenders:   Object.entries(customsOffenders).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count })),
+    topTransporterRequests: Object.entries(customsTransporterMap).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count })),
   };
 
   // ─── 10. Load reference intelligence ──────────────────────────

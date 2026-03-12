@@ -103,12 +103,15 @@ export const INLAND_DEPOTS: EntityEntry[] = [
 // roles: ['transporter','depot'] → appear in both Transporter AND Depot charts.
 // ─────────────────────────────────────────────────────────────────
 export const APPROVED_TRANSPORTERS: EntityEntry[] = [
-  { canonicalName: 'Starmans',     entityType: 'transporter', roles: ['transporter'],          aliases: ['starmans'] },
-  { canonicalName: 'Henk Dammes',  entityType: 'transporter', roles: ['transporter'],          aliases: ['henk dammes','dammes'] },
-  { canonicalName: 'Falcoline',    entityType: 'transporter', roles: ['transporter'],          aliases: ['falcoline','falcoline gmbh','falcoline transport','falcoline spedition'] },
-  { canonicalName: 'GTS Coldchain',entityType: 'transporter', roles: ['transporter'],          aliases: ['gts coldchain','gts cold','gts truck','gts logistics','gts duisburg','gts transport','gts'] },
-  { canonicalName: 'CTV Vrede',    entityType: 'transporter', roles: ['transporter','depot'],  aliases: ['ctv vrede','ctv transport','ctv','ctv spedition','ctv gmbh'] },
-  { canonicalName: 'EKB Transport',entityType: 'transporter', roles: ['transporter','depot'],  aliases: ['ekb transport','ekb'] },
+  { canonicalName: 'Starmans',            entityType: 'transporter', roles: ['transporter'],         aliases: ['starmans'] },
+  { canonicalName: 'Henk Dammes',         entityType: 'transporter', roles: ['transporter'],         aliases: ['henk dammes','dammes'] },
+  { canonicalName: 'Falcoline',           entityType: 'transporter', roles: ['transporter'],         aliases: ['falcoline','falcoline gmbh','falcoline transport','falcoline spedition','falcoline belgium','falcoline belgie'] },
+  { canonicalName: 'GTS Coldchain',       entityType: 'transporter', roles: ['transporter'],         aliases: ['gts coldchain','gts cold','gts truck','gts logistics','gts duisburg','gts transport','gts'] },
+  { canonicalName: 'CTV Vrede',           entityType: 'transporter', roles: ['transporter','depot'], aliases: ['ctv vrede','ctv transport','ctv','ctv spedition','ctv gmbh'] },
+  { canonicalName: 'EKB Transport',       entityType: 'transporter', roles: ['transporter','depot'], aliases: ['ekb transport','ekb'] },
+  { canonicalName: 'Optimodal Nederland', entityType: 'transporter', roles: ['transporter'],         aliases: ['optimodal nederland bv','optimodal nederland','optimodal'] },
+  { canonicalName: 'Kiem Transport',      entityType: 'transporter', roles: ['transporter'],         aliases: ['kiem transport','kiem'] },
+  { canonicalName: 'DCH Düsseldorf',      entityType: 'transporter', roles: ['transporter'],         aliases: ['dch duesseldorfer container-hafen','dch düsseldorfer container-hafen','dch duesseldorf','dch container hafen','dch container-hafen','dch duisburg','dch'] },
 ];
 
 // ─────────────────────────────────────────────────────────────────
@@ -297,4 +300,86 @@ export function getEntityRoles(canonicalName: string): EntityType[] {
     if (entry.canonicalName.toLowerCase() === lower) return entry.roles;
   }
   return [];
+}
+
+// ─────────────────────────────────────────────────────────────────
+// INTERNAL ISR LABEL DETECTION
+//
+// Patterns that identify internal Maersk/MSL mailbox or address-book
+// entries rather than real customers.  These feed issue-state logic
+// (reference updates, amendments, customs docs) but must NEVER appear
+// in Customer Burden or other customer-facing charts.
+// ─────────────────────────────────────────────────────────────────
+const INTERNAL_ISR_PATTERNS: RegExp[] = [
+  /internal global address book/i,
+  /maersk\s+line.*do not use/i,
+  /msl.*internal/i,
+  /do not use/i,
+  /\bmaersk\s+internal\b/i,
+  /\bisr\s+mailbox\b/i,
+  /address\s+book.*blank/i,
+  /address\s+book.*germany/i,
+  /address\s+book.*hamburg/i,
+  /\bmsl\s*-\s*hamburg\b/i,
+  /\bmaersk\s+line\s*-\s*do/i,
+];
+
+/**
+ * Returns true if the name looks like an internal ISR / Maersk address-book
+ * entry rather than a real external customer.
+ * These must not appear in any customer-level reporting.
+ */
+export function isInternalISRLabel(name: string): boolean {
+  if (!name) return false;
+  return INTERNAL_ISR_PATTERNS.some(p => p.test(name));
+}
+
+// ─────────────────────────────────────────────────────────────────
+// CUSTOMER JUNK BLACKLIST
+//
+// Generic, non-company placeholder labels that sometimes appear in
+// the customer column but carry no meaningful account identity.
+// Block these from customer charts and treat as unresolved.
+// ─────────────────────────────────────────────────────────────────
+const CUSTOMER_JUNK_EXACT = new Set<string>([
+  'service',
+  'service representative',
+  'service intermodal',
+  'service team',
+  'reference',
+  'unknown',
+  'n/a',
+  'na',
+  'none',
+  '-',
+  '--',
+  '---',
+  '.',
+  'null',
+  'tbd',
+  'tba',
+  'blank',
+  'not specified',
+  'not provided',
+  'no customer',
+  'no account',
+  'general',
+  'general customer',
+  'test',
+  'test customer',
+  'test account',
+  'demo',
+  'placeholder',
+  'intermodal',
+]);
+
+/**
+ * Returns true if the name is a generic junk label rather than a real company.
+ * These must not appear in Customer Burden or related customer charts.
+ */
+export function isCustomerJunkLabel(name: string): boolean {
+  if (!name) return false;
+  const lower = name.toLowerCase().trim();
+  if (lower.length < 2) return true;
+  return CUSTOMER_JUNK_EXACT.has(lower);
 }
