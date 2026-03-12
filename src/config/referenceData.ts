@@ -816,16 +816,18 @@ export function isAllowedAreaLabel(name: string): boolean {
 /**
  * Scan aggregated dashboard output for rule violations.
  *
- * Checks enforced:
- *  1. No operational entity (depot/terminal/transporter/carrier) in Customer Burden
- *  2. No internal ISR label in Customer Burden
+ * Checks enforced (all ERROR severity unless noted):
+ *  1. No operational entity (depot/terminal/approved haulier) in Customer Burden
+ *  2. No internal ISR / Maersk address-book label in Customer Burden
  *  3. No junk placeholder in Customer Burden
- *  4. No ocean carrier / counterparty name in Customer Burden
- *  5. Positive company name gate — non-company-looking names flagged
- *  6. Only approved transporters in Transporter Performance
- *  7. Area Hotspots uses only allowlisted operational area labels
- *  8. All expected approved transporters are resolvable
+ *  4. No recognised external carrier (KNOWN_CARRIERS) in Customer Burden
+ *  5. No ocean carrier / counterparty name in Customer Burden
+ *  6. Positive company name gate — name must pass isPositiveCustomerCandidate
+ *  7. Only approved transporters in Transporter Performance
+ *  8. Area Hotspots uses only allowlisted operational labels (strict positive gate)
  *  9. Named hardcoded entities that must never appear in Customer Burden
+ * 10. Case number presence check (WARN)
+ * 11. Dictionary integrity — all required approved transporters resolvable (WARN)
  */
 export function validateOutputGuards(
   customerBurden:         Array<{ name: string }>,
@@ -835,13 +837,25 @@ export function validateOutputGuards(
 ): ValidationViolation[] {
   const v: ValidationViolation[] = [];
 
+  // Customer Burden checks — each blocked class gets its own rule for actionable output.
+  // Priority order mirrors isBlockedFromCustomerRole() but with specific rule names.
   for (const c of customerBurden) {
-    if (isBlockedFromCustomerRole(c.name))
-      v.push({ rule: 'BLOCKED_ENTITY_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
+    if (isKnownOperationalEntity(c.name))
+      v.push({ rule: 'OPERATIONAL_ENTITY_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
+    else if (isInternalISRLabel(c.name))
+      v.push({ rule: 'ISR_LABEL_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
     else if (isCustomerJunkLabel(c.name))
       v.push({ rule: 'JUNK_LABEL_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
-    else if (!isPositiveCustomerCandidate(c.name))
-      v.push({ rule: 'NON_COMPANY_NAME_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'WARN' });
+    else {
+      // Carrier/counterparty checks — two paths: entity dict + ocean carrier regex
+      const entityHit = lookupEntity(c.name);
+      if (entityHit && entityHit.entry.entityType === 'carrier')
+        v.push({ rule: 'CARRIER_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
+      else if (OCEAN_CARRIER_PATTERNS.some(p => p.test(c.name)))
+        v.push({ rule: 'OCEAN_CARRIER_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
+      else if (!isPositiveCustomerCandidate(c.name))
+        v.push({ rule: 'NON_COMPANY_NAME_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
+    }
   }
 
   for (const t of transporterPerformance) {
@@ -852,7 +866,9 @@ export function validateOutputGuards(
   if (areaHotspots) {
     for (const a of areaHotspots) {
       if (!isAllowedAreaLabel(a.name)) {
-        v.push({ rule: 'DISALLOWED_AREA_IN_HOTSPOTS', offender: a.name, severity: 'WARN' });
+        // ERROR: area allowlist is a definitive positive gate — anything not in it
+        // should never reach the chart after both aggregation and component filters.
+        v.push({ rule: 'DISALLOWED_AREA_IN_HOTSPOTS', offender: a.name, severity: 'ERROR' });
       }
     }
   }
