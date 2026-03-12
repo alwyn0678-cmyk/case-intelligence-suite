@@ -64,6 +64,26 @@ export function SummaryPage({ analysis }: Props) {
         </div>
       </div>
 
+      {/* Data quality */}
+      {(summary.reviewFlagCount > 0 || summary.unknownEntityCount > 0) && (
+        <div className="grid grid-cols-2 gap-4">
+          {summary.reviewFlagCount > 0 && (
+            <div className="bg-[#dc6d7d]/6 border border-[#dc6d7d]/20 rounded-lg p-4">
+              <p className="text-xs text-[#dc6d7d] font-semibold uppercase tracking-wide mb-1">Review Flags</p>
+              <p className="text-2xl font-semibold text-[#dc6d7d]">{summary.reviewFlagCount.toLocaleString()}</p>
+              <p className="text-xs text-[#a6aec4] mt-1">Low-confidence classifications — check Case Explorer</p>
+            </div>
+          )}
+          {summary.unknownEntityCount > 0 && (
+            <div className="bg-[#d8a34c]/6 border border-[#d8a34c]/20 rounded-lg p-4">
+              <p className="text-xs text-[#d8a34c] font-semibold uppercase tracking-wide mb-1">Unknown Entities</p>
+              <p className="text-2xl font-semibold text-[#d8a34c]">{summary.unknownEntityCount.toLocaleString()}</p>
+              <p className="text-xs text-[#a6aec4] mt-1">Logistics names not in reference dictionary</p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Forecast headline */}
       {analysis.forecast.available && (
         <div className="bg-[#8b7cff]/8 border border-[#8b7cff]/25 rounded-lg p-4 flex items-center justify-between">

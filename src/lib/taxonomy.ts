@@ -255,6 +255,51 @@ export const ISSUE_TAXONOMY: TaxonomyItem[] = [
     ],
     hours: 0.5, preventable: true, color: '#52c7c7',
   },
+  // ── New categories added for intent-aware classification ─────
+  {
+    id: 'ref_provided',
+    label: 'Reference Update / Info Provided',
+    keywords: [
+      'see below load ref', 'find below load ref', 'load ref attached',
+      'booking ref attached', 'reference attached', 'reference see below',
+      'as requested load ref', 'reference provided', 'ref provided',
+      'reference confirmed', 'ref confirmed', 'booking confirmed',
+    ],
+    hours: 0.25, preventable: false, color: '#52c7c7',
+  },
+  {
+    id: 'equipment_release',
+    label: 'Equipment Release / Acceptance',
+    keywords: [
+      'release order', 'pin code', 'pickup authorisation', 'release pin',
+      'delivery order', 'pin not received', 'pin not working', 'pin expired',
+      'pin invalid', 'acceptance', 'accepted at terminal', 'terminal acceptance',
+      'terminal release', 'gate out', 'container release', 'cargo release',
+      'release not received',
+    ],
+    hours: 0.75, preventable: false, color: '#d8a34c',
+  },
+  {
+    id: 'scheduling',
+    label: 'Scheduling / Closing / Allocation',
+    keywords: [
+      'planning slot', 'time slot request', 'booking slot', 'terminal slot',
+      'depot slot', 'slot allocation', 'arrival window', 'collection window',
+      'appointment request', 'appointment confirmation', 'pre-gate appointment',
+    ],
+    hours: 0.5, preventable: true, color: '#8b7cff',
+  },
+  {
+    id: 'pickup_delivery',
+    label: 'Pickup / Delivery Planning',
+    keywords: [
+      'pickup planning', 'delivery planning', 'collection planning',
+      'last-mile', 'last mile', 'home delivery', 'residential delivery',
+      'delivery address confirm', 'pickup address', 'driver instruction',
+      'delivery instruction', 'access instruction',
+    ],
+    hours: 0.5, preventable: true, color: '#7aa2ff',
+  },
   {
     id: 'other',
     label: 'Other / Unclassified',

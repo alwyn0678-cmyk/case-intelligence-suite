@@ -1,11 +1,40 @@
 import type { NormalisedRecord } from './index';
+import type { ExtractedEntity } from '../lib/entityExtraction';
+import type { IssueState } from '../lib/issueRules';
+import type { RoutingAlignment } from '../config/zipAreaRules';
+
+export type { IssueState, RoutingAlignment };
 
 export interface EnrichedRecord extends NormalisedRecord {
   combinedText: string;
-  issues: string[];       // matched taxonomy ids
-  primaryIssue: string;  // first matched id
+  issues: string[];              // matched taxonomy ids
+  primaryIssue: string;          // first / highest-confidence id
+  secondaryIssue: string | null;
+  issueState: IssueState;
   weekKey: string;
   resolvedArea: string | null;
+  routingHint: string | null;
+  routingAlignment: RoutingAlignment;
+  extractedZip: string | null;
+
+  // ── Resolved entity names ──────────────────────────────────────
+  resolvedCustomer: string | null;
+  resolvedTransporter: string | null;
+  resolvedDepot: string | null;
+  resolvedDeepseaTerminal: string | null;
+
+  // ── Classification quality ─────────────────────────────────────
+  confidence: number;           // 0–1
+  reviewFlag: boolean;
+  unresolvedReason: string | null;
+
+  // ── Full entity extraction output ─────────────────────────────
+  allEntities: ExtractedEntity[];
+  unknownEntities: string[];
+
+  // ── Evidence trail ────────────────────────────────────────────
+  evidence: string[];
+  sourceFieldsUsed: string[];
 }
 
 export interface IssueBreakdownItem {
@@ -25,6 +54,7 @@ export interface CustomerBurdenItem {
   hoursLost: number;
   preventablePct: number;
   missingLoadRef: number;
+  refProvided: number;
   missingCustomsDocs: number;
   amendments: number;
   delays: number;
@@ -47,6 +77,30 @@ export interface TransporterItem {
   weekCounts: Record<string, number>;
 }
 
+export interface DepotItem {
+  name: string;
+  count: number;
+  hoursLost: number;
+  topIssue: string;
+  trend: 'up' | 'down' | 'stable';
+  weekCounts: Record<string, number>;
+}
+
+export interface DeepseaTerminalItem {
+  name: string;
+  count: number;
+  hoursLost: number;
+  topIssue: string;
+  trend: 'up' | 'down' | 'stable';
+  weekCounts: Record<string, number>;
+}
+
+export interface UnknownEntityItem {
+  name: string;
+  count: number;
+  sourceField: string;
+}
+
 export interface CustomsCompliance {
   totalCases: number;
   customsDocs: number;
@@ -58,6 +112,7 @@ export interface CustomsCompliance {
 
 export interface LoadRefIntelligence {
   totalMissing: number;
+  totalProvided: number;
   estimatedRework: number;
   topOffenders: Array<{ name: string; count: number }>;
 }
@@ -128,6 +183,8 @@ export interface AnalysisSummary {
   weekCount: number;
   quickWin: string;
   narrative: string;
+  reviewFlagCount: number;
+  unknownEntityCount: number;
 }
 
 export interface AnalysisResult {
@@ -143,6 +200,9 @@ export interface AnalysisResult {
   sortedWeeks: string[];
   customerBurden: CustomerBurdenItem[];
   transporterPerformance: TransporterItem[];
+  depotPerformance: DepotItem[];
+  deepseaTerminalData: DeepseaTerminalItem[];
+  unknownEntities: UnknownEntityItem[];
   customsCompliance: CustomsCompliance;
   loadRefIntelligence: LoadRefIntelligence;
   areaHotspots: AreaHotspot[];
