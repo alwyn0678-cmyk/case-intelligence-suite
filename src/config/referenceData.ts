@@ -2,9 +2,11 @@
 // Built-in entity reference dictionaries
 // Every entity has: canonicalName, entityType, and aliases[]
 // Priority for classification: deepsea_terminal > depot > transporter > customer
+// 'carrier' = recognised external logistics company; NOT blocked from customer charts;
+//             NOT shown in Transporter Performance (approved hauliers only).
 // ─────────────────────────────────────────────────────────────────
 
-export type EntityType = 'transporter' | 'depot' | 'deepsea_terminal' | 'customer' | 'unknown_entity';
+export type EntityType = 'transporter' | 'depot' | 'deepsea_terminal' | 'customer' | 'carrier' | 'unknown_entity';
 
 export interface EntityEntry {
   canonicalName: string;
@@ -13,34 +15,27 @@ export interface EntityEntry {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// DEEPSEA TERMINALS (Rotterdam, Hamburg, Antwerp, Bremen, …)
+// APPROVED DEEP SEA TERMINALS
+// Restricted to Rotterdam, Antwerp, and Bremen/Bremerhaven only.
+// Hamburg, Felixstowe, Southampton are NOT part of this dashboard.
 // ─────────────────────────────────────────────────────────────────
 export const DEEPSEA_TERMINALS: EntityEntry[] = [
   // Rotterdam
-  { canonicalName: 'ECT Delta Terminal',       entityType: 'deepsea_terminal', aliases: ['ect delta','ect','euromax','ect euromax','europe combined terminals'] },
+  { canonicalName: 'ECT Delta Terminal',       entityType: 'deepsea_terminal', aliases: ['ect delta','ect','ect euromax','europe combined terminals'] },
   { canonicalName: 'APM Terminals Maasvlakte', entityType: 'deepsea_terminal', aliases: ['apm terminals','apmt','apm maasvlakte','apmt maasvlakte','apm rotterdam'] },
   { canonicalName: 'RWG Terminal',             entityType: 'deepsea_terminal', aliases: ['rwg','rotterdam world gateway','world gateway'] },
-  { canonicalName: 'EUROMAX Terminal',         entityType: 'deepsea_terminal', aliases: ['euromax terminal','euromax rotterdam'] },
-  { canonicalName: 'Hutchison Ports Rotterdam',entityType: 'deepsea_terminal', aliases: ['hutchison ports','hutchison rotterdam','hutchison ecth','ecth'] },
+  { canonicalName: 'EUROMAX Terminal',         entityType: 'deepsea_terminal', aliases: ['euromax terminal','euromax rotterdam','euromax'] },
+  { canonicalName: 'Hutchison Ports Rotterdam',entityType: 'deepsea_terminal', aliases: ['hutchison ports rotterdam','hutchison rotterdam','hutchison ecth','ecth'] },
   { canonicalName: 'Uniport Multipurpose',     entityType: 'deepsea_terminal', aliases: ['uniport','uniport multipurpose','uniport rotterdam'] },
   { canonicalName: 'OVET Terminal',            entityType: 'deepsea_terminal', aliases: ['ovet','ovet terminal'] },
-  // Hamburg
-  { canonicalName: 'HHLA Burchardkai',         entityType: 'deepsea_terminal', aliases: ['burchardkai','hhla burchardkai','ctb','container terminal burchardkai'] },
-  { canonicalName: 'HHLA Altenwerder',         entityType: 'deepsea_terminal', aliases: ['altenwerder','cta','container terminal altenwerder','hhla altenwerder'] },
-  { canonicalName: 'HHLA Tollerort',           entityType: 'deepsea_terminal', aliases: ['tollerort','ctt','hhla tollerort'] },
-  { canonicalName: 'Eurogate Hamburg',         entityType: 'deepsea_terminal', aliases: ['eurogate hamburg','eurogate'] },
-  { canonicalName: 'MSC Gate Hamburg',         entityType: 'deepsea_terminal', aliases: ['msc gate','msc gate hamburg'] },
   // Antwerp
   { canonicalName: 'MSC PSA European Terminal',entityType: 'deepsea_terminal', aliases: ['msct','msc psa','psa antwerp','msc psa european terminal','deurganckdok'] },
   { canonicalName: 'DP World Antwerp Gateway', entityType: 'deepsea_terminal', aliases: ['dp world antwerp','antwerp gateway','dpw antwerp'] },
-  { canonicalName: 'PSA HNN Antwerp',          entityType: 'deepsea_terminal', aliases: ['psa hnn','hnn antwerp','hessenatie','north sea terminal'] },
+  { canonicalName: 'PSA HNN Antwerp',          entityType: 'deepsea_terminal', aliases: ['psa hnn','hnn antwerp','hessenatie','north sea terminal antwerp'] },
   { canonicalName: 'Antwerp Terminal',         entityType: 'deepsea_terminal', aliases: ['antwerp terminal','at antwerp'] },
   // Bremen / Bremerhaven
   { canonicalName: 'Eurogate Bremerhaven',     entityType: 'deepsea_terminal', aliases: ['eurogate bremerhaven','bct','bremer container terminal'] },
   { canonicalName: 'NTB Bremerhaven',          entityType: 'deepsea_terminal', aliases: ['ntb','north sea terminal bremerhaven','nst bremerhaven'] },
-  // Felixstowe / UK
-  { canonicalName: 'Port of Felixstowe',       entityType: 'deepsea_terminal', aliases: ['felixstowe','port of felixstowe'] },
-  { canonicalName: 'DP World Southampton',     entityType: 'deepsea_terminal', aliases: ['southampton','dp world southampton'] },
 ];
 
 // ─────────────────────────────────────────────────────────────────
@@ -56,7 +51,7 @@ export const INLAND_DEPOTS: EntityEntry[] = [
   { canonicalName: 'Bonn AZS',               entityType: 'depot', aliases: ['bonn azs','azs bonn','debnx01','bon depot'] },
   { canonicalName: 'Trier AZS',              entityType: 'depot', aliases: ['trier azs','azs trier','detreaz'] },
   { canonicalName: 'EGS Nuremberg',          entityType: 'depot', aliases: ['egs nuremberg','egs nürnberg','egs','denue02'] },
-  { canonicalName: 'Germersheim DPW',        entityType: 'depot', aliases: ['germersheim dpw','dpw germersheim','germersheim','dp world germersheim','degrh01','dpw germersheim'] },
+  { canonicalName: 'Germersheim DPW',        entityType: 'depot', aliases: ['germersheim dpw','dpw germersheim','germersheim','dp world germersheim','degrh01'] },
   { canonicalName: 'Rheinhafen Andernach',   entityType: 'depot', aliases: ['rheinhafen andernach','andernach depot'] },
   { canonicalName: 'Gustavsburg Contargo',   entityType: 'depot', aliases: ['gustavsburg contargo','gustavsburg','contargo gustavsburg'] },
   { canonicalName: 'Mainz Frankenbach',      entityType: 'depot', aliases: ['mainz frankenbach','frankenbach','mainz depot'] },
@@ -81,7 +76,8 @@ export const INLAND_DEPOTS: EntityEntry[] = [
 
 // ─────────────────────────────────────────────────────────────────
 // APPROVED SPECIALIST INLAND HAULIERS
-// Only these 6 appear in Transporter Performance reporting.
+// ONLY these 6 appear in Transporter Performance reporting.
+// entityType = 'transporter' is EXCLUSIVELY reserved for these.
 // ─────────────────────────────────────────────────────────────────
 export const APPROVED_TRANSPORTERS: EntityEntry[] = [
   { canonicalName: 'Starmans',    entityType: 'transporter', aliases: ['starmans'] },
@@ -93,37 +89,42 @@ export const APPROVED_TRANSPORTERS: EntityEntry[] = [
 ];
 
 // ─────────────────────────────────────────────────────────────────
-// KNOWN EXTERNAL CARRIERS (recognised as operational — blocked from
-// customer charts — but NOT shown in Transporter Performance)
+// KNOWN EXTERNAL CARRIERS
+// Recognised for entity disambiguation only.
+// entityType = 'carrier' — distinct from 'transporter'.
+// These are NOT operational entities for this dashboard:
+//   - They DO NOT appear in Transporter Performance
+//   - They DO NOT block customer inference (can appear in Customer Burden
+//     if that company genuinely raised a case as a counterparty/customer)
 // ─────────────────────────────────────────────────────────────────
 export const KNOWN_CARRIERS: EntityEntry[] = [
-  { canonicalName: 'DB Schenker',        entityType: 'transporter', aliases: ['db schenker','schenker','dbschenker'] },
-  { canonicalName: 'DHL Freight',        entityType: 'transporter', aliases: ['dhl freight','dhl logistics','dhl'] },
-  { canonicalName: 'DSV',                entityType: 'transporter', aliases: ['dsv road','dsv air','dsv logistics','dsv'] },
-  { canonicalName: 'Rhenus Logistics',   entityType: 'transporter', aliases: ['rhenus logistics','rhenus road','rhenus transport'] },
-  { canonicalName: 'Dachser',            entityType: 'transporter', aliases: ['dachser'] },
-  { canonicalName: 'Kuehne+Nagel',       entityType: 'transporter', aliases: ['kuehne nagel','kühne nagel','kühnenegel','kuhne nagel','k+n','kuehne+nagel'] },
-  { canonicalName: 'XPO Logistics',      entityType: 'transporter', aliases: ['xpo logistics','xpo transport','xpo'] },
-  { canonicalName: 'Geodis',             entityType: 'transporter', aliases: ['geodis'] },
-  { canonicalName: 'Ceva Logistics',     entityType: 'transporter', aliases: ['ceva logistics','ceva'] },
-  { canonicalName: 'Raben Group',        entityType: 'transporter', aliases: ['raben group','raben transport','raben'] },
-  { canonicalName: 'Gefco',              entityType: 'transporter', aliases: ['gefco','ceva gefco'] },
-  { canonicalName: 'Fiege Logistics',    entityType: 'transporter', aliases: ['fiege logistics','fiege'] },
-  { canonicalName: 'Samskip',            entityType: 'transporter', aliases: ['samskip'] },
-  { canonicalName: 'Nedcargo',           entityType: 'transporter', aliases: ['nedcargo'] },
-  { canonicalName: 'Van Dieren Transport',entityType: 'transporter', aliases: ['van dieren','vandieren'] },
-  { canonicalName: 'Kloosterboer',       entityType: 'transporter', aliases: ['kloosterboer'] },
-  { canonicalName: 'PostNL',             entityType: 'transporter', aliases: ['postnl','post nl'] },
-  { canonicalName: 'TNT Express',        entityType: 'transporter', aliases: ['tnt express','tnt'] },
-  { canonicalName: 'UPS',                entityType: 'transporter', aliases: ['ups supply chain','ups freight','ups'] },
-  { canonicalName: 'FedEx',              entityType: 'transporter', aliases: ['fedex freight','fedex'] },
-  { canonicalName: 'Wincanton',          entityType: 'transporter', aliases: ['wincanton'] },
-  { canonicalName: 'HGK Shipping',       entityType: 'transporter', aliases: ['hgk shipping','hgk'] },
-  { canonicalName: 'Broekman Logistics', entityType: 'transporter', aliases: ['broekman logistics','broekman'] },
-  { canonicalName: 'CTD Logistics',      entityType: 'transporter', aliases: ['ctd logistics','ctd'] },
+  { canonicalName: 'DB Schenker',        entityType: 'carrier', aliases: ['db schenker','schenker','dbschenker'] },
+  { canonicalName: 'DHL Freight',        entityType: 'carrier', aliases: ['dhl freight','dhl logistics','dhl'] },
+  { canonicalName: 'DSV',                entityType: 'carrier', aliases: ['dsv road','dsv air','dsv logistics','dsv'] },
+  { canonicalName: 'Rhenus Logistics',   entityType: 'carrier', aliases: ['rhenus logistics','rhenus road','rhenus transport'] },
+  { canonicalName: 'Dachser',            entityType: 'carrier', aliases: ['dachser'] },
+  { canonicalName: 'Kuehne+Nagel',       entityType: 'carrier', aliases: ['kuehne nagel','kühne nagel','kühnenegel','kuhne nagel','k+n','kuehne+nagel'] },
+  { canonicalName: 'XPO Logistics',      entityType: 'carrier', aliases: ['xpo logistics','xpo transport','xpo'] },
+  { canonicalName: 'Geodis',             entityType: 'carrier', aliases: ['geodis'] },
+  { canonicalName: 'Ceva Logistics',     entityType: 'carrier', aliases: ['ceva logistics','ceva'] },
+  { canonicalName: 'Raben Group',        entityType: 'carrier', aliases: ['raben group','raben transport','raben'] },
+  { canonicalName: 'Gefco',              entityType: 'carrier', aliases: ['gefco','ceva gefco'] },
+  { canonicalName: 'Fiege Logistics',    entityType: 'carrier', aliases: ['fiege logistics','fiege'] },
+  { canonicalName: 'Samskip',            entityType: 'carrier', aliases: ['samskip'] },
+  { canonicalName: 'Nedcargo',           entityType: 'carrier', aliases: ['nedcargo'] },
+  { canonicalName: 'Van Dieren Transport',entityType: 'carrier', aliases: ['van dieren','vandieren'] },
+  { canonicalName: 'Kloosterboer',       entityType: 'carrier', aliases: ['kloosterboer'] },
+  { canonicalName: 'PostNL',             entityType: 'carrier', aliases: ['postnl','post nl'] },
+  { canonicalName: 'TNT Express',        entityType: 'carrier', aliases: ['tnt express','tnt'] },
+  { canonicalName: 'UPS',                entityType: 'carrier', aliases: ['ups supply chain','ups freight','ups'] },
+  { canonicalName: 'FedEx',              entityType: 'carrier', aliases: ['fedex freight','fedex'] },
+  { canonicalName: 'Wincanton',          entityType: 'carrier', aliases: ['wincanton'] },
+  { canonicalName: 'HGK Shipping',       entityType: 'carrier', aliases: ['hgk shipping','hgk'] },
+  { canonicalName: 'Broekman Logistics', entityType: 'carrier', aliases: ['broekman logistics','broekman'] },
+  { canonicalName: 'CTD Logistics',      entityType: 'carrier', aliases: ['ctd logistics','ctd'] },
 ];
 
-// Combined export kept for backward compatibility
+// Combined export for backward compatibility
 export const TRANSPORTERS: EntityEntry[] = [...APPROVED_TRANSPORTERS, ...KNOWN_CARRIERS];
 
 // ─────────────────────────────────────────────────────────────────
@@ -132,20 +133,21 @@ export const TRANSPORTERS: EntityEntry[] = [...APPROVED_TRANSPORTERS, ...KNOWN_C
 export const ALL_ENTITIES: EntityEntry[] = [
   ...DEEPSEA_TERMINALS,
   ...INLAND_DEPOTS,
-  ...TRANSPORTERS,
+  ...APPROVED_TRANSPORTERS,
+  ...KNOWN_CARRIERS,
 ];
 
 /**
  * Build a flat lookup table: alias (lowercase) → EntityEntry
- * When two entries share an alias the higher-priority one wins
- * (deepsea_terminal > depot > transporter).
+ * When two entries share an alias the higher-priority one wins.
  */
 const PRIORITY: Record<EntityType, number> = {
-  deepsea_terminal: 3,
-  depot: 2,
-  transporter: 1,
-  customer: 0,
-  unknown_entity: -1,
+  deepsea_terminal: 4,
+  depot:            3,
+  transporter:      2,  // APPROVED_TRANSPORTERS only
+  carrier:          1,  // KNOWN_CARRIERS — lower than operational types
+  customer:         0,
+  unknown_entity:  -1,
 };
 
 export const ENTITY_ALIAS_MAP: Map<string, EntityEntry> = (() => {
@@ -179,46 +181,64 @@ export function lookupEntity(text: string): { entry: EntityEntry; matchedAlias: 
 
 // ─────────────────────────────────────────────────────────────────
 // Hard-guard utility sets  (used by analyzeData.ts)
+// OPERATIONAL = deepsea_terminal + depot + transporter (approved hauliers ONLY).
+// KNOWN_CARRIERS ('carrier' type) are intentionally EXCLUDED from operational
+// sets so they do NOT block customer inference or customer-level reporting.
 // ─────────────────────────────────────────────────────────────────
 
-/** All canonical names of known operational entities (depot / terminal / transporter) */
+/** Canonical names of true operational entities (terminal / depot / approved haulier) */
 export const OPERATIONAL_CANONICAL_NAMES: Set<string> = new Set(
-  [...DEEPSEA_TERMINALS, ...INLAND_DEPOTS, ...TRANSPORTERS].map(e => e.canonicalName.toLowerCase())
+  [...DEEPSEA_TERMINALS, ...INLAND_DEPOTS, ...APPROVED_TRANSPORTERS].map(e => e.canonicalName.toLowerCase())
 );
 
-/** All aliases of known operational entities */
+/** All aliases of true operational entities */
 export const OPERATIONAL_ALIAS_SET: Set<string> = new Set(
-  [...DEEPSEA_TERMINALS, ...INLAND_DEPOTS, ...TRANSPORTERS].flatMap(e => e.aliases)
+  [...DEEPSEA_TERMINALS, ...INLAND_DEPOTS, ...APPROVED_TRANSPORTERS].flatMap(e => e.aliases)
 );
 
-/** Approved transporter canonical names — only the 6 specialist inland hauliers */
+/** Approved transporter canonical names — the 6 specialist inland hauliers */
 export const APPROVED_TRANSPORTER_CANONICAL: Set<string> = new Set(
   APPROVED_TRANSPORTERS.map(e => e.canonicalName.toLowerCase())
 );
 
+/** Approved transporter aliases — all aliases belonging to the 6 hauliers */
+export const APPROVED_TRANSPORTER_ALIASES: Set<string> = new Set(
+  APPROVED_TRANSPORTERS.flatMap(e => e.aliases)
+);
+
 /**
- * Returns true if the name (canonical or alias) belongs to any known
- * operational entity (transporter, depot, deepsea_terminal).
- * A known operational entity must NEVER enter customer-level reporting.
+ * Returns true if the name belongs to a true operational entity
+ * (approved haulier, inland depot, or approved deep sea terminal).
+ * These names must NEVER enter customer-level reporting.
+ * KNOWN_CARRIERS ('carrier' type) are NOT considered operational here.
  */
 export function isKnownOperationalEntity(name: string): boolean {
   if (!name) return false;
   const lower = name.toLowerCase().trim();
   if (OPERATIONAL_CANONICAL_NAMES.has(lower)) return true;
   if (OPERATIONAL_ALIAS_SET.has(lower)) return true;
-  // Also run through lookupEntity to catch partial alias matches
   const hit = lookupEntity(name);
-  return hit !== null && hit.entry.entityType !== 'customer';
+  return hit !== null && (
+    hit.entry.entityType === 'deepsea_terminal' ||
+    hit.entry.entityType === 'depot' ||
+    hit.entry.entityType === 'transporter'
+  );
 }
 
 /**
- * Returns true only if the name matches an approved transporter canonical name or alias.
+ * Returns true ONLY if the name matches an APPROVED TRANSPORTER
+ * (canonical name or alias from APPROVED_TRANSPORTERS only).
+ * KNOWN_CARRIERS have entityType='carrier' and will NOT pass this check.
  * Only approved transporters may appear in Transporter Performance reporting.
  */
 export function isApprovedTransporter(name: string): boolean {
   if (!name) return false;
   const lower = name.toLowerCase().trim();
   if (APPROVED_TRANSPORTER_CANONICAL.has(lower)) return true;
-  const hit = lookupEntity(name);
-  return hit !== null && hit.entry.entityType === 'transporter';
+  if (APPROVED_TRANSPORTER_ALIASES.has(lower)) return true;
+  // Partial match against approved aliases only (not KNOWN_CARRIERS)
+  for (const alias of APPROVED_TRANSPORTER_ALIASES) {
+    if (lower.includes(alias)) return true;
+  }
+  return false;
 }

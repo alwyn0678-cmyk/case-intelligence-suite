@@ -221,7 +221,9 @@ export function runAnalysis(
       evidence:             cls.evidence,
       sourceFieldsUsed:     cls.sourceFieldsUsed,
       // Override raw transporter/customer with resolved canonical names.
-      // For customer: only fall back to raw r.customer if it is NOT a known operational entity.
+      // For customer: only fall back to raw r.customer if it is NOT a hard-blocked
+      // operational entity (depot / terminal / approved haulier).
+      // KNOWN_CARRIERS ('carrier' type) are allowed as customers.
       transporter: cls.resolvedTransporter ?? r.transporter,
       customer: cls.resolvedCustomer ?? (
         r.customer && !isKnownOperationalEntity(r.customer) ? r.customer : undefined

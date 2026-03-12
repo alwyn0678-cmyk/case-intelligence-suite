@@ -95,28 +95,57 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   const normalizedText = combinedText.replace(/\s+/g, ' ').trim();
 
   // ── 3 + 4 + 5. Entity extraction ─────────────────────────────
+  // Build extra raw text from any unmapped columns in _raw that aren't
+  // already covered by the standard normalised fields. This ensures
+  // fields like "External Details", "Account Name", "Notes", etc.
+  // are scanned even if not formally mapped during file parsing.
+  const standardRawKeys = new Set([
+    'subject','title','case subject','case title','onderwerp','email subject',
+    'description','desc','case description','body','email body','message body','comments','details',
+    'isr details','isr_details','isr','isr detail','sr details','internal details',
+    'customer','account','client','company','klant','account name','customer name','debtor',
+    'transporter','haulier','carrier','hauler','transport company','vervoerder',
+    'zip','postcode','post code','zip code','zipcode','postal code','postal_code',
+    'area','region','zone','terminal','location','hub','site',
+    'date','created date','creation date','created at','created_at','closed date','datum','opened',
+    'status','case status','state','resolution',
+    'priority','urgency','severity',
+    'category','type','case type','issue type','categorie',
+    'hours','time spent','duration','effort','uren',
+  ]);
+  const extraRaw = Object.entries(record._raw)
+    .filter(([k]) => !standardRawKeys.has(k.toLowerCase().trim()))
+    .map(([, v]) => (v != null ? String(v) : ''))
+    .filter(s => s.trim().length > 2)
+    .join(' ');
+
   const entityResult = extractEntities(
     record.transporter,
     record.customer,
     record.subject,
     record.description,
     record.isr_details,
+    extraRaw || undefined,
   );
 
   const resolvedTransporter    = entityResult.transporter?.canonicalName ?? null;
   const resolvedDepot          = entityResult.depot?.canonicalName ?? null;
   const resolvedDeepseaTerminal= entityResult.deepseaTerminal?.canonicalName ?? null;
-  // Only use the raw record.customer value as customer if it is NOT a known operational entity.
-  // If it resolves to a depot/terminal/transporter, leave resolvedCustomer as null so it stays
-  // in the correct entity bucket and never enters customer-level reporting.
+  // Only use the raw record.customer value as customer if it is NOT a hard-blocked
+  // operational entity (deepsea_terminal, depot, approved transporter).
+  // KNOWN_CARRIERS have entityType='carrier' and are allowed as customers.
   let resolvedCustomer: string | null = entityResult.customer?.canonicalName ?? null;
   if (!resolvedCustomer && record.customer?.trim()) {
     const rawCustLookup = lookupEntity(record.customer.trim());
-    if (!rawCustLookup) {
-      // Not in any dictionary — safe to use as customer
-      resolvedCustomer = record.customer.trim();
+    const isOperationalBlock =
+      rawCustLookup !== null &&
+      (rawCustLookup.entry.entityType === 'deepsea_terminal' ||
+       rawCustLookup.entry.entityType === 'depot' ||
+       rawCustLookup.entry.entityType === 'transporter');
+    if (!isOperationalBlock) {
+      resolvedCustomer = rawCustLookup ? rawCustLookup.entry.canonicalName : record.customer.trim();
     }
-    // If rawCustLookup exists, it is a transporter/depot/terminal. Leave resolvedCustomer null.
+    // If operational block: it is a depot/terminal/approved haulier. Leave resolvedCustomer null.
   }
 
   // ── 6. Extract references ─────────────────────────────────────

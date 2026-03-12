@@ -1,32 +1,49 @@
-// Known transporter keywords derived from zip.xlsx (Truck + Barge-Rail sheets).
-// Account names containing any of these (case-insensitive) are classified as
-// transporters; everything else is treated as a customer.
+// Known transporter / depot keywords used during file parsing to
+// reclassify account column values when no dedicated transporter column exists.
+// Only includes APPROVED_TRANSPORTERS and INLAND_DEPOTS.
+// KNOWN_CARRIERS (DSV, DHL, XPO, etc.) are intentionally excluded here —
+// they are not operational entities for this dashboard.
 
 const TRANSPORTER_KEYWORDS: string[] = [
-  // Truck transporters
+  // Approved specialist inland hauliers
   'starmans',
   'henk dammes',
+  'dammes',
   'falcoline',
   'gts coldchain',
+  'gts cold',
   'gts truck',
+  'gts logistics',
+  'gts duisburg',
   'ctv vrede',
-  'hp duisburg truck',
+  'ctv transport',
+  'ekb transport',
   'ekb',
 
-  // Barge / Rail inland terminals & depots
-  'hutchison ports',
+  // Inland depots / barge-rail terminals
+  'contargo',
+  'zehnhoff',
+  'h&s andernach',
+  'hs andernach',
+  'bonn azs',
+  'azs bonn',
+  'trier azs',
+  'azs trier',
+  'egs nuremberg',
+  'germersheim dpw',
+  'dpw germersheim',
+  'dp world germersheim',
+  'rheinhafen andernach',
+  'gustavsburg',
+  'mainz frankenbach',
+  'frankenbach',
   'dit depot',
   'rrt depot',
-  'mainz frankenbach',
-  'gustavsburg contargo',
-  'contargo',
-  'bonn azs',
-  'am zehnhoff',
-  'zehnhoff',
-  'trier azs',
-  'germersheim dpw',
-  'rheinhafen andernach',
+  'hp duisburg',
   'nuernberg cdn',
+  'moerdijk',
+  'venlo container',
+  'nijmegen terminal',
 ];
 
 export function isTransporter(accountName: string): boolean {

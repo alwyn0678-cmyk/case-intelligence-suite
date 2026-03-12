@@ -5,7 +5,9 @@
 // terminal, customer) from all available row fields.
 //
 // Priority: deepsea_terminal > depot > transporter > customer
-// Every extraction stores the evidence trail required by CLAUDE.md.
+// 'carrier' entities (KNOWN_CARRIERS) are recognised but are NOT
+// treated as operational — they can appear as customers if the
+// customer column contains them.
 // ─────────────────────────────────────────────────────────────────
 
 import { lookupEntity, ENTITY_ALIAS_MAP, type EntityType } from '../config/referenceData';
@@ -31,7 +33,7 @@ export interface EntityExtractionResult {
 }
 
 // Fields to scan, in search-priority order
-type FieldName = 'transporter_col' | 'customer_col' | 'subject' | 'isr_details' | 'description';
+type FieldName = 'transporter_col' | 'customer_col' | 'subject' | 'isr_details' | 'description' | 'extra_raw';
 
 interface FieldEntry {
   name: FieldName;
@@ -48,7 +50,6 @@ function buildSnippet(text: string, alias: string, windowChars = 60): string {
   const end = Math.min(text.length, idx + alias.length + Math.floor(windowChars / 2));
   return (start > 0 ? '…' : '') + text.substring(start, end) + (end < text.length ? '…' : '');
 }
-
 
 /**
  * Scan text for ALL entity matches (not just the first/highest-priority one).
@@ -86,13 +87,33 @@ function findAllEntitiesInText(
   return results;
 }
 
+/**
+ * Extract all entities from all available record fields.
+ *
+ * @param transporterCol  - dedicated transporter column value
+ * @param customerCol     - dedicated customer/account column value
+ * @param subject         - case subject / email subject
+ * @param description     - case description / body
+ * @param isrDetails      - ISR details field
+ * @param extraRaw        - any additional raw field text (unmapped columns, external details, notes)
+ */
 export function extractEntities(
   transporterCol: string | undefined,
   customerCol: string | undefined,
   subject: string | undefined,
   description: string | undefined,
   isrDetails: string | undefined,
+  extraRaw?: string,
 ): EntityExtractionResult {
+
+  const confidenceByField: Record<FieldName, number> = {
+    transporter_col: 0.95,
+    customer_col:    0.85,
+    isr_details:     0.80,
+    subject:         0.75,
+    description:     0.60,
+    extra_raw:       0.55,
+  };
 
   const fields: FieldEntry[] = [
     { name: 'transporter_col', text: transporterCol ?? '' },
@@ -100,17 +121,10 @@ export function extractEntities(
     { name: 'subject',         text: subject ?? '' },
     { name: 'isr_details',     text: isrDetails ?? '' },
     { name: 'description',     text: description ?? '' },
+    { name: 'extra_raw',       text: extraRaw ?? '' },
   ];
 
   const allEntities: ExtractedEntity[] = [];
-
-  const confidenceByField: Record<FieldName, number> = {
-    transporter_col: 0.95,
-    customer_col: 0.85,
-    isr_details: 0.80,
-    subject: 0.75,
-    description: 0.60,
-  };
 
   // ── Extract ALL known entities from every field ───────────────
   for (const field of fields) {
@@ -134,54 +148,73 @@ export function extractEntities(
 
   // ── Customer inference ────────────────────────────────────────
   // Customer is inferred only AFTER all operational entities are identified.
-  // Customer col raw value is used ONLY if it does NOT resolve to any known entity.
+  //
+  // Blocking rule: ONLY deepsea_terminal, depot, and transporter (approved hauliers)
+  // prevent a customer_col value from being treated as a customer.
+  //
+  // KNOWN_CARRIERS have entityType='carrier' — they are NOT operational for this
+  // dashboard. If a carrier (e.g. DSV, DHL) appears in the customer column, they
+  // can be treated as a customer/counterparty in that case context.
   let customer: ExtractedEntity | null = null;
   const custText = customerCol?.trim() ?? '';
 
   if (custText) {
     const knownMatch = lookupEntity(custText);
-    if (!knownMatch) {
-      // Not a known entity — safe to treat as customer
+    const isOperationalBlock =
+      knownMatch !== null &&
+      (knownMatch.entry.entityType === 'deepsea_terminal' ||
+       knownMatch.entry.entityType === 'depot' ||
+       knownMatch.entry.entityType === 'transporter');
+
+    if (!isOperationalBlock) {
+      // Not an operational entity — safe to treat as customer
+      // (includes unrecognised names AND carrier-type entities)
+      const canonicalName = knownMatch ? knownMatch.entry.canonicalName : custText;
       customer = {
         rawValue: custText,
-        normalizedValue: custText,
+        normalizedValue: canonicalName,
         entityType: 'customer',
-        canonicalName: custText,
-        matchedAlias: '',
+        canonicalName,
+        matchedAlias: knownMatch?.matchedAlias ?? '',
         sourceField: 'customer_col',
         confidence: 0.85,
         snippet: custText,
       };
     }
-    // If knownMatch exists, the entity is already in allEntities under its correct type.
-    // Do NOT add it as a customer. Leave customer as null.
+    // If operational block: entity is already in allEntities under its correct type.
+    // Leave customer as null.
   }
 
   // ── Deep entity recovery pass ────────────────────────────────
   // If customer is still null, scan all text fields for a company name
-  // that looks like a customer (not an operational entity).
-  // Strategy: extract company-like tokens from text that don't match any known entity.
+  // that looks like a customer (not a hard-blocked operational entity).
   if (!customer) {
     const allText = fields.map(f => f.text).join(' ');
-    // Match patterns: "Account: XYZ", "Customer: XYZ", "client: XYZ", or standalone company names
     const accountPatterns = [
       /\baccount[:\s]+([A-Z][A-Za-z0-9 &\-\.]{2,40})/i,
       /\bcustomer[:\s]+([A-Z][A-Za-z0-9 &\-\.]{2,40})/i,
       /\bclient[:\s]+([A-Z][A-Za-z0-9 &\-\.]{2,40})/i,
       /\bkunde[:\s]+([A-Z][A-Za-z0-9 &\-\.]{2,40})/i,
+      /\bopdrachtgever[:\s]+([A-Z][A-Za-z0-9 &\-\.]{2,40})/i,
     ];
     for (const pattern of accountPatterns) {
       const m = allText.match(pattern);
       if (m && m[1]) {
         const candidate = m[1].trim();
         const knownMatch = lookupEntity(candidate);
-        if (!knownMatch) {
+        const isOperationalBlock =
+          knownMatch !== null &&
+          (knownMatch.entry.entityType === 'deepsea_terminal' ||
+           knownMatch.entry.entityType === 'depot' ||
+           knownMatch.entry.entityType === 'transporter');
+
+        if (!isOperationalBlock) {
           customer = {
             rawValue: candidate,
-            normalizedValue: candidate,
+            normalizedValue: knownMatch ? knownMatch.entry.canonicalName : candidate,
             entityType: 'customer',
-            canonicalName: candidate,
-            matchedAlias: '',
+            canonicalName: knownMatch ? knownMatch.entry.canonicalName : candidate,
+            matchedAlias: knownMatch?.matchedAlias ?? '',
             sourceField: 'description',
             confidence: 0.55,
             snippet: candidate,
@@ -196,7 +229,7 @@ export function extractEntities(
   const unknownEntities: string[] = [];
   // Flag logistics-sounding names from the customer column that don't match any dictionary
   if (custText && !lookupEntity(custText) && custText.length > 3) {
-    const logisticsHint = /\b(transport|logistics|freight|cargo|barge|shipping|spedition|spediteur|haulage|container|terminal|depot|express|forwarding|spedition|hafen|port)\b/i.test(custText);
+    const logisticsHint = /\b(transport|logistics|freight|cargo|barge|shipping|spedition|spediteur|haulage|container|terminal|depot|express|forwarding|hafen|port)\b/i.test(custText);
     if (logisticsHint) {
       unknownEntities.push(custText);
     }
