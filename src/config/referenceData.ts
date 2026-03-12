@@ -133,7 +133,7 @@ export const KNOWN_CARRIERS: EntityEntry[] = [
   { canonicalName: 'DB Schenker',         entityType: 'carrier', roles: ['carrier'], aliases: ['db schenker','schenker','dbschenker'] },
   { canonicalName: 'DHL Freight',         entityType: 'carrier', roles: ['carrier'], aliases: ['dhl freight','dhl logistics','dhl'] },
   { canonicalName: 'DSV',                 entityType: 'carrier', roles: ['carrier'], aliases: ['dsv road','dsv air','dsv logistics','dsv'] },
-  { canonicalName: 'Rhenus Logistics',    entityType: 'carrier', roles: ['carrier'], aliases: ['rhenus logistics','rhenus road','rhenus transport'] },
+  { canonicalName: 'Rhenus Logistics',    entityType: 'carrier', roles: ['carrier'], aliases: ['rhenus logistics','rhenus road','rhenus transport','rhenus'] },
   { canonicalName: 'Dachser',             entityType: 'carrier', roles: ['carrier'], aliases: ['dachser'] },
   { canonicalName: 'Kuehne+Nagel',        entityType: 'carrier', roles: ['carrier'], aliases: ['kuehne nagel','kühne nagel','kühnenegel','kuhne nagel','k+n','kuehne+nagel'] },
   { canonicalName: 'XPO Logistics',       entityType: 'carrier', roles: ['carrier'], aliases: ['xpo logistics','xpo transport','xpo'] },
@@ -153,6 +153,17 @@ export const KNOWN_CARRIERS: EntityEntry[] = [
   { canonicalName: 'Wincanton',           entityType: 'carrier', roles: ['carrier'], aliases: ['wincanton'] },
   { canonicalName: 'Broekman Logistics',  entityType: 'carrier', roles: ['carrier'], aliases: ['broekman logistics','broekman'] },
   { canonicalName: 'CTD Logistics',       entityType: 'carrier', roles: ['carrier'], aliases: ['ctd logistics','ctd'] },
+  // Additional logistics counterparties — blocked from customer charts
+  { canonicalName: 'Hellmann Worldwide',  entityType: 'carrier', roles: ['carrier'], aliases: ['hellmann worldwide logistics','hellmann worldwide','hellmann logistics','hellmann'] },
+  { canonicalName: 'P&O Ferrymasters',    entityType: 'carrier', roles: ['carrier'], aliases: ['p&o ferrymasters','po ferrymasters','ferrymasters','p and o ferrymasters'] },
+  { canonicalName: 'Bolloré Logistics',   entityType: 'carrier', roles: ['carrier'], aliases: ['bolloré logistics','bollore logistics','bollore','bolloré'] },
+  { canonicalName: 'BLG Logistics',       entityType: 'carrier', roles: ['carrier'], aliases: ['blg logistics','blg'] },
+  { canonicalName: 'Falco Lines',         entityType: 'carrier', roles: ['carrier'], aliases: ['falco lines belgium nv','falco lines belgium','falco lines','falcoline','falco'] },
+  { canonicalName: 'Yusen Logistics',     entityType: 'carrier', roles: ['carrier'], aliases: ['yusen logistics','nyk logistics','yusen'] },
+  { canonicalName: 'Agility Logistics',   entityType: 'carrier', roles: ['carrier'], aliases: ['agility logistics','agility'] },
+  { canonicalName: 'Expeditors',          entityType: 'carrier', roles: ['carrier'], aliases: ['expeditors international','expeditors'] },
+  { canonicalName: 'Logwin',              entityType: 'carrier', roles: ['carrier'], aliases: ['logwin','logwin ag','logwin logistics'] },
+  { canonicalName: 'Nacco',               entityType: 'carrier', roles: ['carrier'], aliases: ['nacco','nacco logistics','naco'] },
 ];
 
 // Combined export for backward compatibility
@@ -358,18 +369,18 @@ const OCEAN_CARRIER_PATTERNS: RegExp[] = [
   /\bmaersk\s*(line|shipping|sealand|logistics|air|supply)?\b/i,
   /\bcma\s*cgm\b/i,
   /\bhapag[\s-]*lloyd\b/i,
-  /\bmediterranean\s*shipping\b/i,
-  /\bmsco?\b/i,                // MSC / MSCO
-  /\bevergreen\s*(line|marine|shipping)?\b/i,
-  /\bcosco\s*(shipping|container|logistics)?\b/i,
+  /\bmediterranean\s*shipping\s*(co|company)?\b/i,
+  /^msc$/i,                          // MSC as standalone label only (not substring)
+  /^msc\s+(mediterranean|shipping|line|transport)\b/i,  // MSC compound names
+  /\bevergreen\s*(line|marine|shipping|container)?\b/i,
+  /\bcosco\s*(shipping|container|logistics|line)?\b/i,
   /\byang\s*ming\b/i,
-  /\bhanjin\b/i,
-  /\bone\s*(ocean\s*network)?\b/i,   // Ocean Network Express
-  /\bzim\s*(integrated)?\b/i,
-  /\bpil\b/i,                  // Pacific International Lines
-  /\bwanhai\b/i,
-  /\bseagate\s*container\b/i,
-  /\bturkon\b/i,
+  /\bhanjin\s*(shipping|line)?\b/i,
+  /\bone\s*ocean\s*network\b/i,      // Ocean Network Express (full name)
+  /\bzim\s*(integrated|shipping|line)?\b/i,
+  /\bpil\b/i,                        // Pacific International Lines
+  /\bwanhai\s*(lines|shipping)?\b/i,
+  /\bturkon\s*(line|container)?\b/i,
   /\bkmtc\b/i,
 ];
 

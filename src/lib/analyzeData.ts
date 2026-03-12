@@ -436,7 +436,12 @@ export function runAnalysis(
     c.preventablePct += preventableCount / r.issues.length;
   }
 
+  // Both gates applied inline at build time so ALL downstream uses
+  // (summary, repeatOffenders, actionInsights, forecast, UI) see clean data.
+  //   Negative gate: isBlockedFromCustomerRole — blocks operational/carrier/ISR/junk
+  //   Positive gate: isPositiveCustomerCandidate — requires real company-name substance
   const customerBurden: CustomerBurdenItem[] = Object.values(custMap)
+    .filter(c => !isBlockedFromCustomerRole(c.name) && isPositiveCustomerCandidate(c.name))
     .map(c => {
       const recs = custRecordsMap[c.name] ?? [];
       const topIssue = topIssueForGroup(recs);
@@ -903,37 +908,29 @@ export function runAnalysis(
   const forecast = buildForecast(weeklyHistory, sortedWeeks, customerBurden, transporterPerformance);
   const actions  = generateActions(issueBreakdown, customerBurden, transporterPerformance);
 
-  // ─── 20. Final chart guards ───────────────────────────────────
-  // Belt-and-suspenders post-aggregation filter:
-  //   NEGATIVE gate — any name that isBlockedFromCustomerRole() catches is removed.
-  //   POSITIVE gate — any name that fails isPositiveCustomerCandidate() is removed.
-  // Both gates must pass. This is the last line of defence before the UI receives data.
-  // The primary gates in sections 4 and 5 should have already excluded all violations;
-  // this final filter catches any edge cases that slipped through.
-  const cleanCustomerBurden = customerBurden.filter(
-    c => !isBlockedFromCustomerRole(c.name) && isPositiveCustomerCandidate(c.name),
-  );
-
-  // Development-mode validation: log violations so they can be investigated.
-  // Does not throw — violations do not crash the dashboard.
+  // ─── 20. Output validation ────────────────────────────────────
+  // customerBurden was already built with both gates applied inline (section 4).
+  // This block runs post-aggregation validation to surface any rule violations,
+  // splitting ERROR (data integrity failures) from WARN (quality issues).
+  // Does not throw — violations are logged for investigation without crashing.
   if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-    // Case number preservation check
     const casesWithNumbers = records.filter(r => r.case_number).length;
     if (casesWithNumbers === 0 && records.length > 0) {
       console.warn(
-        '[CIS validation] No Case Number values found in dataset — evidence drilldown will lack Case No. links.',
-        'Ensure the Excel includes a "Case Number" or "Case No." column.',
+        '[CIS validation] No Case Number values found — evidence drilldown will lack Case No. links.',
+        'Add a "Case Number" or "Case No." column to the Excel.',
       );
     }
     const violations = validateOutputGuards(
-      cleanCustomerBurden,
+      customerBurden,
       transporterPerformance,
       areaHotspots,
       { totalRecords: records.length, recordsWithCaseNumber: casesWithNumbers },
     );
-    if (violations.length > 0) {
-      console.warn('[CIS validation]', violations);
-    }
+    const errors = violations.filter(v => v.severity === 'ERROR');
+    const warns  = violations.filter(v => v.severity === 'WARN');
+    if (errors.length > 0) console.error('[CIS validation] ERRORS (data integrity):', errors);
+    if (warns.length  > 0) console.warn( '[CIS validation] WARNINGS (quality):',     warns);
   }
 
   return {
@@ -943,7 +940,7 @@ export function runAnalysis(
     weeklyHistory,
     sortedWeeks,
     chartWeeks,
-    customerBurden: cleanCustomerBurden,
+    customerBurden,
     transporterPerformance,
     depotPerformance,
     deepseaTerminalData,
