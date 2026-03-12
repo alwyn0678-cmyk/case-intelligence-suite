@@ -32,7 +32,8 @@ export interface IssueMatch {
 const MISSING_SIGNALS = [
   'please provide', 'please send', 'please share', 'please forward',
   'please supply', 'kindly provide', 'kindly send',
-  'can you send', 'can you provide', 'can you share',
+  'can you send', 'can you provide', 'can you share', 'can you advise',
+  'please advise', 'please let us know', 'could you please', 'could you advise',
   'we need', 'we require', 'we are waiting', 'still waiting',
   'not received', 'not provided', 'not yet received', 'not yet sent',
   'not available', 'not found', 'not in', 'not attached',
@@ -74,6 +75,8 @@ const AMENDED_SIGNALS = [
   'wrong', 'incorrect', 'error in', 'mistake in',
   'should be', 'instead of', 'replace with', 'change from',
   'update required', 'needs updating',
+  // Booking cancellation — a cancellation is an amendment/correction event
+  'cancelled', 'cancellation', 'cancel booking', 'cancelling',
 ];
 
 // "DELAYED" signals — time-based failure
@@ -261,6 +264,10 @@ const TOPIC_RULES: TopicRule[] = [
       'wrong shipper', 'wrong port', 'wrong destination',
       'routing change', 'please correct', 'please amend',
       'please update the booking', 'rebook', 're-book',
+      // Cancellations are amendment-class events
+      'booking cancelled', 'booking cancellation', 'cancel booking',
+      'order cancelled', 'shipment cancelled', 'transport cancelled',
+      'loading cancelled', 'pickup cancelled', 'delivery cancelled',
     ],
     weakSignals: [
       'correction', 'amend', 'change request', 'modification',
@@ -425,6 +432,9 @@ const TOPIC_RULES: TopicRule[] = [
     weakSignals: [
       'pickup', 'pick-up', 'pick up', 'delivery planning',
       'collection planning', 'route planning',
+      // Load/loading date queries are pickup/delivery planning
+      'load date', 'loading date', 'loaddate', 'load day',
+      'please advise load', 'advise loading',
     ],
   },
   {
@@ -458,33 +468,64 @@ function resolveIssueId(topic: string, state: IssueState): string {
  * Classify a piece of text using intent-aware rules.
  * Returns all matching issues with confidence and evidence.
  * Never returns 'other' — that is handled by fallbackIssueRules.ts.
+ *
+ * ACCURACY DESIGN: per-topic context-window state detection.
+ *
+ * Each topic's intent/state is detected using a 280-character window
+ * around the first matching keyword, NOT the full field text. This prevents
+ * false positives when a single field contains mixed content — e.g. a
+ * description that provides a load reference AND mentions missing customs
+ * docs would previously conflate the two states via a shared detectState()
+ * call, causing the load-ref to be misclassified as "missing".
+ *
+ * Example:
+ *   "Load ref BKG12345 see below. Customs docs not yet received."
+ *   load_ref topic: context = "Load ref BKG12345 see below" → state=provided → ref_provided ✅
+ *   customs topic:  context = "Customs docs not yet received" → state=missing → customs ✅
+ *
+ * Without context windowing, detectState(fullText) would see "not yet received"
+ * as a negation guard and suppress the "see below" provided signal for ALL topics.
  */
 export function classifyByRules(text: string): IssueMatch[] {
   const t = text.toLowerCase();
   const matches: IssueMatch[] = [];
 
-  const { state, evidence: stateEvidence } = detectState(text);
-
   for (const rule of TOPIC_RULES) {
     const topicEvidence: string[] = [];
     let baseConfidence = 0;
+    // Track position of first matching signal — used to anchor the context window
+    let firstMatchPos = -1;
 
     for (const sig of rule.strongSignals) {
-      if (t.includes(sig)) {
+      const pos = t.indexOf(sig);
+      if (pos !== -1) {
         topicEvidence.push(`"${sig}"`);
         baseConfidence = Math.max(baseConfidence, 0.85);
+        if (firstMatchPos === -1) firstMatchPos = pos;
       }
     }
     if (baseConfidence < 0.85) {
       for (const sig of rule.weakSignals) {
-        if (t.includes(sig)) {
+        const pos = t.indexOf(sig);
+        if (pos !== -1) {
           topicEvidence.push(`"${sig}" (weak)`);
           baseConfidence = Math.max(baseConfidence, 0.55);
+          if (firstMatchPos === -1) firstMatchPos = pos;
         }
       }
     }
 
     if (topicEvidence.length === 0) continue;
+
+    // Per-topic context-window state detection:
+    // Slice a 280-char window (120 before + 160 after the first keyword match)
+    // and run detectState only on that context. This isolates intent detection
+    // to the relevant sentence rather than the whole field.
+    const winStart = Math.max(0, firstMatchPos - 120);
+    const winEnd   = Math.min(text.length, firstMatchPos + 160);
+    const contextWindow = text.slice(winStart, winEnd);
+
+    const { state, evidence: stateEvidence } = detectState(contextWindow);
 
     // State bonus: knowing the intent increases confidence
     const confidenceBonus = state !== 'unknown' ? 0.10 : 0;

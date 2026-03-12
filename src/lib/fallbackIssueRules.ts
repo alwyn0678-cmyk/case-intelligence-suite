@@ -53,7 +53,15 @@ const FALLBACK_RULES: FallbackRule[] = [
     evidence: 'missing reference pattern', confidence: 0.65 },
   { issueId: 'ref_provided', state: 'provided',
     pattern: /\b(here is|find below|see below|as requested).{0,40}(reference|ref|booking number|order number|load number)\b/i,
-    evidence: 'reference provided pattern', confidence: 0.65 },
+    evidence: 'reference provided — see below pattern', confidence: 0.65 },
+  // Explicit ref value follows keyword: "load ref: BKG1234", "ref no 12345", "reference is ABC"
+  { issueId: 'ref_provided', state: 'provided',
+    pattern: /\b(?:load\s*ref(?:erence)?|booking\s*ref(?:erence)?|ref(?:erence)?)\s*(?:is|:|no\.?|#)\s*[A-Z0-9]{4,}/i,
+    evidence: 'explicit reference value pattern', confidence: 0.70 },
+  // Ref sent / forwarded / attached
+  { issueId: 'ref_provided', state: 'provided',
+    pattern: /\b(?:load\s*ref(?:erence)?|booking\s*ref(?:erence)?|reference)\b.{0,40}\b(?:attached|sent|forwarded|provided|below|herewith)\b/i,
+    evidence: 'reference attached/sent pattern', confidence: 0.65 },
 
   // ── T1 / transit ─────────────────────────────────────────────────
   { issueId: 't1', state: 'missing',

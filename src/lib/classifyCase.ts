@@ -320,25 +320,80 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     unresolvedReason = 'No matching rules or patterns found. Manual review required.';
   }
 
-  // ── Load-ref ambiguity resolution ────────────────────────────
-  // Problem: "ref no 1234" contains "no " which matches MISSING_SIGNALS.
-  //          But "ref no" means "reference number" — the ref WAS provided.
-  // Fix: when state=unknown AND a reference number immediately follows a
-  //      ref/loadref/booking keyword, reclassify as ref_provided.
-  // We only do this for state='unknown' — if 'missing' was explicitly
-  // detected (strong signal like "please provide"), we leave it alone.
-  if (issues.includes('load_ref') && issueState === 'unknown') {
-    // Pattern: ref/loadref/booking ref + optional "no." + alphanumeric ref (4+ chars)
-    const refNumPresent = /(?:(?:load\s*)?ref(?:erence)?|loadref|booking\s*ref(?:erence)?)\s*(?:no\.?\s*|#\s*)?[A-Z0-9]{4,}/i.test(normalizedText);
-    if (refNumPresent) {
-      issues = issues.map(i => i === 'load_ref' ? 'ref_provided' : i);
-      issueState = 'provided';
-      evidence.push('load-ref number present → ref_provided');
+  // ── Load-ref accuracy: missing vs provided disambiguation ─────
+  //
+  // The load_ref topic fires on keywords like "load ref", "booking ref",
+  // "ref no", etc. Whether the case is MISSING or PROVIDED depends on intent.
+  // Two disambiguation passes run here:
+  //
+  // Case A (state=unknown): a reference number follows the keyword immediately.
+  //   "ref no BKG1234" — "no" is "number" not negation → provided.
+  //
+  // Case B (state=missing): subject line suggests "missing" but the description
+  //   body explicitly provides the actual reference value or contains a "see below"
+  //   / "ref is XXXX" pattern. Description body overrides subject intent for this.
+  if (issues.includes('load_ref')) {
+    if (issueState === 'unknown') {
+      // Case A: alphanumeric ref value immediately follows keyword
+      const refNumPresent = /(?:(?:load\s*)?ref(?:erence)?|loadref|booking\s*ref(?:erence)?)\s*(?:no\.?\s*|#\s*)?[A-Z0-9]{4,}/i.test(normalizedText);
+      if (refNumPresent) {
+        issues = issues.map(i => i === 'load_ref' ? 'ref_provided' : i);
+        issueState = 'provided';
+        evidence.push('load-ref number present → ref_provided');
+      }
+    } else if (issueState === 'missing') {
+      // Case B: description body explicitly provides the reference.
+      // This happens when the subject says "Missing Load Ref" (driving state=missing)
+      // but the email body actually contains the ref value. Body wins.
+      const descText = fields.description ?? '';
+      const BODY_PROVIDES_REF = [
+        // "ref is BKG12345", "load ref: BKG12345", "reference: BKG12345"
+        /(?:load\s*ref(?:erence)?|booking\s*ref(?:erence)?|ref(?:erence)?)\s*(?:is|:)\s*[A-Z0-9]{4,}/i,
+        // "see below ... ref", "find below ... load"
+        /(?:see|find)\s+below.{0,60}(?:ref(?:erence)?|load|booking)/i,
+        // "ref ... see below"
+        /(?:ref(?:erence)?|load|booking).{0,40}(?:see|find)\s+below/i,
+        // "attached / herewith ... ref"
+        /(?:attached|herewith|find\s+enclosed).{0,60}(?:ref(?:erence)?|load|booking|reference)/i,
+        // "reference no BKG1234", "ref # BKG1234"
+        /(?:reference|load\s*ref|booking\s*ref)\s*(?:no\.?\s*|#\s*|:\s*)[A-Z0-9]{4,}/i,
+      ];
+      if (descText.trim().length > 10 && BODY_PROVIDES_REF.some(p => p.test(descText))) {
+        issues = issues.map(i => i === 'load_ref' ? 'ref_provided' : i);
+        issueState = 'provided';
+        evidence.push('[description] body provides explicit ref — overrides subject missing-signal → ref_provided');
+      }
+    }
+  }
+
+  // ── Contradiction guard: ref_provided and load_ref are mutually exclusive ──
+  // Context-window detection can produce both if subject and description disagree.
+  // Keep only ref_provided — a reference cannot be simultaneously missing and provided.
+  // This also prevents secondary load_ref from inflating "Missing Load Ref" counts
+  // in the aggregation layer (which sums all issues[], not just primaryIssue).
+  if (issues.includes('ref_provided') && issues.includes('load_ref')) {
+    issues = issues.filter(i => i !== 'load_ref');
+  }
+
+  // ── Subject-only classification penalty ───────────────────────
+  // When description is substantive (>30 chars) but contributed no classification
+  // evidence, the primary classification was driven only by subject/category fields.
+  // Subject is less operationally reliable than body text — apply a confidence
+  // penalty and flag for review.
+  const hasSubstantiveDesc  = (fields.description ?? '').trim().length > 30;
+  const descHasEvidence     = evidence.some(e => e.startsWith('[description]'));
+  if (hasSubstantiveDesc && !descHasEvidence && confidence > 0.60) {
+    confidence = Math.max(confidence - 0.18, 0.48);
+    if (!reviewFlag) {
+      reviewFlag = true;
+      unresolvedReason = 'Subject-only classification — description present but provided no matching evidence. Verify manually.';
     }
   }
 
   // ── Flag low confidence ───────────────────────────────────────
-  if (confidence < 0.50 && !reviewFlag) {
+  // Threshold raised from 0.50 to 0.60 to catch weak-signal-only classifications
+  // (weak + state bonus = 0.65 → after field weight may be below 0.60).
+  if (confidence < 0.60 && !reviewFlag) {
     reviewFlag = true;
     unresolvedReason = unresolvedReason ?? `Low confidence (${(confidence * 100).toFixed(0)}%) — classified by weak signal.`;
   }
