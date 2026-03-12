@@ -18,7 +18,7 @@
 // ─────────────────────────────────────────────────────────────────
 
 import { extractEntities }              from './entityExtraction';
-import { lookupEntity }                 from '../config/referenceData';
+import { lookupEntity, isInternalISRLabel, isCustomerJunkLabel } from '../config/referenceData';
 import { classifyByRules }              from './issueRules';
 import { fallbackClassify, operationalClueScan } from './fallbackIssueRules';
 import { resolveZipToArea, extractZipsFromText } from '../config/zipAreaRules';
@@ -146,6 +146,14 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
       resolvedCustomer = rawCustLookup ? rawCustLookup.entry.canonicalName : record.customer.trim();
     }
     // If operational block: it is a depot/terminal/approved haulier. Leave resolvedCustomer null.
+  }
+
+  // ── ISR / junk null-out: last-resort guard before record is stored ──────
+  // Even if entity extraction or the raw-value fallback set a customer name,
+  // discard it if it is an internal ISR address-book entry or a junk placeholder.
+  // These cases are counted as unresolved (unknownCustomerCaseCount in analyzeData).
+  if (resolvedCustomer && (isInternalISRLabel(resolvedCustomer) || isCustomerJunkLabel(resolvedCustomer))) {
+    resolvedCustomer = null;
   }
 
   // ── 6. Extract references ─────────────────────────────────────

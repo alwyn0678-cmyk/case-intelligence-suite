@@ -70,12 +70,12 @@ export const INLAND_DEPOTS: EntityEntry[] = [
   { canonicalName: 'Gustavsburg Contargo',  entityType: 'depot', roles: ['depot','transporter'], aliases: ['gustavsburg contargo','gustavsburg','contargo gustavsburg'] },
   // HGK: Rhine barge shipping company + inland depot operations
   { canonicalName: 'HGK',                   entityType: 'depot', roles: ['depot','transporter'], aliases: ['hgk shipping','hgk','hgk transport','hgk barge'] },
-  // ── Depot-only (no independent transport role in this system) ────
+  // ── Depot-only ────────────────────────────────────────────────────
   { canonicalName: 'ZSK am Zehnhoff',       entityType: 'depot', roles: ['depot'], aliases: ['am zehnhoff','zehnhoff','zsk','andernach zehnhoff'] },
-  { canonicalName: 'H&S Andernach',         entityType: 'depot', roles: ['depot'], aliases: ['h&s andernach','h s andernach','hs andernach','deajhra','h&s schiffahrts andernach','h+s andernach'] },
-  { canonicalName: 'Bonn AZS',              entityType: 'depot', roles: ['depot'], aliases: ['bonn azs','azs bonn','debnx01','bon depot'] },
-  { canonicalName: 'Trier AZS',             entityType: 'depot', roles: ['depot'], aliases: ['trier azs','azs trier','detreaz'] },
-  { canonicalName: 'EGS Nuremberg',         entityType: 'depot', roles: ['depot'], aliases: ['egs nuremberg','egs nürnberg','egs','denue02'] },
+  { canonicalName: 'H&S Andernach',         entityType: 'depot', roles: ['depot','transporter'], aliases: ['h&s andernach','h s andernach','hs andernach','deajhra','h&s schiffahrts andernach','h+s andernach'] },
+  { canonicalName: 'Bonn AZS',              entityType: 'depot', roles: ['depot','transporter'], aliases: ['bonn azs','azs bonn','debnx01','bon depot'] },
+  { canonicalName: 'Trier AZS',             entityType: 'depot', roles: ['depot','transporter'], aliases: ['trier azs','azs trier','detreaz'] },
+  { canonicalName: 'EGS Nuremberg',         entityType: 'depot', roles: ['depot','transporter'], aliases: ['egs nuremberg','egs nürnberg','egs','denue02'] },
   { canonicalName: 'Rheinhafen Andernach',  entityType: 'depot', roles: ['depot'], aliases: ['rheinhafen andernach','andernach depot'] },
   // Rhine South / Basel
   { canonicalName: 'Rhenus Basel',          entityType: 'depot', roles: ['depot'], aliases: ['rhenus basel','rhenus port basel','rheinport basel'] },
@@ -382,4 +382,61 @@ export function isCustomerJunkLabel(name: string): boolean {
   const lower = name.toLowerCase().trim();
   if (lower.length < 2) return true;
   return CUSTOMER_JUNK_EXACT.has(lower);
+}
+// ─────────────────────────────────────────────────────────────────
+// OUTPUT QUALITY VALIDATION
+//
+// Call validateOutputGuards() after aggregation to detect any
+// data-quality violations in the final dashboard output.
+// Returns an array of violations (empty = clean).
+// ─────────────────────────────────────────────────────────────────
+
+export interface ValidationViolation {
+  rule: string;
+  offender: string;
+  severity: 'ERROR' | 'WARN';
+}
+
+/**
+ * Scan aggregated dashboard output for rule violations.
+ *
+ * Checks enforced:
+ *  1. No operational entity (depot/terminal/transporter) in Customer Burden
+ *  2. No internal ISR label in Customer Burden
+ *  3. No junk placeholder in Customer Burden
+ *  4. Only approved transporters in Transporter Performance
+ *  5. All expected new approved transporters are resolvable
+ */
+export function validateOutputGuards(
+  customerBurden:        Array<{ name: string }>,
+  transporterPerformance: Array<{ name: string }>,
+): ValidationViolation[] {
+  const v: ValidationViolation[] = [];
+
+  for (const c of customerBurden) {
+    if (isKnownOperationalEntity(c.name))
+      v.push({ rule: 'OPERATIONAL_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
+    if (isInternalISRLabel(c.name))
+      v.push({ rule: 'ISR_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
+    if (isCustomerJunkLabel(c.name))
+      v.push({ rule: 'JUNK_IN_CUSTOMER_BURDEN', offender: c.name, severity: 'ERROR' });
+  }
+
+  for (const t of transporterPerformance) {
+    if (!isApprovedTransporter(t.name))
+      v.push({ rule: 'NON_APPROVED_IN_TRANSPORTER', offender: t.name, severity: 'ERROR' });
+  }
+
+  // Verify new approved transporters are in the dictionary
+  const requiredTransporters = [
+    'optimodal nederland bv', 'kiem transport',
+    'dch duesseldorfer container-hafen',
+    'h&s andernach', 'bonn azs', 'trier azs', 'egs nuremberg',
+  ];
+  for (const alias of requiredTransporters) {
+    if (!isApprovedTransporter(alias))
+      v.push({ rule: 'APPROVED_TRANSPORTER_MISSING', offender: alias, severity: 'WARN' });
+  }
+
+  return v;
 }

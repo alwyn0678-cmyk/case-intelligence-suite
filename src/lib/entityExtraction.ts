@@ -15,7 +15,7 @@
 // they can appear as customers if the customer column contains them.
 // ─────────────────────────────────────────────────────────────────
 
-import { lookupEntity, ENTITY_ALIAS_MAP, type EntityType } from '../config/referenceData';
+import { lookupEntity, ENTITY_ALIAS_MAP, type EntityType, isInternalISRLabel, isCustomerJunkLabel } from '../config/referenceData';
 
 export interface ExtractedEntity {
   rawValue: string;
@@ -168,7 +168,11 @@ export function extractEntities(
   let customer: ExtractedEntity | null = null;
   const custText = customerCol?.trim() ?? '';
 
-  if (custText) {
+  // Skip customer inference for internal ISR labels and junk placeholders.
+  // These must never reach the customer slot or customer-level reporting.
+  if (custText && (isInternalISRLabel(custText) || isCustomerJunkLabel(custText))) {
+    // Leave customer as null — treated as unresolved in aggregation.
+  } else if (custText) {
     const knownMatch = lookupEntity(custText);
     const isOperationalBlock =
       knownMatch !== null &&
