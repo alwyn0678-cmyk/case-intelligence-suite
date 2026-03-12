@@ -10,7 +10,7 @@ import type {
 } from '../types/analysis';
 import { buildForecast } from './forecast';
 import { isKnownOperationalEntity, isApprovedTransporter, isBlockedFromCustomerRole, isInternalISRLabel, isAllowedAreaLabel, validateOutputGuards, isPositiveCustomerCandidate } from '../config/referenceData';
-import { PROVIDED_REF_PATTERNS } from './loadRefGuards';
+
 import { isLoadRefFalsePositive, detectsTransportOrder, validateCaseNumberPreservation } from './validators';
 import {} from './textNormalization';
 
@@ -946,7 +946,7 @@ export function runAnalysis(
       customerBurden,
       transporterPerformance,
       areaHotspots,
-      { totalRecords: records.length, recordsWithCaseNumber: casesWithNumbers },
+      { totalRecords: records.length, recordsWithCaseNumber: cnReport.preserved },
     );
     const errors = violations.filter(v => v.severity === 'ERROR');
     const warns  = violations.filter(v => v.severity === 'WARN');
