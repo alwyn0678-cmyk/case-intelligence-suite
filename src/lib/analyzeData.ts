@@ -891,6 +891,39 @@ export function runAnalysis(
         'Add a "Case Number" or "Case No." column to the Excel.',
       );
     }
+
+    // ── Row-level load-ref contradiction scan ─────────────────────
+    // After all classification passes (context-window detection, description-override,
+    // contradiction guard), any remaining load_ref(missing) case whose description
+    // contains an explicit provided-ref pattern is a classifier false positive.
+    // Flag these so they can be investigated and the classifier improved.
+    const PROVIDED_REF_SCAN = [
+      /(?:load\s*ref(?:erence)?|booking\s*ref(?:erence)?|ref(?:erence)?)\s*(?:is|:)\s*[A-Z0-9]{4,}/i,
+      /(?:see|find)\s+below.{0,60}(?:ref(?:erence)?|load|booking)/i,
+      /(?:ref(?:erence)?|load|booking).{0,40}(?:see|find)\s+below/i,
+      /(?:attached|herewith|find\s+enclosed).{0,60}(?:ref(?:erence)?|load|booking)/i,
+      /(?:reference|load\s*ref|booking\s*ref)\s*(?:no\.?\s*|#\s*|:\s*)[A-Z0-9]{4,}/i,
+      /\bref(?:erence)?\s+no\.?\s*[A-Z0-9]{4,}/i,
+    ];
+    const loadRefFalsePositives = records.filter(r =>
+      r.primaryIssue === 'load_ref' &&
+      r.issueState  !== 'provided' &&
+      r.description  &&
+      PROVIDED_REF_SCAN.some(p => p.test(r.description ?? ''))
+    );
+    if (loadRefFalsePositives.length > 0) {
+      console.error(
+        `[CIS validation] LOAD_REF_FALSE_POSITIVE: ${loadRefFalsePositives.length} case(s) classified as Missing Load Ref but description contains provided-ref pattern.`,
+        loadRefFalsePositives.map(r => ({
+          caseNumber: r.case_number ?? '—',
+          subject:    r.subject?.slice(0, 80) ?? '—',
+          descSnippet: r.description?.slice(0, 120) ?? '—',
+          confidence: r.confidence,
+          evidence:   r.evidence,
+        })),
+      );
+    }
+
     const violations = validateOutputGuards(
       customerBurden,
       transporterPerformance,
