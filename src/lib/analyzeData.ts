@@ -9,7 +9,7 @@ import type {
   IssueDrilldown, WeekOnWeek, WowChange, RepeatOffenderItem, ActionInsight,
 } from '../types/analysis';
 import { buildForecast } from './forecast';
-import { isKnownOperationalEntity, isApprovedTransporter, isBlockedFromCustomerRole, isInternalISRLabel, isAllowedAreaLabel, validateOutputGuards, isPositiveCustomerCandidate } from '../config/referenceData';
+import { isApprovedTransporter, isBlockedFromCustomerRole, isInternalISRLabel, isAllowedAreaLabel, validateOutputGuards, isPositiveCustomerCandidate } from '../config/referenceData';
 
 import { isLoadRefFalsePositive, detectsTransportOrder, validateCaseNumberPreservation, isSentenceFragment } from './validators';
 import {} from './textNormalization';
@@ -951,7 +951,7 @@ export function runAnalysis(
     if (sentenceFragmentLeaks.length > 0) {
       console.error(
         `[CIS validation] SENTENCE_FRAGMENT_IN_CUSTOMER_BURDEN: ${sentenceFragmentLeaks.length} name(s) look like email prose rather than company names.`,
-        sentenceFragmentLeaks.map(c => ({ name: c.name, caseCount: c.caseCount })),
+        sentenceFragmentLeaks.map(c => ({ name: c.name, count: c.count })),
       );
     }
 
