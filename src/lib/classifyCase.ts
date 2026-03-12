@@ -172,10 +172,9 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     }
   }
 
-  // Ultimate fallback: cases with no resolvable area default to Switzerland area
-  if (!resolvedArea) {
-    resolvedArea = 'Switzerland area';
-  }
+  // No area fallback: leave as null — do NOT default to "Switzerland area".
+  // Unresolved areas are omitted from area hotspot charts rather than
+  // being incorrectly assigned to a geography.
 
   // Routing alignment: compare expected depot from ZIP vs. actual depot found
   let routingAlignment: RoutingAlignment = 'no_zip';
@@ -241,6 +240,23 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     confidence       = 0.10;
     reviewFlag       = true;
     unresolvedReason = 'No matching rules or patterns found. Manual review required.';
+  }
+
+  // ── Load-ref ambiguity resolution ────────────────────────────
+  // Problem: "ref no 1234" contains "no " which matches MISSING_SIGNALS.
+  //          But "ref no" means "reference number" — the ref WAS provided.
+  // Fix: when state=unknown AND a reference number immediately follows a
+  //      ref/loadref/booking keyword, reclassify as ref_provided.
+  // We only do this for state='unknown' — if 'missing' was explicitly
+  // detected (strong signal like "please provide"), we leave it alone.
+  if (issues.includes('load_ref') && issueState === 'unknown') {
+    // Pattern: ref/loadref/booking ref + optional "no." + alphanumeric ref (4+ chars)
+    const refNumPresent = /(?:(?:load\s*)?ref(?:erence)?|loadref|booking\s*ref(?:erence)?)\s*(?:no\.?\s*|#\s*)?[A-Z0-9]{4,}/i.test(normalizedText);
+    if (refNumPresent) {
+      issues = issues.map(i => i === 'load_ref' ? 'ref_provided' : i);
+      issueState = 'provided';
+      evidence.push('load-ref number present → ref_provided');
+    }
   }
 
   // ── Flag low confidence ───────────────────────────────────────

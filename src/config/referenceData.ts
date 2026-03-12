@@ -1,17 +1,26 @@
 // ─────────────────────────────────────────────────────────────────
 // Built-in entity reference dictionaries
-// Every entity has: canonicalName, entityType, and aliases[]
-// Priority for classification: deepsea_terminal > depot > transporter > customer
-// 'carrier' = recognised external logistics company; NOT blocked from customer charts;
-//             NOT shown in Transporter Performance (approved hauliers only).
+//
+// ROLE-BASED ENTITY MODEL
+// Every entity has:
+//   entityType  — primary type for priority resolution and customer-blocking
+//   roles[]     — ALL functional roles this entity can fulfill
+//
+// An entity can be both a transporter AND a depot (e.g. Contargo,
+// DP World Germersheim, HP Duisburg, CTV Vrede, EKB Transport).
+// These dual-role entities appear in BOTH transporter and depot reporting.
+//
+// Priority for customer-blocking: deepsea_terminal > depot > transporter > carrier
+// Only 'carrier' entities can appear in Customer Burden charts.
 // ─────────────────────────────────────────────────────────────────
 
 export type EntityType = 'transporter' | 'depot' | 'deepsea_terminal' | 'customer' | 'carrier' | 'unknown_entity';
 
 export interface EntityEntry {
   canonicalName: string;
-  entityType: EntityType;
-  aliases: string[];           // all lowercase, used for matching
+  entityType: EntityType;   // primary type (priority resolution + customer-blocking)
+  roles: EntityType[];      // ALL functional roles (transporter, depot, etc.)
+  aliases: string[];        // all lowercase, used for matching
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -21,107 +30,119 @@ export interface EntityEntry {
 // ─────────────────────────────────────────────────────────────────
 export const DEEPSEA_TERMINALS: EntityEntry[] = [
   // Rotterdam
-  { canonicalName: 'ECT Delta Terminal',       entityType: 'deepsea_terminal', aliases: ['ect delta','ect','ect euromax','europe combined terminals'] },
-  { canonicalName: 'APM Terminals Maasvlakte', entityType: 'deepsea_terminal', aliases: ['apm terminals','apmt','apm maasvlakte','apmt maasvlakte','apm rotterdam'] },
-  { canonicalName: 'RWG Terminal',             entityType: 'deepsea_terminal', aliases: ['rwg','rotterdam world gateway','world gateway'] },
-  { canonicalName: 'EUROMAX Terminal',         entityType: 'deepsea_terminal', aliases: ['euromax terminal','euromax rotterdam','euromax'] },
-  { canonicalName: 'Hutchison Ports Rotterdam',entityType: 'deepsea_terminal', aliases: ['hutchison ports rotterdam','hutchison rotterdam','hutchison ecth','ecth'] },
-  { canonicalName: 'Uniport Multipurpose',     entityType: 'deepsea_terminal', aliases: ['uniport','uniport multipurpose','uniport rotterdam'] },
-  { canonicalName: 'OVET Terminal',            entityType: 'deepsea_terminal', aliases: ['ovet','ovet terminal'] },
+  { canonicalName: 'ECT Delta Terminal',        entityType: 'deepsea_terminal', roles: ['deepsea_terminal'], aliases: ['ect delta','ect','ect euromax','europe combined terminals'] },
+  { canonicalName: 'APM Terminals Maasvlakte',  entityType: 'deepsea_terminal', roles: ['deepsea_terminal'], aliases: ['apm terminals','apmt','apm maasvlakte','apmt maasvlakte','apm rotterdam'] },
+  { canonicalName: 'RWG Terminal',              entityType: 'deepsea_terminal', roles: ['deepsea_terminal'], aliases: ['rwg','rotterdam world gateway','world gateway'] },
+  { canonicalName: 'EUROMAX Terminal',          entityType: 'deepsea_terminal', roles: ['deepsea_terminal'], aliases: ['euromax terminal','euromax rotterdam','euromax'] },
+  { canonicalName: 'Hutchison Ports Rotterdam', entityType: 'deepsea_terminal', roles: ['deepsea_terminal'], aliases: ['hutchison ports rotterdam','hutchison rotterdam','hutchison ecth','ecth'] },
+  { canonicalName: 'Uniport Multipurpose',      entityType: 'deepsea_terminal', roles: ['deepsea_terminal'], aliases: ['uniport','uniport multipurpose','uniport rotterdam'] },
+  { canonicalName: 'OVET Terminal',             entityType: 'deepsea_terminal', roles: ['deepsea_terminal'], aliases: ['ovet','ovet terminal'] },
   // Antwerp
-  { canonicalName: 'MSC PSA European Terminal',entityType: 'deepsea_terminal', aliases: ['msct','msc psa','psa antwerp','msc psa european terminal','deurganckdok'] },
-  { canonicalName: 'DP World Antwerp Gateway', entityType: 'deepsea_terminal', aliases: ['dp world antwerp','antwerp gateway','dpw antwerp'] },
-  { canonicalName: 'PSA HNN Antwerp',          entityType: 'deepsea_terminal', aliases: ['psa hnn','hnn antwerp','hessenatie','north sea terminal antwerp'] },
-  { canonicalName: 'Antwerp Terminal',         entityType: 'deepsea_terminal', aliases: ['antwerp terminal','at antwerp'] },
+  { canonicalName: 'MSC PSA European Terminal', entityType: 'deepsea_terminal', roles: ['deepsea_terminal'], aliases: ['msct','msc psa','psa antwerp','msc psa european terminal','deurganckdok'] },
+  { canonicalName: 'DP World Antwerp Gateway',  entityType: 'deepsea_terminal', roles: ['deepsea_terminal'], aliases: ['dp world antwerp','antwerp gateway','dpw antwerp'] },
+  { canonicalName: 'PSA HNN Antwerp',           entityType: 'deepsea_terminal', roles: ['deepsea_terminal'], aliases: ['psa hnn','hnn antwerp','hessenatie','north sea terminal antwerp'] },
+  { canonicalName: 'Antwerp Terminal',          entityType: 'deepsea_terminal', roles: ['deepsea_terminal'], aliases: ['antwerp terminal','at antwerp'] },
   // Bremen / Bremerhaven
-  { canonicalName: 'Eurogate Bremerhaven',     entityType: 'deepsea_terminal', aliases: ['eurogate bremerhaven','bct','bremer container terminal'] },
-  { canonicalName: 'NTB Bremerhaven',          entityType: 'deepsea_terminal', aliases: ['ntb','north sea terminal bremerhaven','nst bremerhaven'] },
+  { canonicalName: 'Eurogate Bremerhaven',      entityType: 'deepsea_terminal', roles: ['deepsea_terminal'], aliases: ['eurogate bremerhaven','bct','bremer container terminal'] },
+  { canonicalName: 'NTB Bremerhaven',           entityType: 'deepsea_terminal', roles: ['deepsea_terminal'], aliases: ['ntb','north sea terminal bremerhaven','nst bremerhaven'] },
 ];
 
 // ─────────────────────────────────────────────────────────────────
 // INLAND DEPOTS / BARGE-RAIL TERMINALS
+//
+// Many inland operators act as BOTH the depot/terminal AND the
+// transport/barge operator. These carry roles: ['depot','transporter']
+// and appear in BOTH Depot reporting AND Transporter Performance.
 // ─────────────────────────────────────────────────────────────────
 export const INLAND_DEPOTS: EntityEntry[] = [
-  // Rhine corridor
-  { canonicalName: 'Contargo Rhine Ruhr',    entityType: 'depot', aliases: ['contargo rhine ruhr','contargo ruhr','contargo dortmund','contargo duisburg'] },
-  { canonicalName: 'Contargo Trimodal',      entityType: 'depot', aliases: ['contargo trimodal','contargo köln','contargo cologne','contargo neuss'] },
-  { canonicalName: 'Contargo',               entityType: 'depot', aliases: ['contargo'] },
-  { canonicalName: 'ZSK am Zehnhoff',        entityType: 'depot', aliases: ['am zehnhoff','zehnhoff','zsk','andernach zehnhoff'] },
-  { canonicalName: 'H&S Andernach',          entityType: 'depot', aliases: ['h&s andernach','h s andernach','hs andernach','deajhra','h&s schiffahrts andernach','h+s andernach'] },
-  { canonicalName: 'Bonn AZS',               entityType: 'depot', aliases: ['bonn azs','azs bonn','debnx01','bon depot'] },
-  { canonicalName: 'Trier AZS',              entityType: 'depot', aliases: ['trier azs','azs trier','detreaz'] },
-  { canonicalName: 'EGS Nuremberg',          entityType: 'depot', aliases: ['egs nuremberg','egs nürnberg','egs','denue02'] },
-  { canonicalName: 'Germersheim DPW',        entityType: 'depot', aliases: ['germersheim dpw','dpw germersheim','germersheim','dp world germersheim','degrh01'] },
-  { canonicalName: 'Rheinhafen Andernach',   entityType: 'depot', aliases: ['rheinhafen andernach','andernach depot'] },
-  { canonicalName: 'Gustavsburg Contargo',   entityType: 'depot', aliases: ['gustavsburg contargo','gustavsburg','contargo gustavsburg'] },
-  { canonicalName: 'Mainz Frankenbach',      entityType: 'depot', aliases: ['mainz frankenbach','frankenbach','mainz depot'] },
+  // ── Dual-role: depot + transporter ───────────────────────────────
+  // Germersheim: DP World operates both the inland terminal and Rhine barge transport
+  { canonicalName: 'Germersheim DPW',       entityType: 'depot', roles: ['depot','transporter'], aliases: ['germersheim dpw','dpw germersheim','germersheim','dp world germersheim','degrh01'] },
+  // HP Duisburg: Rhine barge company that also operates an inland depot
+  { canonicalName: 'HP Duisburg',           entityType: 'depot', roles: ['depot','transporter'], aliases: ['hp duisburg'] },
+  // Contargo variants: Rhine shipping + inland terminal operator
+  { canonicalName: 'Contargo Rhine Ruhr',   entityType: 'depot', roles: ['depot','transporter'], aliases: ['contargo rhine ruhr','contargo ruhr','contargo dortmund','contargo duisburg'] },
+  { canonicalName: 'Contargo Trimodal',     entityType: 'depot', roles: ['depot','transporter'], aliases: ['contargo trimodal','contargo köln','contargo cologne','contargo neuss'] },
+  { canonicalName: 'Contargo',              entityType: 'depot', roles: ['depot','transporter'], aliases: ['contargo'] },
+  // Frankenbach/Mainz: inland depot also acting as transport operator
+  { canonicalName: 'Mainz Frankenbach',     entityType: 'depot', roles: ['depot','transporter'], aliases: ['mainz frankenbach','frankenbach','mainz depot'] },
+  // Gustavsburg Contargo: Rhine terminal at Mainz junction
+  { canonicalName: 'Gustavsburg Contargo',  entityType: 'depot', roles: ['depot','transporter'], aliases: ['gustavsburg contargo','gustavsburg','contargo gustavsburg'] },
+  // HGK: Rhine barge shipping company + inland depot operations
+  { canonicalName: 'HGK',                   entityType: 'depot', roles: ['depot','transporter'], aliases: ['hgk shipping','hgk','hgk transport','hgk barge'] },
+  // ── Depot-only (no independent transport role in this system) ────
+  { canonicalName: 'ZSK am Zehnhoff',       entityType: 'depot', roles: ['depot'], aliases: ['am zehnhoff','zehnhoff','zsk','andernach zehnhoff'] },
+  { canonicalName: 'H&S Andernach',         entityType: 'depot', roles: ['depot'], aliases: ['h&s andernach','h s andernach','hs andernach','deajhra','h&s schiffahrts andernach','h+s andernach'] },
+  { canonicalName: 'Bonn AZS',              entityType: 'depot', roles: ['depot'], aliases: ['bonn azs','azs bonn','debnx01','bon depot'] },
+  { canonicalName: 'Trier AZS',             entityType: 'depot', roles: ['depot'], aliases: ['trier azs','azs trier','detreaz'] },
+  { canonicalName: 'EGS Nuremberg',         entityType: 'depot', roles: ['depot'], aliases: ['egs nuremberg','egs nürnberg','egs','denue02'] },
+  { canonicalName: 'Rheinhafen Andernach',  entityType: 'depot', roles: ['depot'], aliases: ['rheinhafen andernach','andernach depot'] },
   // Rhine South / Basel
-  { canonicalName: 'Rhenus Basel',           entityType: 'depot', aliases: ['rhenus basel','rhenus port basel','rheinport basel'] },
-  { canonicalName: 'Häfen Basel',            entityType: 'depot', aliases: ['häfen basel','hafen basel','rheinhafen basel'] },
+  { canonicalName: 'Rhenus Basel',          entityType: 'depot', roles: ['depot'], aliases: ['rhenus basel','rhenus port basel','rheinport basel'] },
+  { canonicalName: 'Häfen Basel',           entityType: 'depot', roles: ['depot'], aliases: ['häfen basel','hafen basel','rheinhafen basel'] },
   // Ruhr / NRW
-  { canonicalName: 'DIT Depot',              entityType: 'depot', aliases: ['dit depot','dit duisburg','duisburg intermodal'] },
-  { canonicalName: 'RRT Depot',              entityType: 'depot', aliases: ['rrt depot','rrt duisburg'] },
-  { canonicalName: 'Duisburg Hafen',         entityType: 'depot', aliases: ['duisport','duisburg hafen','duisburg port','dusiburg'] },
-  { canonicalName: 'HP Duisburg',            entityType: 'depot', aliases: ['hp duisburg'] },
+  { canonicalName: 'DIT Depot',             entityType: 'depot', roles: ['depot'], aliases: ['dit depot','dit duisburg','duisburg intermodal'] },
+  { canonicalName: 'RRT Depot',             entityType: 'depot', roles: ['depot'], aliases: ['rrt depot','rrt duisburg'] },
+  { canonicalName: 'Duisburg Hafen',        entityType: 'depot', roles: ['depot'], aliases: ['duisport','duisburg hafen','duisburg port','dusiburg'] },
   // Bavaria / South Germany
-  { canonicalName: 'Nürnberg CDN',           entityType: 'depot', aliases: ['nuernberg cdn','nürnberg cdn','cdn nuremberg','cdn nürnberg'] },
-  { canonicalName: 'München Container Terminal',entityType: 'depot', aliases: ['münchen container','munich container','mct münchen','mct munich'] },
+  { canonicalName: 'Nürnberg CDN',          entityType: 'depot', roles: ['depot'], aliases: ['nuernberg cdn','nürnberg cdn','cdn nuremberg','cdn nürnberg'] },
+  { canonicalName: 'München Container Terminal', entityType: 'depot', roles: ['depot'], aliases: ['münchen container','munich container','mct münchen','mct munich'] },
   // Netherlands inland
-  { canonicalName: 'Moerdijk Container Terminal',entityType: 'depot', aliases: ['moerdijk','mct moerdijk','container terminal moerdijk'] },
-  { canonicalName: 'Nijmegen Inland Terminal',entityType: 'depot', aliases: ['nijmegen terminal','barge nijmegen'] },
-  { canonicalName: 'Venlo Container Terminal',entityType: 'depot', aliases: ['venlo terminal','venlo container'] },
+  { canonicalName: 'Moerdijk Container Terminal', entityType: 'depot', roles: ['depot'], aliases: ['moerdijk','mct moerdijk','container terminal moerdijk'] },
+  { canonicalName: 'Nijmegen Inland Terminal', entityType: 'depot', roles: ['depot'], aliases: ['nijmegen terminal','barge nijmegen'] },
+  { canonicalName: 'Venlo Container Terminal', entityType: 'depot', roles: ['depot'], aliases: ['venlo terminal','venlo container'] },
   // Belgium inland
-  { canonicalName: 'Liège Container Terminal',entityType: 'depot', aliases: ['liège terminal','liege terminal','trilogiport'] },
+  { canonicalName: 'Liège Container Terminal', entityType: 'depot', roles: ['depot'], aliases: ['liège terminal','liege terminal','trilogiport'] },
 ];
 
 // ─────────────────────────────────────────────────────────────────
 // APPROVED SPECIALIST INLAND HAULIERS
-// ONLY these 6 appear in Transporter Performance reporting.
-// entityType = 'transporter' is EXCLUSIVELY reserved for these.
+//
+// These appear in Transporter Performance reporting.
+// CTV Vrede and EKB Transport are also depot operators →
+// roles: ['transporter','depot'] → appear in both Transporter AND Depot charts.
 // ─────────────────────────────────────────────────────────────────
 export const APPROVED_TRANSPORTERS: EntityEntry[] = [
-  { canonicalName: 'Starmans',    entityType: 'transporter', aliases: ['starmans'] },
-  { canonicalName: 'Henk Dammes', entityType: 'transporter', aliases: ['henk dammes','dammes'] },
-  { canonicalName: 'Falcoline',   entityType: 'transporter', aliases: ['falcoline','falcoline gmbh','falcoline transport','falcoline spedition'] },
-  { canonicalName: 'GTS Coldchain',entityType: 'transporter', aliases: ['gts coldchain','gts cold','gts truck','gts logistics','gts duisburg','gts transport','gts'] },
-  { canonicalName: 'CTV Vrede',   entityType: 'transporter', aliases: ['ctv vrede','ctv transport','ctv','ctv spedition','ctv gmbh'] },
-  { canonicalName: 'EKB Transport',entityType: 'transporter', aliases: ['ekb transport','ekb'] },
+  { canonicalName: 'Starmans',     entityType: 'transporter', roles: ['transporter'],          aliases: ['starmans'] },
+  { canonicalName: 'Henk Dammes',  entityType: 'transporter', roles: ['transporter'],          aliases: ['henk dammes','dammes'] },
+  { canonicalName: 'Falcoline',    entityType: 'transporter', roles: ['transporter'],          aliases: ['falcoline','falcoline gmbh','falcoline transport','falcoline spedition'] },
+  { canonicalName: 'GTS Coldchain',entityType: 'transporter', roles: ['transporter'],          aliases: ['gts coldchain','gts cold','gts truck','gts logistics','gts duisburg','gts transport','gts'] },
+  { canonicalName: 'CTV Vrede',    entityType: 'transporter', roles: ['transporter','depot'],  aliases: ['ctv vrede','ctv transport','ctv','ctv spedition','ctv gmbh'] },
+  { canonicalName: 'EKB Transport',entityType: 'transporter', roles: ['transporter','depot'],  aliases: ['ekb transport','ekb'] },
 ];
 
 // ─────────────────────────────────────────────────────────────────
 // KNOWN EXTERNAL CARRIERS
 // Recognised for entity disambiguation only.
-// entityType = 'carrier' — distinct from 'transporter'.
-// These are NOT operational entities for this dashboard:
-//   - They DO NOT appear in Transporter Performance
-//   - They DO NOT block customer inference (can appear in Customer Burden
-//     if that company genuinely raised a case as a counterparty/customer)
+// entityType = 'carrier' — these are NOT operational entities:
+//   - They do NOT appear in Transporter Performance
+//   - They do NOT block customer inference
+// Note: HGK has been moved to INLAND_DEPOTS (dual-role depot+transporter).
 // ─────────────────────────────────────────────────────────────────
 export const KNOWN_CARRIERS: EntityEntry[] = [
-  { canonicalName: 'DB Schenker',        entityType: 'carrier', aliases: ['db schenker','schenker','dbschenker'] },
-  { canonicalName: 'DHL Freight',        entityType: 'carrier', aliases: ['dhl freight','dhl logistics','dhl'] },
-  { canonicalName: 'DSV',                entityType: 'carrier', aliases: ['dsv road','dsv air','dsv logistics','dsv'] },
-  { canonicalName: 'Rhenus Logistics',   entityType: 'carrier', aliases: ['rhenus logistics','rhenus road','rhenus transport'] },
-  { canonicalName: 'Dachser',            entityType: 'carrier', aliases: ['dachser'] },
-  { canonicalName: 'Kuehne+Nagel',       entityType: 'carrier', aliases: ['kuehne nagel','kühne nagel','kühnenegel','kuhne nagel','k+n','kuehne+nagel'] },
-  { canonicalName: 'XPO Logistics',      entityType: 'carrier', aliases: ['xpo logistics','xpo transport','xpo'] },
-  { canonicalName: 'Geodis',             entityType: 'carrier', aliases: ['geodis'] },
-  { canonicalName: 'Ceva Logistics',     entityType: 'carrier', aliases: ['ceva logistics','ceva'] },
-  { canonicalName: 'Raben Group',        entityType: 'carrier', aliases: ['raben group','raben transport','raben'] },
-  { canonicalName: 'Gefco',              entityType: 'carrier', aliases: ['gefco','ceva gefco'] },
-  { canonicalName: 'Fiege Logistics',    entityType: 'carrier', aliases: ['fiege logistics','fiege'] },
-  { canonicalName: 'Samskip',            entityType: 'carrier', aliases: ['samskip'] },
-  { canonicalName: 'Nedcargo',           entityType: 'carrier', aliases: ['nedcargo'] },
-  { canonicalName: 'Van Dieren Transport',entityType: 'carrier', aliases: ['van dieren','vandieren'] },
-  { canonicalName: 'Kloosterboer',       entityType: 'carrier', aliases: ['kloosterboer'] },
-  { canonicalName: 'PostNL',             entityType: 'carrier', aliases: ['postnl','post nl'] },
-  { canonicalName: 'TNT Express',        entityType: 'carrier', aliases: ['tnt express','tnt'] },
-  { canonicalName: 'UPS',                entityType: 'carrier', aliases: ['ups supply chain','ups freight','ups'] },
-  { canonicalName: 'FedEx',              entityType: 'carrier', aliases: ['fedex freight','fedex'] },
-  { canonicalName: 'Wincanton',          entityType: 'carrier', aliases: ['wincanton'] },
-  { canonicalName: 'HGK Shipping',       entityType: 'carrier', aliases: ['hgk shipping','hgk'] },
-  { canonicalName: 'Broekman Logistics', entityType: 'carrier', aliases: ['broekman logistics','broekman'] },
-  { canonicalName: 'CTD Logistics',      entityType: 'carrier', aliases: ['ctd logistics','ctd'] },
+  { canonicalName: 'DB Schenker',         entityType: 'carrier', roles: ['carrier'], aliases: ['db schenker','schenker','dbschenker'] },
+  { canonicalName: 'DHL Freight',         entityType: 'carrier', roles: ['carrier'], aliases: ['dhl freight','dhl logistics','dhl'] },
+  { canonicalName: 'DSV',                 entityType: 'carrier', roles: ['carrier'], aliases: ['dsv road','dsv air','dsv logistics','dsv'] },
+  { canonicalName: 'Rhenus Logistics',    entityType: 'carrier', roles: ['carrier'], aliases: ['rhenus logistics','rhenus road','rhenus transport'] },
+  { canonicalName: 'Dachser',             entityType: 'carrier', roles: ['carrier'], aliases: ['dachser'] },
+  { canonicalName: 'Kuehne+Nagel',        entityType: 'carrier', roles: ['carrier'], aliases: ['kuehne nagel','kühne nagel','kühnenegel','kuhne nagel','k+n','kuehne+nagel'] },
+  { canonicalName: 'XPO Logistics',       entityType: 'carrier', roles: ['carrier'], aliases: ['xpo logistics','xpo transport','xpo'] },
+  { canonicalName: 'Geodis',              entityType: 'carrier', roles: ['carrier'], aliases: ['geodis'] },
+  { canonicalName: 'Ceva Logistics',      entityType: 'carrier', roles: ['carrier'], aliases: ['ceva logistics','ceva'] },
+  { canonicalName: 'Raben Group',         entityType: 'carrier', roles: ['carrier'], aliases: ['raben group','raben transport','raben'] },
+  { canonicalName: 'Gefco',               entityType: 'carrier', roles: ['carrier'], aliases: ['gefco','ceva gefco'] },
+  { canonicalName: 'Fiege Logistics',     entityType: 'carrier', roles: ['carrier'], aliases: ['fiege logistics','fiege'] },
+  { canonicalName: 'Samskip',             entityType: 'carrier', roles: ['carrier'], aliases: ['samskip'] },
+  { canonicalName: 'Nedcargo',            entityType: 'carrier', roles: ['carrier'], aliases: ['nedcargo'] },
+  { canonicalName: 'Van Dieren Transport',entityType: 'carrier', roles: ['carrier'], aliases: ['van dieren','vandieren'] },
+  { canonicalName: 'Kloosterboer',        entityType: 'carrier', roles: ['carrier'], aliases: ['kloosterboer'] },
+  { canonicalName: 'PostNL',              entityType: 'carrier', roles: ['carrier'], aliases: ['postnl','post nl'] },
+  { canonicalName: 'TNT Express',         entityType: 'carrier', roles: ['carrier'], aliases: ['tnt express','tnt'] },
+  { canonicalName: 'UPS',                 entityType: 'carrier', roles: ['carrier'], aliases: ['ups supply chain','ups freight','ups'] },
+  { canonicalName: 'FedEx',               entityType: 'carrier', roles: ['carrier'], aliases: ['fedex freight','fedex'] },
+  { canonicalName: 'Wincanton',           entityType: 'carrier', roles: ['carrier'], aliases: ['wincanton'] },
+  { canonicalName: 'Broekman Logistics',  entityType: 'carrier', roles: ['carrier'], aliases: ['broekman logistics','broekman'] },
+  { canonicalName: 'CTD Logistics',       entityType: 'carrier', roles: ['carrier'], aliases: ['ctd logistics','ctd'] },
 ];
 
 // Combined export for backward compatibility
@@ -196,14 +217,34 @@ export const OPERATIONAL_ALIAS_SET: Set<string> = new Set(
   [...DEEPSEA_TERMINALS, ...INLAND_DEPOTS, ...APPROVED_TRANSPORTERS].flatMap(e => e.aliases)
 );
 
-/** Approved transporter canonical names — the 6 specialist inland hauliers */
-export const APPROVED_TRANSPORTER_CANONICAL: Set<string> = new Set(
-  APPROVED_TRANSPORTERS.map(e => e.canonicalName.toLowerCase())
+// ─────────────────────────────────────────────────────────────────
+// TRANSPORTER-CAPABLE sets
+// Includes ALL entities with 'transporter' in their roles:
+//   - The 6 approved specialist hauliers (entityType='transporter')
+//   - Dual-role depot+transporter entities (Germersheim, HP Duisburg,
+//     Contargo variants, Frankenbach, HGK, CTV, EKB)
+// These are the ONLY entities that may appear in Transporter Performance.
+// ─────────────────────────────────────────────────────────────────
+
+/** Canonical names of all entities with 'transporter' in their roles */
+export const TRANSPORTER_ROLE_CANONICAL: Set<string> = new Set(
+  ALL_ENTITIES
+    .filter(e => e.roles.includes('transporter'))
+    .map(e => e.canonicalName.toLowerCase())
 );
 
-/** Approved transporter aliases — all aliases belonging to the 6 hauliers */
-export const APPROVED_TRANSPORTER_ALIASES: Set<string> = new Set(
-  APPROVED_TRANSPORTERS.flatMap(e => e.aliases)
+/** All aliases of transporter-capable entities */
+export const TRANSPORTER_ROLE_ALIASES: Set<string> = new Set(
+  ALL_ENTITIES
+    .filter(e => e.roles.includes('transporter'))
+    .flatMap(e => e.aliases)
+);
+
+/** All canonical names of entities with 'depot' in their roles */
+export const DEPOT_ROLE_CANONICAL: Set<string> = new Set(
+  ALL_ENTITIES
+    .filter(e => e.roles.includes('depot'))
+    .map(e => e.canonicalName.toLowerCase())
 );
 
 /**
@@ -226,19 +267,34 @@ export function isKnownOperationalEntity(name: string): boolean {
 }
 
 /**
- * Returns true ONLY if the name matches an APPROVED TRANSPORTER
- * (canonical name or alias from APPROVED_TRANSPORTERS only).
- * KNOWN_CARRIERS have entityType='carrier' and will NOT pass this check.
- * Only approved transporters may appear in Transporter Performance reporting.
+ * Returns true for ANY entity with 'transporter' in its roles.
+ * This includes:
+ *   - The 6 approved specialist inland hauliers
+ *   - Dual-role depot+transporter entities (Germersheim, Contargo, HP Duisburg,
+ *     Frankenbach, HGK, CTV Vrede, EKB Transport)
+ * KNOWN_CARRIERS have roles=['carrier'] and will NOT pass this check.
+ * Only transporter-capable entities may appear in Transporter Performance reporting.
  */
 export function isApprovedTransporter(name: string): boolean {
   if (!name) return false;
   const lower = name.toLowerCase().trim();
-  if (APPROVED_TRANSPORTER_CANONICAL.has(lower)) return true;
-  if (APPROVED_TRANSPORTER_ALIASES.has(lower)) return true;
-  // Partial match against approved aliases only (not KNOWN_CARRIERS)
-  for (const alias of APPROVED_TRANSPORTER_ALIASES) {
+  if (TRANSPORTER_ROLE_CANONICAL.has(lower)) return true;
+  if (TRANSPORTER_ROLE_ALIASES.has(lower)) return true;
+  // Partial match against transporter-capable aliases
+  for (const alias of TRANSPORTER_ROLE_ALIASES) {
     if (lower.includes(alias)) return true;
   }
   return false;
+}
+
+/**
+ * Look up all roles for a given canonical name.
+ * Returns empty array if entity not found.
+ */
+export function getEntityRoles(canonicalName: string): EntityType[] {
+  const lower = canonicalName.toLowerCase().trim();
+  for (const entry of ALL_ENTITIES) {
+    if (entry.canonicalName.toLowerCase() === lower) return entry.roles;
+  }
+  return [];
 }

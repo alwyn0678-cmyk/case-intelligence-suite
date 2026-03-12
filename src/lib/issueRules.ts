@@ -52,10 +52,17 @@ const PROVIDED_SIGNALS = [
   'herewith', 'hereby', 'please find herewith',
   'attached', 'enclosed', 'sending', 'sent', 'forwarded',
   'here is', 'here are', 'find enclosed',
-  'providing', 'provided', 'supplied', 'sharing',
+  'providing', 'supplied', 'sharing',
   'please see', 'see below for', 'details below',
   'confirmed', 'confirmation', 'done', 'completed',
-  'updated', 'resolved',
+  // Specific "ref no X" patterns — "ref no" means "reference number" not negation
+  'ref no ', 'ref no.', 'reference no ', 'reference no.',
+  'ref is ', 'reference is ', 'ref: ', 'loadref: ', 'load ref: ',
+  'ref #', 'reference #',
+  // "has been provided" / "was provided" are unambiguous
+  'has been provided', 'was provided', 'already provided',
+  'has been sent', 'was sent', 'already sent',
+  'resolved',
 ];
 
 // "AMENDED" signals — a correction or update is being made
@@ -99,11 +106,26 @@ const INFORMATIONAL_SIGNALS = [
   'no action required', 'no action needed', 'no further action',
 ];
 
+// ─── Negation patterns ─────────────────────────────────────────────
+// These phrases indicate something is ABSENT/MISSING even when
+// a "provided" keyword also appears (e.g. "not provided", "not received").
+// The negation guard prevents "not provided" from triggering PROVIDED state.
+const NEGATION_GUARD_PHRASES = [
+  'not provided', 'not received', 'not yet received', 'not yet sent',
+  'not attached', 'not available', 'not found', 'not yet',
+  'has not been', 'have not', 'hasn\'t been', 'did not receive',
+  'cannot', 'not confirmed', 'not issued', 'not in system',
+];
+
 function detectState(text: string): { state: IssueState; evidence: string[] } {
   const t = text.toLowerCase();
   const evidence: string[] = [];
 
-  const checkSignals = (signals: string[], _state: IssueState): boolean => {
+  // Check if negation phrases are present — if so, PROVIDED signals are suppressed
+  // to prevent "not provided" → state='provided' false positives.
+  const hasNegation = NEGATION_GUARD_PHRASES.some(p => t.includes(p));
+
+  const checkSignals = (signals: string[]): boolean => {
     for (const sig of signals) {
       if (t.includes(sig)) {
         evidence.push(`"${sig}"`);
@@ -113,12 +135,27 @@ function detectState(text: string): { state: IssueState; evidence: string[] } {
     return false;
   };
 
-  if (checkSignals(ESCALATED_SIGNALS, 'escalated'))   return { state: 'escalated', evidence };
-  if (checkSignals(AMENDED_SIGNALS, 'amended'))        return { state: 'amended', evidence };
-  if (checkSignals(PROVIDED_SIGNALS, 'provided'))      return { state: 'provided', evidence };
-  if (checkSignals(MISSING_SIGNALS, 'missing'))        return { state: 'missing', evidence };
-  if (checkSignals(DELAYED_SIGNALS, 'delayed'))        return { state: 'delayed', evidence };
-  if (checkSignals(INFORMATIONAL_SIGNALS, 'informational')) return { state: 'informational', evidence };
+  // Escalated: always highest priority regardless of negation
+  if (checkSignals(ESCALATED_SIGNALS))   return { state: 'escalated', evidence };
+
+  // Amended: checked before provided (corrections take precedence)
+  if (checkSignals(AMENDED_SIGNALS))     return { state: 'amended', evidence };
+
+  // Provided: SKIP if negation guard is active
+  // This prevents "not provided" / "not received" from falsely → provided
+  if (!hasNegation && checkSignals(PROVIDED_SIGNALS)) return { state: 'provided', evidence };
+
+  // Missing: covers all "not X" / "no X" patterns
+  if (checkSignals(MISSING_SIGNALS))     return { state: 'missing', evidence };
+
+  // If negation was detected but no specific missing signal matched, treat as missing
+  if (hasNegation) {
+    evidence.push('(negation guard — item absent)');
+    return { state: 'missing', evidence };
+  }
+
+  if (checkSignals(DELAYED_SIGNALS))     return { state: 'delayed', evidence };
+  if (checkSignals(INFORMATIONAL_SIGNALS)) return { state: 'informational', evidence };
 
   return { state: 'unknown', evidence: [] };
 }

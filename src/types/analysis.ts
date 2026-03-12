@@ -185,6 +185,8 @@ export interface AnalysisSummary {
   narrative: string;
   reviewFlagCount: number;
   unknownEntityCount: number;
+  /** Cases where no customer could be resolved — shown in review panel, not in top-customer charts */
+  unknownCustomerCount: number;
 }
 
 export interface AnalysisResult {

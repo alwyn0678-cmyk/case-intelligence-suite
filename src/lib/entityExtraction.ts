@@ -4,10 +4,15 @@
 // Extracts and classifies entities (transporter, depot, deepsea
 // terminal, customer) from all available row fields.
 //
-// Priority: deepsea_terminal > depot > transporter > customer
-// 'carrier' entities (KNOWN_CARRIERS) are recognised but are NOT
-// treated as operational — they can appear as customers if the
-// customer column contains them.
+// ROLE-BASED MODEL:
+//   An entity may have multiple roles (e.g. 'depot' + 'transporter').
+//   byRole() selects the best entity that has a given role.
+//   This allows dual-role entities (Contargo, Germersheim DPW, etc.)
+//   to populate BOTH resolvedTransporter AND resolvedDepot.
+//
+// Priority for customer-blocking: deepsea_terminal > depot > transporter > carrier
+// 'carrier' entities (KNOWN_CARRIERS) are recognised but NOT operational —
+// they can appear as customers if the customer column contains them.
 // ─────────────────────────────────────────────────────────────────
 
 import { lookupEntity, ENTITY_ALIAS_MAP, type EntityType } from '../config/referenceData';
@@ -16,20 +21,21 @@ export interface ExtractedEntity {
   rawValue: string;
   normalizedValue: string;
   entityType: EntityType;
+  roles: EntityType[];       // all functional roles for this entity
   canonicalName: string;
   matchedAlias: string;
   sourceField: string;
-  confidence: number;      // 0–1
-  snippet: string;         // excerpt of the text where entity was found
+  confidence: number;        // 0–1
+  snippet: string;           // excerpt of the text where entity was found
 }
 
 export interface EntityExtractionResult {
-  transporter: ExtractedEntity | null;
-  depot: ExtractedEntity | null;
+  transporter: ExtractedEntity | null;    // best entity with 'transporter' role
+  depot: ExtractedEntity | null;          // best entity with 'depot' role
   deepseaTerminal: ExtractedEntity | null;
   customer: ExtractedEntity | null;
   allEntities: ExtractedEntity[];
-  unknownEntities: string[];   // account/company names that didn't match any dictionary
+  unknownEntities: string[];              // account/company names that didn't match any dictionary
 }
 
 // Fields to scan, in search-priority order
@@ -54,6 +60,7 @@ function buildSnippet(text: string, alias: string, windowChars = 60): string {
 /**
  * Scan text for ALL entity matches (not just the first/highest-priority one).
  * Returns every distinct canonical match found, sorted by priority.
+ * Includes the full roles[] array from the EntityEntry.
  */
 function findAllEntitiesInText(
   text: string,
@@ -75,6 +82,7 @@ function findAllEntitiesInText(
           rawValue: text,
           normalizedValue: entry.canonicalName,
           entityType: entry.entityType,
+          roles: entry.roles,
           canonicalName: entry.canonicalName,
           matchedAlias: alias,
           sourceField,
@@ -136,15 +144,17 @@ export function extractEntities(
     }
   }
 
-  // ── Determine best entity per type ───────────────────────────
-  const byType = (t: EntityType) =>
+  // ── Role-based entity selection ───────────────────────────────
+  // An entity with roles=['depot','transporter'] will appear in BOTH
+  // the depot AND transporter slots. This is the core of the multi-role model.
+  const byRole = (role: EntityType): ExtractedEntity | null =>
     allEntities
-      .filter(e => e.entityType === t)
+      .filter(e => e.roles.includes(role))
       .sort((a, b) => b.confidence - a.confidence)[0] ?? null;
 
-  const deepseaTerminal = byType('deepsea_terminal');
-  const depot           = byType('depot');
-  const transporter     = byType('transporter');
+  const deepseaTerminal = byRole('deepsea_terminal');
+  const depot           = byRole('depot');
+  const transporter     = byRole('transporter');
 
   // ── Customer inference ────────────────────────────────────────
   // Customer is inferred only AFTER all operational entities are identified.
@@ -174,6 +184,7 @@ export function extractEntities(
         rawValue: custText,
         normalizedValue: canonicalName,
         entityType: 'customer',
+        roles: ['customer'],
         canonicalName,
         matchedAlias: knownMatch?.matchedAlias ?? '',
         sourceField: 'customer_col',
@@ -213,6 +224,7 @@ export function extractEntities(
             rawValue: candidate,
             normalizedValue: knownMatch ? knownMatch.entry.canonicalName : candidate,
             entityType: 'customer',
+            roles: ['customer'],
             canonicalName: knownMatch ? knownMatch.entry.canonicalName : candidate,
             matchedAlias: knownMatch?.matchedAlias ?? '',
             sourceField: 'description',
