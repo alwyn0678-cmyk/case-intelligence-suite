@@ -729,14 +729,41 @@ const CUSTOMER_JUNK_PATTERNS: RegExp[] = [
   // Strings ending in operational suffixes with no company context
   /\b(team|group|department|dept|division|unit|desk|inbox|mailbox|queue)$/i,
   // IBAN / bank account numbers — e.g. "NL57ABNA0421705191", "DE89370400440532013000"
-  // Pattern: 2-letter country code + 2 check digits + 11–30 alphanumeric BBAN chars
-  // These are financial account identifiers, never company names.
   /^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/,
-  // Shipping/container/booking reference codes that might appear in customer column
-  // e.g. "MAEU262065895", "TCKU1234567", "BKG12345678"
+  // Shipping/container/booking reference codes — e.g. "MAEU262065895", "TCKU1234567"
   /^[A-Z]{3,4}\d{7,12}$/,
   // Long purely alphanumeric codes without spaces (reference codes, not names)
   /^[A-Z0-9]{10,25}$/,
+
+  // ── Sentence fragment detection ────────────────────────────────
+  // The patterns below target text that is clearly email body prose rather than
+  // a company name. These leak into the customer column when the Account Name
+  // field in the source Excel contains a copy of email text rather than an account.
+
+  // Finite English verb phrases — sentences, not names
+  // e.g. "did not forward the customs documents to"
+  //      "has not been received", "was not provided"
+  /\b(did\s+not|has\s+not|have\s+not|was\s+not|were\s+not|had\s+not|is\s+not|are\s+not|could\s+not|would\s+not|will\s+not|shall\s+not|does\s+not|do\s+not)\b/i,
+
+  // Auto-generated system / email notification phrases
+  // e.g. "This is an automatically generated E-mail"
+  /\bautomatically\s+generated\b/i,
+  /\bdo\s+not\s+reply\b/i,
+  /\bnoreply\b/i,
+  /\bno[\s\-]?reply\b/i,
+
+  // Sentence-opener patterns (articles/demonstratives starting a phrase — never a company name)
+  // e.g. "This is an automatically generated E-mail", "The following documents are"
+  /^(this\s+(is|was|are|will)|there\s+(is|are|was|were)|it\s+(is|was)|the\s+(above|below|following|attached|enclosed))\b/i,
+
+  // Fragment ending with a bare preposition (sentence tail, not a company name)
+  // e.g. "did not forward the customs documents to"
+  //      "please send the documents to", "forwarded to"
+  /\s+(to|from|for|with|of|by|at|in|on)\s*\.?\s*$/i,
+
+  // Portal / system / interface as the only content (not a company name)
+  // e.g. "Portal.", "System", "Platform"
+  /^(portal|system|platform|application|app|software|database|server|interface|module|dashboard|tool|solution|service\s+portal|customer\s+portal|web\s+portal)\.?\s*$/i,
 ];
 
 /**
@@ -769,6 +796,15 @@ export function isCustomerJunkLabel(name: string): boolean {
   const strippedForWordCheck = normalizeForMatching(lower); // strips GmbH, B.V., NV, etc.
   const words = strippedForWordCheck.split(/[\s\-–_/]+/).filter(w => w.length > 1);
   if (words.length >= 1 && words.every(w => JUNK_SINGLE_WORDS.has(w))) return true;
+
+  // Layer 2b: word-count ceiling — sentence fragments leaked from email body.
+  // Real company names almost never exceed 6 whitespace-separated tokens.
+  // Strings with 6+ tokens that lack a legal suffix are almost certainly prose.
+  // We skip this check when the original name contains a legal suffix (e.g. "BASF
+  // Chemicals Europe GmbH & Co. KG" is legitimate even though it is long).
+  const rawTokens = trimmed.split(/\s+/);
+  const hasLegalSuffix = /\b(gmbh|b\.?v\.?|n\.?v\.?|s\.?a\.?|ltd\.?|limited|inc\.?|corp\.?|llc\.?|plc\.?|a\.?g\.?|s\.?e\.?|k\.?g\.?|u\.?g\.?|s\.?r\.?l\.?|s\.?p\.?a\.?)\b/i.test(trimmed);
+  if (rawTokens.length >= 6 && !hasLegalSuffix) return true;
 
   // Layer 3: regex patterns
   if (CUSTOMER_JUNK_PATTERNS.some(p => p.test(trimmed))) return true;

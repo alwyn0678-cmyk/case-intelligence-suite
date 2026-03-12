@@ -223,6 +223,48 @@ export function auditCustomerAcceptance(name: string): CustomerAcceptanceResult 
   return { blocked: false, positiveGate: true, accepted: true, reason: 'accepted' };
 }
 
+// ─── Sentence Fragment Detection ─────────────────────────────────
+
+/**
+ * Returns true if the string is clearly a sentence fragment or email prose
+ * rather than a company/account name.
+ *
+ * Checks for:
+ *  - Negated verb phrases ("did not", "has not", etc.)
+ *  - Auto-generated email phrases
+ *  - Sentence-opener patterns
+ *  - Fragment ending with a bare preposition
+ *  - 6+ word strings without a legal suffix
+ *
+ * @example
+ * isSentenceFragment('did not forward the customs documents to')
+ * // → true
+ *
+ * isSentenceFragment('This is an automatically generated E-mail')
+ * // → true
+ *
+ * isSentenceFragment('BASF SE')
+ * // → false
+ */
+export const SENTENCE_FRAGMENT_PATTERNS: RegExp[] = [
+  /\b(did\s+not|has\s+not|have\s+not|was\s+not|were\s+not|had\s+not|is\s+not|are\s+not|could\s+not|would\s+not|will\s+not|shall\s+not|does\s+not|do\s+not)\b/i,
+  /\bautomatically\s+generated\b/i,
+  /\bdo\s+not\s+reply\b/i,
+  /\bno[\s\-]?reply\b/i,
+  /^(this\s+(is|was|are|will)|there\s+(is|are|was|were)|it\s+(is|was)|the\s+(above|below|following|attached|enclosed))\b/i,
+  /\s+(to|from|for|with|of|by|at|in|on)\s*\.?\s*$/i,
+];
+
+export function isSentenceFragment(text: string): boolean {
+  if (!text || !text.trim()) return false;
+  if (SENTENCE_FRAGMENT_PATTERNS.some(p => p.test(text))) return true;
+  // Word-count ceiling: 6+ tokens without a legal suffix
+  const tokens = text.trim().split(/\s+/);
+  const hasLegalSuffix = /\b(gmbh|b\.?v\.?|n\.?v\.?|s\.?a\.?|ltd\.?|limited|inc\.?|corp\.?|llc\.?|plc\.?|a\.?g\.?|s\.?e\.?|k\.?g\.?|u\.?g\.?|s\.?r\.?l\.?|s\.?p\.?a\.?)\b/i.test(text);
+  if (tokens.length >= 6 && !hasLegalSuffix) return true;
+  return false;
+}
+
 // ─── Hotspot Label Validation ─────────────────────────────────────
 
 import { isAllowedAreaLabel } from '../config/referenceData';

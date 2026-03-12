@@ -11,7 +11,7 @@ import type {
 import { buildForecast } from './forecast';
 import { isKnownOperationalEntity, isApprovedTransporter, isBlockedFromCustomerRole, isInternalISRLabel, isAllowedAreaLabel, validateOutputGuards, isPositiveCustomerCandidate } from '../config/referenceData';
 
-import { isLoadRefFalsePositive, detectsTransportOrder, validateCaseNumberPreservation } from './validators';
+import { isLoadRefFalsePositive, detectsTransportOrder, validateCaseNumberPreservation, isSentenceFragment } from './validators';
 import {} from './textNormalization';
 
 const MAX_CHART_WEEKS = 16;
@@ -530,13 +530,16 @@ export function runAnalysis(
   };
 
   // ─── 10. Load reference intelligence ──────────────────────────
-  const loadRefRecords     = records.filter(r => r.issues.includes('load_ref'));
-  const refProvidedRecords = records.filter(r => r.issues.includes('ref_provided'));
+  // Use primaryIssue (not r.issues[]) so secondary matches don't inflate totals.
+  const loadRefRecords     = records.filter(r => r.primaryIssue === 'load_ref');
+  const refProvidedRecords = records.filter(r => r.primaryIssue === 'ref_provided');
   const loadRefByCustomer: Record<string, number> = {};
   for (const r of loadRefRecords) {
     const name = r.resolvedCustomer;
     if (!name) continue;
-    if (isKnownOperationalEntity(name)) continue;
+    // Apply full dual-gate: both negative block and positive company-name check.
+    if (isBlockedFromCustomerRole(name)) continue;
+    if (!isPositiveCustomerCandidate(name)) continue;
     loadRefByCustomer[name] = (loadRefByCustomer[name] ?? 0) + 1;
   }
   const loadRefIntelligence: LoadRefIntelligence = {
@@ -939,6 +942,16 @@ export function runAnalysis(
           primaryIssue: r.primaryIssue,
           evidence:    r.evidence,
         })),
+      );
+    }
+
+    // ── Sentence fragment leak scan ────────────────────────────────
+    // Detects email body prose that slipped through the customer gates.
+    const sentenceFragmentLeaks = customerBurden.filter(c => isSentenceFragment(c.name));
+    if (sentenceFragmentLeaks.length > 0) {
+      console.error(
+        `[CIS validation] SENTENCE_FRAGMENT_IN_CUSTOMER_BURDEN: ${sentenceFragmentLeaks.length} name(s) look like email prose rather than company names.`,
+        sentenceFragmentLeaks.map(c => ({ name: c.name, caseCount: c.caseCount })),
       );
     }
 
