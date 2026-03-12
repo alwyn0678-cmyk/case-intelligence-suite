@@ -11,8 +11,9 @@
 //   to populate BOTH resolvedTransporter AND resolvedDepot.
 //
 // Priority for customer-blocking: deepsea_terminal > depot > transporter > carrier
-// 'carrier' entities (KNOWN_CARRIERS) are recognised but NOT operational —
-// they can appear as customers if the customer column contains them.
+// ALL known operational entities (terminal / depot / transporter / carrier) are
+// blocked from the customer slot. A carrier name in the customer column means the
+// row relates to a logistics partner, not an end-customer account — send to unresolved.
 // ─────────────────────────────────────────────────────────────────
 
 import { lookupEntity, ENTITY_ALIAS_MAP, type EntityType, isInternalISRLabel, isCustomerJunkLabel } from '../config/referenceData';
@@ -179,7 +180,7 @@ export function extractEntities(
       (knownMatch.entry.entityType === 'deepsea_terminal' ||
        knownMatch.entry.entityType === 'depot' ||
        knownMatch.entry.entityType === 'transporter' ||
-       knownMatch.entry.entityType === 'carrier');  // recognised logistics cos — not customers on this dashboard
+       knownMatch.entry.entityType === 'carrier');  // all logistics entities blocked from customer slot
 
     if (!isOperationalBlock) {
       // Not a known entity, OR an unrecognised name — safe to treat as customer
@@ -222,7 +223,7 @@ export function extractEntities(
           (knownMatch.entry.entityType === 'deepsea_terminal' ||
            knownMatch.entry.entityType === 'depot' ||
            knownMatch.entry.entityType === 'transporter' ||
-           knownMatch.entry.entityType === 'carrier');  // carriers not customers
+           knownMatch.entry.entityType === 'carrier');  // all logistics entities blocked
 
         if (!isOperationalBlock) {
           customer = {

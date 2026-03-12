@@ -372,7 +372,15 @@ export function isInternalISRLabel(name: string): boolean {
 // Generic, non-company placeholder labels that sometimes appear in
 // the customer column but carry no meaningful account identity.
 // Block these from customer charts and treat as unresolved.
+//
+// THREE-LAYER DETECTION:
+//  1. CUSTOMER_JUNK_EXACT      — exact lowercase matches for known junk values
+//  2. JUNK_SINGLE_WORDS        — comprehensive set of logistics/ops vocabulary words;
+//                                any name consisting ONLY of words from this set is junk
+//  3. CUSTOMER_JUNK_PATTERNS   — regex patterns for fragments and non-company text
 // ─────────────────────────────────────────────────────────────────
+
+// Layer 1 — exact-match junk values (lowercase, trimmed)
 const CUSTOMER_JUNK_EXACT = new Set<string>([
   // Generic role/function labels masquerading as customer names
   'service',
@@ -391,7 +399,65 @@ const CUSTOMER_JUNK_EXACT = new Set<string>([
   'barge',
   'inland',
   'serve',
-  // Operational phrases that sometimes leak in as customer values
+  // More single-word operational role labels
+  'pickup',
+  'collection',
+  'export',
+  'import',
+  'booking',
+  'amendment',
+  'correction',
+  'status',
+  'tracking',
+  'vessel',
+  'shipment',
+  'cargo',
+  'loading',
+  'unloading',
+  'dispatch',
+  'clearance',
+  'inspection',
+  'manifest',
+  'release',
+  'acceptance',
+  'confirmation',
+  'documentation',
+  'document',
+  'customs',
+  'terminal',
+  'handling',
+  'storage',
+  'warehouse',
+  'distribution',
+  'hub',
+  'allocation',
+  'reply',
+  'response',
+  'escalation',
+  'query',
+  'enquiry',
+  'inquiry',
+  'claim',
+  'damage',
+  'support',
+  'advice',
+  'instruction',
+  'notification',
+  'update',
+  'information',
+  'delay',
+  'waiting',
+  'carrier',
+  'haulier',
+  'hauler',
+  'agent',
+  'broker',
+  'operator',
+  'company',
+  'customer',
+  'account',
+  'client',
+  // Operational phrase fragments
   'rail-und barge',
   'serve - rail-und barge',
   'not be able to load',
@@ -420,36 +486,84 @@ const CUSTOMER_JUNK_EXACT = new Set<string>([
   'test account',
   'demo',
   'placeholder',
+  'end customer',
+  'shipper',
+  'consignee',
+  'receiver',
+  'sender',
 ]);
 
-// Regex patterns for non-company labels that should not appear as customer names.
-// These catch phrases / fragments that exact-match cannot cover.
+// Layer 2 — single-word operational vocabulary set
+// Any name whose words are ALL from this set is treated as junk.
+// This catches: "Service Logistics", "Delivery Transport", "Freight Forwarding", etc.
+// without blocking real names like "Maersk Logistics" (Maersk not in set).
+const JUNK_SINGLE_WORDS = new Set<string>([
+  // All words from CUSTOMER_JUNK_EXACT that are single words
+  'service','representative','intermodal','reference','delivery','logistics',
+  'forwarding','transport','transportation','shipping','freight','rail','barge',
+  'inland','serve','pickup','collection','export','import','booking','amendment',
+  'correction','status','tracking','vessel','shipment','cargo','loading',
+  'unloading','dispatch','clearance','inspection','manifest','release',
+  'acceptance','confirmation','documentation','document','customs','terminal',
+  'handling','storage','warehouse','distribution','hub','allocation','reply',
+  'response','escalation','query','enquiry','inquiry','claim','damage','support',
+  'advice','instruction','notification','update','information','delay','waiting',
+  'carrier','haulier','hauler','agent','broker','operator','company','customer',
+  'account','client','shipper','consignee','receiver','sender','team',
+  'general','unknown','test','demo','placeholder','blank','null','none',
+]);
+
+// Layer 3 — regex patterns for non-company text
 const CUSTOMER_JUNK_PATTERNS: RegExp[] = [
-  // Starts with a generic operational word and nothing else meaningful
-  /^(deliver(y|ies)?|logistic[s]?|forward(ing)?|transport(ation)?|shipping|freight|barg(e|ing)|inland|ser?ve?)[\s.,:!?-]*$/i,
   // "not be able to ..." / "unable to ..." — action phrases, not company names
   /^(not be able to|unable to|cannot|can't)\b/i,
   // "serve - " or "service - " prefix followed by operational words
   /^serv(e|ice)\s*[-–]\s*(rail|barge|inland|transport|logistics)/i,
   // Pure operational instructions or email-fragment-style strings
-  /^(please|kindly|urgent|asap|re:|fw:|fwd:|attn:|attention:)\b/i,
+  /^(please|kindly|urgent|asap|re:|fw:|fwd:|attn:|attention:|see below|find below|as per|per your|as discussed)\b/i,
   // Strings that look like email addresses or partial mailbox names
   /@[a-z0-9.-]+\.[a-z]{2,}/i,
   // Purely numeric or very-short non-alphabetic strings
   /^[\d\s\-_./:]{1,10}$/,
+  // Raw ZIP code area labels (e.g. "ZIP 55116") — should not reach customer
+  /^ZIP\s+\d/i,
+  // Parenthetical or bracket-only fragments
+  /^\[.*\]$|^\(.*\)$/,
+  // Strings that look like case reference IDs
+  /^(case|ticket|ref|incident|issue)[:\s#]+[\w\-]+$/i,
+  // Strings ending in operational suffixes with no company context
+  /\b(team|group|department|dept|division|unit|desk|inbox|mailbox|queue)$/i,
 ];
 
 /**
  * Returns true if the name is a generic junk label rather than a real company.
- * Checks both the exact-match set and pattern-based non-company detection.
- * These must not appear in Customer Burden or related customer charts.
+ *
+ * Uses three layers of detection:
+ * 1. Exact lowercase match against CUSTOMER_JUNK_EXACT
+ * 2. All-junk-words check: every word in the name is in JUNK_SINGLE_WORDS
+ * 3. Regex pattern match against CUSTOMER_JUNK_PATTERNS
+ *
+ * A company name is only accepted when NONE of the three layers fire.
  */
 export function isCustomerJunkLabel(name: string): boolean {
   if (!name) return false;
-  const lower = name.toLowerCase().trim();
+  const trimmed = name.trim();
+  const lower = trimmed.toLowerCase();
+
+  // Hard minimum: single characters are never companies
   if (lower.length < 2) return true;
+
+  // Layer 1: exact match
   if (CUSTOMER_JUNK_EXACT.has(lower)) return true;
-  return CUSTOMER_JUNK_PATTERNS.some(p => p.test(name.trim()));
+
+  // Layer 2: all words are generic ops vocabulary (catches multi-word junk combos)
+  const words = lower.split(/[\s\-–_/]+/).filter(w => w.length > 1);
+  if (words.length >= 1 && words.every(w => JUNK_SINGLE_WORDS.has(w))) return true;
+
+  // Layer 3: regex patterns
+  if (CUSTOMER_JUNK_PATTERNS.some(p => p.test(trimmed))) return true;
+
+  return false;
 }
 // ─────────────────────────────────────────────────────────────────
 // OUTPUT QUALITY VALIDATION
@@ -468,8 +582,24 @@ export interface ValidationViolation {
 /** Expected operational area labels for German ZIPs */
 const OPERATIONAL_AREA_LABELS = new Set(['Mainz / Germersheim', 'Duisburg / Rhine-Ruhr']);
 
-/** Area label patterns that look like they came from DE_RULES generic geography */
+/** Area label patterns that indicate a non-operational or generic geography leaked through */
 const GENERIC_DE_AREA_PATTERN = /^(Berlin|Brandenburg|Hamburg|Hannover|Bremen|Saxony|Rhine-Ruhr|NRW|Münster|Köln|Saarland|Stuttgart|Bavaria|Nuremberg|Thüringen|Brunswick)/i;
+
+/** Raw ZIP code area label pattern — these should be resolved or excluded, not shown on charts */
+const RAW_ZIP_AREA_PATTERN = /^ZIP\s+\d{4,}/i;
+
+/**
+ * Returns true if an area name is safe to show in the Area Hotspot chart.
+ * Rejects: raw ZIP codes, generic DE geography labels, and known excluded areas.
+ * Accepts: operational area names ("Mainz / Germersheim", "Duisburg / Rhine-Ruhr")
+ *          and deepsea port names (Rotterdam, Antwerp, etc.).
+ */
+export function isAllowedAreaLabel(name: string): boolean {
+  if (!name) return false;
+  if (RAW_ZIP_AREA_PATTERN.test(name)) return false;
+  if (GENERIC_DE_AREA_PATTERN.test(name) && !OPERATIONAL_AREA_LABELS.has(name)) return false;
+  return true;
+}
 
 /**
  * Scan aggregated dashboard output for rule violations.
@@ -503,9 +633,8 @@ export function validateOutputGuards(
 
   if (areaHotspots) {
     for (const a of areaHotspots) {
-      // Flag area names that look like DE_RULES generic geography leaked through
-      if (GENERIC_DE_AREA_PATTERN.test(a.name) && !OPERATIONAL_AREA_LABELS.has(a.name)) {
-        v.push({ rule: 'GENERIC_DE_AREA_IN_HOTSPOTS', offender: a.name, severity: 'WARN' });
+      if (!isAllowedAreaLabel(a.name)) {
+        v.push({ rule: 'DISALLOWED_AREA_IN_HOTSPOTS', offender: a.name, severity: 'WARN' });
       }
     }
   }

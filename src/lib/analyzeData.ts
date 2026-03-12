@@ -9,7 +9,7 @@ import type {
   IssueDrilldown, WeekOnWeek, WowChange, RepeatOffenderItem, ActionInsight,
 } from '../types/analysis';
 import { buildForecast } from './forecast';
-import { isKnownOperationalEntity, isApprovedTransporter, isBlockedFromCustomerRole, isInternalISRLabel } from '../config/referenceData';
+import { isKnownOperationalEntity, isApprovedTransporter, isBlockedFromCustomerRole, isInternalISRLabel, isAllowedAreaLabel, validateOutputGuards } from '../config/referenceData';
 
 const MAX_CHART_WEEKS = 16;
 
@@ -479,7 +479,10 @@ export function runAnalysis(
   }
 
   const areaHotspots: AreaHotspot[] = Object.values(areaMap)
-    .filter(a => !EXCLUDED_AREA_LABELS.has(a.name))
+    // Two-pass filter:
+    // 1. EXCLUDED_AREA_LABELS — explicit NL/BE non-operational areas
+    // 2. isAllowedAreaLabel   — blocks raw ZIP codes + generic DE geography labels
+    .filter(a => !EXCLUDED_AREA_LABELS.has(a.name) && isAllowedAreaLabel(a.name))
     .map(a => {
       const recs = records.filter(r => r.resolvedArea === a.name);
       const topIssue = topIssueForGroup(recs);
@@ -789,6 +792,22 @@ export function runAnalysis(
   const forecast = buildForecast(weeklyHistory, sortedWeeks, customerBurden, transporterPerformance);
   const actions  = generateActions(issueBreakdown, customerBurden, transporterPerformance);
 
+  // ─── 20. Final chart guards ───────────────────────────────────
+  // Last-resort post-aggregation filter: even if upstream guards missed something,
+  // block any name that isBlockedFromCustomerRole() catches from reaching the UI.
+  // This is belt-and-suspenders — the primary guards in sections 4 and 5 should
+  // have already excluded all such names.
+  const cleanCustomerBurden = customerBurden.filter(c => !isBlockedFromCustomerRole(c.name));
+
+  // Development-mode validation: log any violations to console so they can be investigated.
+  // Does not throw — violations do not crash the dashboard.
+  if (typeof window !== 'undefined' && import.meta.env?.DEV) {
+    const violations = validateOutputGuards(cleanCustomerBurden, transporterPerformance, areaHotspots);
+    if (violations.length > 0) {
+      console.warn('[CIS validation]', violations);
+    }
+  }
+
   return {
     meta: { filename: '', rowCount: rawRecords.length, analyzedAt: new Date(), hasZipMap: Object.keys(zipMap).length > 0 },
     summary,
@@ -796,7 +815,7 @@ export function runAnalysis(
     weeklyHistory,
     sortedWeeks,
     chartWeeks,
-    customerBurden,
+    customerBurden: cleanCustomerBurden,
     transporterPerformance,
     depotPerformance,
     deepseaTerminalData,

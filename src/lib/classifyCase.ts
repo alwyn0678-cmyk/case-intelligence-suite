@@ -132,8 +132,9 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   const resolvedDepot          = entityResult.depot?.canonicalName ?? null;
   const resolvedDeepseaTerminal= entityResult.deepseaTerminal?.canonicalName ?? null;
   // Only use the raw record.customer value as customer if it is NOT a hard-blocked
-  // operational entity (deepsea_terminal, depot, approved transporter).
-  // KNOWN_CARRIERS have entityType='carrier' and are allowed as customers.
+  // operational entity (any of: deepsea_terminal, depot, transporter, carrier).
+  // All logistics entities are blocked from the customer slot regardless of which
+  // column they appear in — they must never surface in Customer Burden reporting.
   let resolvedCustomer: string | null = entityResult.customer?.canonicalName ?? null;
   if (!resolvedCustomer && record.customer?.trim()) {
     const rawCustLookup = lookupEntity(record.customer.trim());
@@ -142,7 +143,7 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
       (rawCustLookup.entry.entityType === 'deepsea_terminal' ||
        rawCustLookup.entry.entityType === 'depot' ||
        rawCustLookup.entry.entityType === 'transporter' ||
-       rawCustLookup.entry.entityType === 'carrier');  // carriers not customers
+       rawCustLookup.entry.entityType === 'carrier');  // all logistics entities blocked
     if (!isOperationalBlock) {
       resolvedCustomer = rawCustLookup ? rawCustLookup.entry.canonicalName : record.customer.trim();
     }
