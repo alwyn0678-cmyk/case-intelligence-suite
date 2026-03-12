@@ -3,6 +3,7 @@ import { SectionHeader } from '../components/ui/SectionHeader';
 import { HBarChart } from '../components/ui/ChartWrapper';
 import { ExampleCasesPanel } from '../components/ui/ExampleCasesPanel';
 import { isBlockedFromCustomerRole, isPositiveCustomerCandidate } from '../config/referenceData';
+import { exportEnrichedToXlsx } from '../lib/exportAllCases';
 import type { AnalysisResult, CustomerBurdenItem } from '../types/analysis';
 
 interface Props { analysis: AnalysisResult }
@@ -135,16 +136,30 @@ export function CustomerPage({ analysis }: Props) {
                     <td className="px-3 py-2.5">
                       <span className="text-xs font-medium px-1.5 py-0.5 rounded" style={{ color: RISK_CLR[c.risk], background: RISK_CLR[c.risk] + '20' }}>{c.risk}</span>
                     </td>
-                    {/* Examples button */}
+                    {/* Examples + export buttons */}
                     <td className="px-3 py-2.5">
-                      {c.exampleCases.length > 0 && (
-                        <button
-                          onClick={() => setSelected(c)}
-                          className="text-xs text-[#7aa2ff] hover:text-[#8fb3ff] font-medium whitespace-nowrap"
-                        >
-                          View {c.exampleCases.length}
-                        </button>
-                      )}
+                      <div className="flex items-center gap-3">
+                        {c.exampleCases.length > 0 && (
+                          <button
+                            onClick={() => setSelected(c)}
+                            className="text-xs text-[#7aa2ff] hover:text-[#8fb3ff] font-medium whitespace-nowrap"
+                          >
+                            View {c.exampleCases.length}
+                          </button>
+                        )}
+                        {c.count > 0 && (
+                          <button
+                            onClick={() => exportEnrichedToXlsx(
+                              `Customer — ${c.name}`,
+                              analysis.records.filter(r => r.resolvedCustomer === c.name),
+                            )}
+                            className="text-xs text-[#a6aec4] hover:text-[#eceff7] whitespace-nowrap"
+                            title={`Export all ${c.count} classified cases for ${c.name}`}
+                          >
+                            ↓ Export
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

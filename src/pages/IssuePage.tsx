@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { VBarChart, HBarChart } from '../components/ui/ChartWrapper';
 import { ExampleCasesPanel } from '../components/ui/ExampleCasesPanel';
+import { exportEnrichedToXlsx } from '../lib/exportAllCases';
 import type { AnalysisResult, IssueBreakdownItem } from '../types/analysis';
 
 interface Props { analysis: AnalysisResult }
@@ -101,16 +102,30 @@ export function IssuePage({ analysis }: Props) {
                     {TREND_ICON[iss.trend]}
                   </span>
                 </td>
-                {/* Examples button */}
+                {/* Examples + export buttons */}
                 <td className="px-4 py-3 text-right">
-                  {iss.exampleCases.length > 0 && (
-                    <button
-                      onClick={() => setSelected(iss)}
-                      className="text-xs text-[#7aa2ff] hover:text-[#8fb3ff] font-medium whitespace-nowrap"
-                    >
-                      View {iss.exampleCases.length}
-                    </button>
-                  )}
+                  <div className="flex items-center justify-end gap-3">
+                    {iss.exampleCases.length > 0 && (
+                      <button
+                        onClick={() => setSelected(iss)}
+                        className="text-xs text-[#7aa2ff] hover:text-[#8fb3ff] font-medium whitespace-nowrap"
+                      >
+                        View {iss.exampleCases.length}
+                      </button>
+                    )}
+                    {iss.count > 0 && (
+                      <button
+                        onClick={() => exportEnrichedToXlsx(
+                          iss.label,
+                          analysis.records.filter(r => r.primaryIssue === iss.id),
+                        )}
+                        className="text-xs text-[#a6aec4] hover:text-[#eceff7] whitespace-nowrap"
+                        title={`Export all ${iss.count} classified cases for ${iss.label}`}
+                      >
+                        ↓ Export
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

@@ -1,6 +1,7 @@
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { KpiCard } from '../components/ui/Card';
 import { DonutChart, TrendLine } from '../components/ui/ChartWrapper';
+import { exportEnrichedToXlsx } from '../lib/exportAllCases';
 import type { AnalysisResult } from '../types/analysis';
 
 function trendArrow(a: number, b: number) {
@@ -43,6 +44,19 @@ export function SummaryPage({ analysis }: Props) {
         <KpiCard label="Top Customer"   value={summary.topCustomerCount.toLocaleString()} sub={summary.topCustomer} accent="#52c7c7" />
         <KpiCard label="Top Transporter" value={summary.topTransporterDelays > 0 ? `${summary.topTransporterDelays} delays` : '—'} sub={summary.topTransporter} accent="#dc6d7d" />
       </div>
+
+      {/* Full classified export */}
+      {analysis.records.length > 0 && (
+        <div className="flex justify-end">
+          <button
+            onClick={() => exportEnrichedToXlsx('All Cases', analysis.records)}
+            className="text-xs font-medium text-[#a6aec4] hover:text-[#eceff7] border border-[#2a2f3f] hover:border-[#3a3f52] bg-[#171922] rounded-lg px-4 py-2 whitespace-nowrap"
+            title={`Export all ${analysis.records.length} classified cases with full field detail for accuracy review`}
+          >
+            ↓ Export All Classified Cases ({analysis.records.length.toLocaleString()})
+          </button>
+        </div>
+      )}
 
       {/* Narrative */}
       <div className="bg-[#171922] border border-[#2a2f3f] rounded-lg p-5">

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { HBarChart } from '../components/ui/ChartWrapper';
 import { ExampleCasesPanel } from '../components/ui/ExampleCasesPanel';
+import { exportEnrichedToXlsx } from '../lib/exportAllCases';
 import type { AnalysisResult, TransporterItem } from '../types/analysis';
 
 interface Props { analysis: AnalysisResult }
@@ -103,16 +104,30 @@ export function TransporterPage({ analysis }: Props) {
                 <td className="px-3 py-2.5">
                   <span className="text-xs font-medium px-1.5 py-0.5 rounded" style={{ color: RISK_CLR[t.risk], background: RISK_CLR[t.risk] + '20' }}>{t.risk}</span>
                 </td>
-                {/* Examples button */}
+                {/* Examples + export buttons */}
                 <td className="px-3 py-2.5">
-                  {t.exampleCases.length > 0 && (
-                    <button
-                      onClick={() => setSelected(t)}
-                      className="text-xs text-[#7aa2ff] hover:text-[#8fb3ff] font-medium whitespace-nowrap"
-                    >
-                      View {t.exampleCases.length}
-                    </button>
-                  )}
+                  <div className="flex items-center gap-3">
+                    {t.exampleCases.length > 0 && (
+                      <button
+                        onClick={() => setSelected(t)}
+                        className="text-xs text-[#7aa2ff] hover:text-[#8fb3ff] font-medium whitespace-nowrap"
+                      >
+                        View {t.exampleCases.length}
+                      </button>
+                    )}
+                    {t.count > 0 && (
+                      <button
+                        onClick={() => exportEnrichedToXlsx(
+                          `Transporter — ${t.name}`,
+                          analysis.records.filter(r => r.resolvedTransporter === t.name),
+                        )}
+                        className="text-xs text-[#a6aec4] hover:text-[#eceff7] whitespace-nowrap"
+                        title={`Export all ${t.count} classified cases for ${t.name}`}
+                      >
+                        ↓ Export
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
