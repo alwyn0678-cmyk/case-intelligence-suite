@@ -1093,3 +1093,99 @@ describe('Scheduling / slot context blocks Missing Load Reference', () => {
   });
 
 });
+
+// ─── Case Block 18: Intent Priority — Financial / Equipment guard ─────────────
+
+describe('Case Block 18 — Intent priority: financial and equipment guard', () => {
+
+  it('selfbilling email → rate (not delay)', () => {
+    const record = makeRecord({
+      subject: 'Selfbilling week 10',
+      description: 'Please find attached the selfbilling report for week 10. The driver arrived late but we are billing per the agreed tariff.',
+    });
+    const result = classifyCase(record);
+    console.log([
+      '',
+      `Subject:     "${record.subject}"`,
+      `Primary issue: ${result.primaryIssue} (${(result.confidence * 100).toFixed(1)}%)`,
+      `Result: ${result.primaryIssue === 'rate' ? '✓ PASS' : `✗ FAIL — expected rate, got ${result.primaryIssue}`}`,
+    ].join('\n  '));
+    expect(result.primaryIssue).toBe('rate');
+  });
+
+  it('DCH invoice query → rate (not customs)', () => {
+    const record = makeRecord({
+      subject: 'DCH Invoice query',
+      description: 'We have received the DCH invoice for customs clearance. The amounts appear incorrect — please check the duty charges.',
+    });
+    const result = classifyCase(record);
+    console.log([
+      '',
+      `Subject:     "${record.subject}"`,
+      `Primary issue: ${result.primaryIssue} (${(result.confidence * 100).toFixed(1)}%)`,
+      `Result: ${result.primaryIssue === 'rate' ? '✓ PASS' : `✗ FAIL — expected rate, got ${result.primaryIssue}`}`,
+    ].join('\n  '));
+    expect(result.primaryIssue).toBe('rate');
+  });
+
+  it('extra cost invoice → rate (not customs or delay)', () => {
+    const record = makeRecord({
+      subject: 'Extra cost invoice',
+      description: 'Please see the attached extra cost invoice for this shipment. Additional charges have been applied and we dispute the billing amounts.',
+    });
+    const result = classifyCase(record);
+    console.log([
+      '',
+      `Subject:     "${record.subject}"`,
+      `Primary issue: ${result.primaryIssue} (${(result.confidence * 100).toFixed(1)}%)`,
+      `Result: ${result.primaryIssue === 'rate' ? '✓ PASS' : `✗ FAIL — expected rate, got ${result.primaryIssue}`}`,
+    ].join('\n  '));
+    expect(result.primaryIssue).toBe('rate');
+  });
+
+  it('portable not ok → equipment (not ref_provided)', () => {
+    const record = makeRecord({
+      subject: 'Portable not OK — container TCKU1234567',
+      description: 'The portable is not ok. Container TCKU1234567 was inspected and found not in order. Please arrange replacement.',
+    });
+    const result = classifyCase(record);
+    console.log([
+      '',
+      `Subject:     "${record.subject}"`,
+      `Primary issue: ${result.primaryIssue} (${(result.confidence * 100).toFixed(1)}%)`,
+      `Result: ${result.primaryIssue === 'equipment' ? '✓ PASS' : `✗ FAIL — expected equipment, got ${result.primaryIssue}`}`,
+    ].join('\n  '));
+    expect(result.primaryIssue).toBe('equipment');
+  });
+
+  it('financial intent suppresses delay when selfbilling dominates', () => {
+    const record = makeRecord({
+      subject: 'Selfbilling dispute — driver delayed',
+      description: 'Selfbilling report attached. The driver was delayed by 3 hours but we dispute the extra waiting cost invoice.',
+    });
+    const result = classifyCase(record);
+    console.log([
+      '',
+      `Subject:     "${record.subject}"`,
+      `Primary issue: ${result.primaryIssue} (${(result.confidence * 100).toFixed(1)}%)`,
+      `Result: ${result.primaryIssue === 'rate' ? '✓ PASS' : `✗ FAIL — expected rate (financial intent), got ${result.primaryIssue}`}`,
+    ].join('\n  '));
+    expect(result.primaryIssue).toBe('rate');
+  });
+
+  it('credit note query → rate (not customs or amendment)', () => {
+    const record = makeRecord({
+      subject: 'Credit note query',
+      description: 'We have received a credit note for the overcharged customs fees. Please confirm the credit memo has been processed.',
+    });
+    const result = classifyCase(record);
+    console.log([
+      '',
+      `Subject:     "${record.subject}"`,
+      `Primary issue: ${result.primaryIssue} (${(result.confidence * 100).toFixed(1)}%)`,
+      `Result: ${result.primaryIssue === 'rate' ? '✓ PASS' : `✗ FAIL — expected rate, got ${result.primaryIssue}`}`,
+    ].join('\n  '));
+    expect(result.primaryIssue).toBe('rate');
+  });
+
+});

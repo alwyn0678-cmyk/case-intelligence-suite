@@ -21,6 +21,7 @@ import { extractEntities }              from './entityExtraction';
 import { lookupEntity, isInternalISRLabel, isCustomerJunkLabel } from '../config/referenceData';
 import { classifyByRules }              from './issueRules';
 import { fallbackClassify, operationalClueScan } from './fallbackIssueRules';
+import { filterByIntentPriority, TOPIC_INTENT, INTENT_PRIORITY } from './intentDetection';
 import { resolveZipToArea, extractZipsFromText } from '../config/zipAreaRules';
 import { normalizeText }                from './textNormalization';
 import { textProvidesRef, validateLoadRefMissing, detectBodyIntent } from './loadRefGuards';
@@ -325,6 +326,11 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   // Sort by confidence descending
   ruleMatches.sort((a, b) => b.confidence - a.confidence);
 
+  // Apply intent-priority filter: suppress lower-priority intent categories
+  // when a higher-priority intent has a strong match (≥0.75).
+  // ruleMatches is preserved unchanged for the load_ref gate's next-best lookup.
+  const filteredMatches = filterByIntentPriority(ruleMatches);
+
   // ── 9 + 10. Assign primary and secondary ─────────────────────
   let issues: string[] = [];
   let issueState: IssueState = 'unknown';
@@ -333,9 +339,9 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   let reviewFlag = false;
   let unresolvedReason: string | null = null;
 
-  if (ruleMatches.length > 0) {
-    const primary = ruleMatches[0];
-    issues       = [...new Set(ruleMatches.map(m => m.issueId))];
+  if (filteredMatches.length > 0) {
+    const primary = filteredMatches[0];
+    issues       = [...new Set(filteredMatches.map(m => m.issueId))];
     issueState   = primary.state;
     confidence   = primary.confidence;
     evidence     = primary.evidence;
@@ -557,7 +563,15 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
         !(descPrimary.issueId === 'load_ref' && overallPrimary === 'ref_provided');
       // Only promote if description has a meaningful signal (not just operational clue)
       const descConfidentEnough = descPrimary.confidence >= 0.55;
-      if (topicsDiffer && descConfidentEnough) {
+      // Intent priority guard: don't let a lower-priority-intent description topic
+      // override a higher-priority-intent overall primary.
+      // e.g. financial (priority 1) must not be overridden by documentation (4) or
+      // operational (5) even when the description's top match is a doc/delay topic.
+      const currentIntentPriority = INTENT_PRIORITY[TOPIC_INTENT[overallPrimary] ?? 'unknown'] ?? 9;
+      const descIntentPriority    = INTENT_PRIORITY[TOPIC_INTENT[descPrimary.issueId] ?? 'unknown'] ?? 9;
+      const intentAllowsOverride  = descIntentPriority <= currentIntentPriority;
+
+      if (topicsDiffer && descConfidentEnough && intentAllowsOverride) {
         // Description classification takes precedence — prepend to issues list
         // and replace issueState with description's state.
         if (!issues.includes(descPrimary.issueId)) {

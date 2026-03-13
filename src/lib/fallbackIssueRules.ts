@@ -10,6 +10,7 @@
 // ─────────────────────────────────────────────────────────────────
 
 import type { IssueMatch, IssueState } from './issueRules';
+import { hasStrongFinancialContext, FINANCIAL_INTENT_TOPICS } from './intentDetection';
 
 interface FallbackRule {
   issueId: string;
@@ -80,6 +81,21 @@ const FALLBACK_RULES: FallbackRule[] = [
     evidence: 'release pin provided pattern', confidence: 0.65 },
 
   // ── Rate / billing ────────────────────────────────────────────────
+  { issueId: 'rate', state: 'missing',
+    pattern: /\b(selfbilling|self.billing|selfbill|self.bill)\b/i,
+    evidence: 'selfbilling pattern', confidence: 0.85 },
+  { issueId: 'rate', state: 'missing',
+    pattern: /\bdch\s*(invoice|billing|report|cost)\b/i,
+    evidence: 'DCH invoice/billing pattern', confidence: 0.85 },
+  { issueId: 'rate', state: 'missing',
+    pattern: /\bextra\s*costs?\s*invoice\b/i,
+    evidence: 'extra cost invoice pattern', confidence: 0.85 },
+  { issueId: 'rate', state: 'missing',
+    pattern: /\b(demurrage|detention|storage)\s*invoice\b/i,
+    evidence: 'demurrage/detention invoice pattern', confidence: 0.80 },
+  { issueId: 'rate', state: 'missing',
+    pattern: /\b(credit|debit)\s*(note|memo)\b/i,
+    evidence: 'credit/debit note pattern', confidence: 0.80 },
   { issueId: 'rate', state: 'missing',
     pattern: /\b(invoice|billing|charge|cost|fee|price).{0,25}(query|wrong|issue|error|dispute|question|clarif)\b/i,
     evidence: 'invoice/rate query pattern', confidence: 0.60 },
@@ -158,6 +174,18 @@ export function fallbackClassify(text: string): IssueMatch | null {
         };
       }
     }
+  }
+
+  // Financial guard: if the text has strong financial context but the best match
+  // is a non-financial topic, override with a rate match to prevent financial
+  // emails (selfbilling, extra costs) from falling through to delay/customs/etc.
+  if (best && !FINANCIAL_INTENT_TOPICS.has(best.issueId) && hasStrongFinancialContext(text)) {
+    return {
+      issueId: 'rate',
+      state: 'missing',
+      confidence: 0.70,
+      evidence: ['financial guard: strong financial context overrides non-financial fallback'],
+    };
   }
 
   return best;

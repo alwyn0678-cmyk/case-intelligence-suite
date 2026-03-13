@@ -277,14 +277,21 @@ const TOPIC_RULES: TopicRule[] = [
       'customs docs', 'customs doc', 'customs documentation',
       'customs paperwork', 'customs broker', 'clearing agent', 'customs agent',
       'eur1', 'certificate of origin', 'phytosanitary', 'health cert',
-      'import license', 'export license', 'commercial invoice',
-      'hs code', 'tariff code', 'commodity code', 'eori', 'duty',
+      'import license', 'export license',
+      // NOTE: 'commercial invoice' intentionally removed — it is a financial document
+      // identifier and causes financial emails (billing/extra cost) to misclassify
+      // as Customs / Documentation. Financial intent takes priority (see intentDetection.ts).
+      'hs code', 'tariff code', 'commodity code', 'eori',
       'import duty', 'export duty', 'ata carnet', 'bonded warehouse',
+      // 'duty' alone is kept ONLY as a weak signal — it appears in many non-customs
+      // contexts (e.g. "duty of care", "on duty"). Specific forms remain as strong.
     ],
     weakSignals: [
+      'duty',   // general "duty" — keep weak; specific forms ('import duty') are strong
       'missing documents', 'documents missing', 'documentation missing',
-      'documents not received', 'invoice missing', 'packing list missing',
+      'documents not received', 'packing list missing',
       'certificate missing', 'compliance documents', 'regulatory documents',
+      // NOTE: 'invoice missing' removed — invoice queries are financial (rate topic)
     ],
   },
   {
@@ -396,6 +403,16 @@ const TOPIC_RULES: TopicRule[] = [
       'seal missing', 'seal discrepancy', 'faulty unit',
       'defective container', 'container unavailable', 'equipment shortage',
       'truck breakdown', 'vehicle breakdown', 'mechanical failure',
+      // "Portable / unit not OK" — equipment condition failures reported by drivers/depots.
+      // Must classify as EQUIPMENT, never as Reference Update / Info Provided.
+      'portable not ok', 'portable not in order', 'portable not acceptable',
+      'equipment not ok', 'equipment not in order', 'equipment not acceptable',
+      'unit not ok', 'unit not in order', 'unit not acceptable',
+      'container not ok', 'container not in order', 'container not acceptable',
+      'trailer not ok', 'trailer not in order', 'trailer not acceptable',
+      'not roadworthy', 'unroadworthy', 'unit defective', 'unit damaged',
+      'equipment defect', 'equipment failure', 'equipment fault',
+      'container defect', 'container fault', 'trailer defect', 'trailer fault',
     ],
     weakSignals: [
       'equipment issue', 'container not available', 'no container',
@@ -463,14 +480,37 @@ const TOPIC_RULES: TopicRule[] = [
   {
     topic: 'rate',
     strongSignals: [
+      // Rate / pricing disputes
       'rate query', 'rate dispute', 'invoice query', 'overcharge',
       'billing query', 'charge dispute', 'incorrect invoice',
       'rate discrepancy', 'invoice incorrect', 'wrong invoice',
       'invoice dispute', 'overcharged', 'undercharged', 'charge query',
+      // Selfbilling / auto-billing systems — must classify as financial, never as Delay
+      'selfbilling', 'self billing', 'self-billing', 'selfbill', 'self bill',
+      // DCH (digital cost handling / document cost header) invoice formats
+      'dch invoice', 'dch billing', 'dch report', 'dch cost',
+      // Extra cost invoices — invoices for additional charges
+      'extra cost invoice', 'extra costs invoice', 'extra costs report',
+      'additional cost invoice', 'additional costs invoice',
+      // Billing reports and cost invoices
+      'billing report', 'billing issue', 'billing error', 'billing dispute',
+      'cost invoice', 'waiting cost invoice', 'waiting costs invoice',
+      // Demurrage / detention invoices (financial, not operational demurrage events)
+      'demurrage invoice', 'detention invoice', 'storage invoice',
+      // Credit / debit notes
+      'credit note', 'credit memo', 'debit note', 'debit memo',
+      'credit note query', 'debit note query',
+      // Invoice missing / not received (financial, not customs)
+      'invoice not received', 'invoice missing', 'invoice outstanding',
+      // Commercial invoice (financial document — NOT a customs clearance signal)
+      'commercial invoice query', 'commercial invoice dispute', 'commercial invoice incorrect',
     ],
     weakSignals: [
       'rate', 'pricing', 'surcharge', 'freight rate', 'quotation',
-      'tariff', 'credit note', 'refund request', 'payment dispute',
+      'tariff', 'refund request', 'payment dispute',
+      // Generic billing/invoice language (weak — context window determines final state)
+      'invoice', 'billing', 'extra cost', 'extra costs', 'additional charge',
+      'cost report', 'charge',
     ],
   },
   {
