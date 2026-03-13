@@ -657,8 +657,12 @@ export function runAnalysis(
   };
 
   // ─── 13. Issue drilldowns ─────────────────────────────────────
+  // IMPORTANT: filter by primaryIssue only so drilldown record count matches
+  // the summary panel count (issueBreakdown uses primaryIssue exclusively).
+  // Previously used r.issues.includes(iss.id) which included secondary matches
+  // and inflated drilldown counts vs. summary totals.
   const issueDrilldowns: IssueDrilldown[] = issueBreakdown.slice(0, 8).map(iss => {
-    const issRecs = records.filter(r => r.issues.includes(iss.id));
+    const issRecs = records.filter(r => r.primaryIssue === iss.id);
 
     const topN = <T extends string>(counts: Record<T, number>, total: number): Array<{ name: T; count: number; pct: number }> =>
       (Object.entries(counts) as Array<[T, number]>)

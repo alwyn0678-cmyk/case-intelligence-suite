@@ -330,6 +330,13 @@ const TOPIC_RULES: TopicRule[] = [
       'missing customs documents', 'customs docs missing', 'mrn missing',
       'missing mrn', 'cannot proceed without mrn', 'mrn not received',
       'mrn not provided', 'mrn required', 'need mrn', 'require mrn',
+      // Portbase-specific missing customs docs patterns
+      'missing customs docs portbase', 'customs documents in portbase missing',
+      'customs docs portbase', 'portbase customs missing',
+      'portbase customs docs missing', 'missing customs docs',
+      'customs docs missing', 'portbase check customs',
+      'portbase check customs missing', '1st portbase check',
+      'portbase customs documents missing',
       // Dutch
       'douane documenten ontbreken', 'douane documenten niet ontvangen',
       'graag douane documenten sturen', 'mrn ontbreekt',
@@ -529,6 +536,10 @@ const TOPIC_RULES: TopicRule[] = [
       'pcs message', 'ata notification', 'atd notification',
       'pre arrival notification', 'port entry rejected',
       'arrival notification', 'departure notification',
+      // Missing customs docs in portbase context
+      'missing customs docs portbase', 'portbase customs missing',
+      'portbase customs docs missing', 'customs docs portbase',
+      'portbase check customs missing', 'portbase customs documents missing',
     ],
     weakSignals: [
       'port system', 'terminal notification', 'port pre-arrival',
@@ -566,6 +577,9 @@ const TOPIC_RULES: TopicRule[] = [
       'dch invoice', 'dch billing', 'dch report', 'dch cost',
       // Extra cost invoices — invoices for additional charges
       'extra cost invoice', 'extra costs invoice', 'extra costs report',
+      'extra cost report', 'extrakostenrechnung',
+      'extra kosten rapport', 'extra kosten report',
+      'meerkosten rapport', 'meerkosten report',
       'additional cost invoice', 'additional costs invoice',
       // Billing reports and cost invoices
       'billing report', 'billing issue', 'billing error', 'billing dispute',

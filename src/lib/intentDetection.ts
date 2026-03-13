@@ -167,6 +167,10 @@ export const FINANCIAL_GUARD_KEYWORDS: string[] = [
   'selfbilling', 'self billing', 'self-billing', 'selfbill', 'self bill',
   'dch invoice', 'dch billing', 'dch report',
   'extra cost invoice', 'extra costs invoice',
+  // Extra costs report — must always be financial, never customs/reference
+  'extra costs report', 'extra cost report',
+  'extrakostenrechnung', 'extra kosten rapport', 'extra kosten report',
+  'meerkosten rapport', 'meerkosten report',
   'billing report', 'billing dispute', 'billing issue', 'billing error',
   'cost invoice', 'waiting cost invoice', 'waiting costs invoice',
   'demurrage invoice', 'detention invoice', 'storage invoice',

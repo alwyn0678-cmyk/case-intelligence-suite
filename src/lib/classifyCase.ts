@@ -21,7 +21,7 @@ import { extractEntities }              from './entityExtraction';
 import { lookupEntity, isInternalISRLabel, isCustomerJunkLabel } from '../config/referenceData';
 import { classifyByRules }              from './issueRules';
 import { fallbackClassify, operationalClueScan } from './fallbackIssueRules';
-import { filterByIntentPriority, TOPIC_INTENT, INTENT_PRIORITY, DETECTED_OBJECT_MAP, extractTriggerInfo } from './intentDetection';
+import { filterByIntentPriority, TOPIC_INTENT, INTENT_PRIORITY, DETECTED_OBJECT_MAP, extractTriggerInfo, hasStrongFinancialContext } from './intentDetection';
 import { resolveZipToArea, extractZipsFromText } from '../config/zipAreaRules';
 import { normalizeText }                from './textNormalization';
 import { textProvidesRef, validateLoadRefMissing, detectBodyIntent } from './loadRefGuards';
@@ -39,6 +39,25 @@ const PROVIDED_DOC_PATTERNS: string[] = [
   'please find the t1', 'please find the mrn', 'mrn below',
   't1 number below', 'mrn number', 'mrn:', 'the mrn is',
   'find attached mrn',
+  // Additional provision patterns (FIX C)
+  'mrn attached', 'see attached customs', 'forwarding customs',
+  'customs documents attached', 'hierbij de t1', 'hierbij de douane',
+  'im anhang', 'anbei t1', 'anbei die zolldokumente',
+  'zolldokumente beigefuegt', 't1 number:', 'our t1',
+  'the mrn is', 'mrn number is', 't1 is ',
+  'please find the t1', 'please find attached mrn',
+];
+
+// ─── Financial subject patterns — absolute early-exit override ────
+// When the SUBJECT LINE contains any of these patterns, the case must
+// classify as 'rate' regardless of body content. These are unambiguous
+// financial identifiers that appear in email subjects only for financial emails.
+const FINANCIAL_SUBJECT_PATTERNS: string[] = [
+  'extra costs report', 'extra cost report',
+  'extra costs invoice', 'extra cost invoice',
+  'extrakostenrechnung',
+  'extra kosten rapport', 'extra kosten report',
+  'meerkosten rapport', 'meerkosten report',
 ];
 import type { IssueState, IssueMatch }  from './issueRules';
 
@@ -169,6 +188,50 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
 
   const combinedText = Object.values(fields).filter(Boolean).join(' ');
   const normalizedText = combinedText.replace(/\s+/g, ' ').trim();
+
+  // ── FINANCIAL SUBJECT EARLY-EXIT (FIX A/D) ───────────────────
+  // When the subject line contains an unambiguous financial pattern (e.g.
+  // "Extra Costs Report"), force rate classification immediately — skip all
+  // other scoring. These subjects only appear on financial emails; body content
+  // (which may contain reference numbers or customs terms) is irrelevant.
+  const subjectLower = (fields.subject ?? '').toLowerCase();
+  if (FINANCIAL_SUBJECT_PATTERNS.some(p => subjectLower.includes(p))) {
+    const entityResultFin = extractEntities(
+      record.transporter, record.customer, record.subject, record.description, record.isr_details,
+    );
+    const extractedZipFin = record.zip ?? extractZipsFromText(fields.subject)[0] ?? extractZipsFromText(fields.description)[0] ?? null;
+    let resolvedAreaFin: string | null = record.area ?? null;
+    let routingHintFin: string | null = null;
+    if (!resolvedAreaFin && extractedZipFin) {
+      const zr = resolveZipToArea(extractedZipFin, normalizedText);
+      if (zr) { resolvedAreaFin = zr.area; routingHintFin = zr.typicalRouting ?? null; }
+      else     { resolvedAreaFin = `ZIP ${extractedZipFin}`; }
+    }
+    let resolvedCustomerFin: string | null = entityResultFin.customer?.canonicalName ?? null;
+    if (!resolvedCustomerFin && record.customer?.trim()) {
+      const rawLookup = lookupEntity(record.customer.trim());
+      const isOp = rawLookup !== null && (rawLookup.entry.entityType === 'deepsea_terminal' || rawLookup.entry.entityType === 'depot' || rawLookup.entry.entityType === 'transporter' || rawLookup.entry.entityType === 'carrier');
+      if (!isOp) resolvedCustomerFin = rawLookup ? rawLookup.entry.canonicalName : record.customer.trim();
+    }
+    if (resolvedCustomerFin && (isInternalISRLabel(resolvedCustomerFin) || isCustomerJunkLabel(resolvedCustomerFin))) resolvedCustomerFin = null;
+    return {
+      issues: ['rate'], primaryIssue: 'rate', secondaryIssue: null,
+      issueState: 'unknown', confidence: 0.92,
+      resolvedTransporter: entityResultFin.transporter?.canonicalName ?? null,
+      resolvedDepot: entityResultFin.depot?.canonicalName ?? null,
+      resolvedDeepseaTerminal: entityResultFin.deepseaTerminal?.canonicalName ?? null,
+      resolvedCustomer: resolvedCustomerFin,
+      allEntities: entityResultFin.allEntities, unknownEntities: entityResultFin.unknownEntities,
+      extractedZip: extractedZipFin, resolvedArea: resolvedAreaFin, routingHint: routingHintFin,
+      routingAlignment: extractedZipFin ? 'aligned' : 'no_zip',
+      reviewFlag: false, unresolvedReason: null,
+      evidence: [`[financial-subject-override] Subject contains financial pattern — forced to rate`],
+      sourceFieldsUsed,
+      detectedIntent: 'financial', detectedObject: 'Invoice / Rate / Charge',
+      triggerPhrase: FINANCIAL_SUBJECT_PATTERNS.find(p => subjectLower.includes(p)) ?? 'financial subject',
+      triggerSourceField: 'subject',
+    };
+  }
 
   // ── 3 + 4 + 5. Entity extraction ─────────────────────────────
   // Build extra raw text from any unmapped columns in _raw that aren't
@@ -778,6 +841,67 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
         `[customs-context-check] No transporter entity or operational context found ` +
         `— confidence reduced by ${(penalty * 100).toFixed(0)}%`,
       );
+    }
+  }
+
+  // ── POST-CLASSIFICATION SANITY CHECK (FIX E) ─────────────────
+  // ref_provided must not override financial, equipment, or explicit-missing-doc intent.
+  // These overrides run after all other guards to catch any remaining misrouting.
+  if (issues[0] === 'ref_provided') {
+    const lowerNormCheck = normalizedText.toLowerCase();
+
+    // If strong financial signal exists → override to rate
+    if (hasStrongFinancialContext(lowerNormCheck)) {
+      issues = ['rate', ...issues.filter(i => i !== 'ref_provided')];
+      confidence = Math.max(confidence, 0.80);
+      evidence.push('[sanity-check] ref_provided overridden to rate — strong financial signal detected');
+    }
+
+    // If strong equipment signal exists → override to equipment
+    const EQUIPMENT_OVERRIDE_SIGNALS = [
+      'portable not ok', 'container damaged', 'damaged container',
+      'equipment issue', 'reefer issue', 'seal broken', 'container not ok',
+      'container defect', 'container beschadigd', 'container defekt',
+      'unit not ok', 'equipment not ok', 'trailer not ok',
+    ];
+    if (issues[0] === 'ref_provided' && EQUIPMENT_OVERRIDE_SIGNALS.some(s => lowerNormCheck.includes(s))) {
+      issues = ['equipment', ...issues.filter(i => i !== 'ref_provided')];
+      confidence = Math.max(confidence, 0.80);
+      evidence.push('[sanity-check] ref_provided overridden to equipment — strong equipment signal detected');
+    }
+
+    // If explicit missing-doc signal exists → override to customs/t1
+    const MISSING_DOC_OVERRIDE = [
+      'missing customs docs portbase', 'customs documents in portbase missing',
+      'portbase customs missing', 'portbase customs docs missing',
+      'missing customs docs', 'customs documents missing',
+      't1 missing', 'missing t1', 'mrn missing', 'missing mrn',
+    ];
+    if (issues[0] === 'ref_provided' && MISSING_DOC_OVERRIDE.some(s => lowerNormCheck.includes(s))) {
+      // Determine if this is portbase/customs context
+      const isPortbase = lowerNormCheck.includes('portbase') && lowerNormCheck.includes('customs');
+      const newIssue = isPortbase ? 'customs' : (lowerNormCheck.includes('t1') ? 't1' : 'customs');
+      issues = [newIssue, ...issues.filter(i => i !== 'ref_provided')];
+      issueState = 'missing';
+      confidence = Math.max(confidence, 0.80);
+      evidence.push(`[sanity-check] ref_provided overridden to ${newIssue} — explicit missing-doc signal detected`);
+    }
+  }
+
+  // ── Customs/portbase + "missing" guard (FIX B) ─────────────────
+  // When primary is closing_time but text contains customs + missing,
+  // override to customs (or portbase if portbase keyword is present).
+  if (issues[0] === 'closing_time') {
+    const lowerNormB = normalizedText.toLowerCase();
+    const hasCustoms = lowerNormB.includes('customs') || lowerNormB.includes('douane') || lowerNormB.includes('zoll');
+    const hasMissing = lowerNormB.includes('missing') || lowerNormB.includes('ontbreekt') || lowerNormB.includes('fehlt');
+    if (hasCustoms && hasMissing) {
+      const hasPortbase = lowerNormB.includes('portbase');
+      const overrideIssue = hasPortbase ? 'customs' : 'customs';
+      issues = [overrideIssue, ...issues.filter(i => i !== 'closing_time')];
+      issueState = 'missing';
+      confidence = Math.max(confidence, 0.80);
+      evidence.push(`[customs-missing-guard] closing_time overridden to ${overrideIssue} — customs + missing signals detected`);
     }
   }
 

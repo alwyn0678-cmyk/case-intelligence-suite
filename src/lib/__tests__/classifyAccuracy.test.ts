@@ -402,3 +402,150 @@ describe('Validators — validateEquipmentAsRefProvided', () => {
     expect(validateEquipmentAsRefProvided('ref_provided', 'please find below the load ref BKG123')).toBe(false);
   });
 });
+
+// ─── 13. Extra Costs Report — must ALWAYS be rate ─────────────────
+describe('Accuracy — Extra Costs Report always classifies as rate', () => {
+  it('"Extra Costs Report 680110 / 67008423959 266668610" as subject → rate', () => {
+    const result = pipeline(
+      'Please find attached the extra costs report for this shipment.',
+      'Extra Costs Report 680110 / 67008423959 266668610',
+    );
+    expect(result.primaryIssue).toBe('rate');
+    expect(result.primaryIssue).not.toBe('customs');
+    expect(result.primaryIssue).not.toBe('ref_provided');
+  });
+
+  it('"Extra Costs Report 684315 / 67008580914 / 266785399" as subject → rate', () => {
+    const result = pipeline(
+      'Please review the attached extra costs report for the additional charges.',
+      'Extra Costs Report 684315 / 67008580914 / 266785399',
+    );
+    expect(result.primaryIssue).toBe('rate');
+  });
+
+  it('"extra costs report for shipment" → rate', () => {
+    const result = pipeline(
+      'This is an extra costs report for your shipment with customs reference.',
+      'extra costs report for shipment',
+    );
+    expect(result.primaryIssue).toBe('rate');
+  });
+
+  it('"meerkosten rapport voor zending" as subject → rate', () => {
+    const result = pipeline(
+      'Bijgaand het meerkosten rapport voor deze zending.',
+      'meerkosten rapport voor zending',
+    );
+    expect(result.primaryIssue).toBe('rate');
+  });
+
+  it('financial subject overrides customs/reference body content → rate', () => {
+    // Body mentions customs reference numbers which would normally trigger customs
+    const result = pipeline(
+      'Customs reference 12345. MRN DE123456789012345. Please see attached invoice.',
+      'Extra Costs Report 999',
+    );
+    expect(result.primaryIssue).toBe('rate');
+    expect(result.primaryIssue).not.toBe('customs');
+  });
+
+  it('"extra cost report" rule-level match → rate', () => {
+    const result = classify('extra cost report for shipment ABCD1234567 attached');
+    expect(result).not.toBeNull();
+    expect(result!.issueId).toBe('rate');
+  });
+});
+
+// ─── 14. Missing customs docs portbase — must NOT be closing_time ──
+describe('Accuracy — Missing customs docs portbase must classify as customs/portbase', () => {
+  it('"MISSING CUSTOMS DOCS PORTBASE" as subject → customs or portbase', () => {
+    const result = pipeline(
+      'Customs documents are missing in portbase. Driver cannot proceed.',
+      'MISSING CUSTOMS DOCS PORTBASE',
+    );
+    expect(['customs', 'portbase']).toContain(result.primaryIssue);
+    expect(result.primaryIssue).not.toBe('closing_time');
+    expect(result.primaryIssue).not.toBe('ref_provided');
+  });
+
+  it('"customs documents in Portbase missing" as subject → customs or portbase', () => {
+    const result = pipeline(
+      'Please upload the missing customs documents in Portbase. Container cannot be released.',
+      'customs documents in Portbase missing',
+    );
+    expect(['customs', 'portbase']).toContain(result.primaryIssue);
+    expect(result.primaryIssue).not.toBe('closing_time');
+  });
+
+  it('"1st portbase check / customs documents missing" as subject → customs or portbase', () => {
+    const result = pipeline(
+      'First portbase check failed. Customs documents are missing. Please upload urgently.',
+      '1st portbase check / customs documents missing',
+    );
+    expect(['customs', 'portbase']).toContain(result.primaryIssue);
+    expect(result.primaryIssue).not.toBe('closing_time');
+  });
+
+  it('"missing customs docs portbase" rule-level → customs or portbase', () => {
+    const result = classify('missing customs docs portbase — please upload immediately');
+    expect(result).not.toBeNull();
+    expect(['customs', 'portbase']).toContain(result!.issueId);
+  });
+});
+
+// ─── 15. ref_provided must not absorb financial or equipment ──────
+describe('Accuracy — ref_provided must not override financial or equipment intent', () => {
+  it('subject "extra costs report", body mentions "customs ref" → rate, not ref_provided', () => {
+    const result = pipeline(
+      'Please review the customs reference number for this extra costs report. The reference is attached.',
+      'extra costs report 12345',
+    );
+    expect(result.primaryIssue).toBe('rate');
+    expect(result.primaryIssue).not.toBe('ref_provided');
+  });
+
+  it('"portable not ok, please advise" → equipment, not ref_provided', () => {
+    const result = pipeline(
+      'portable not ok — please advise on next steps. Driver is waiting.',
+      'Portable Not OK',
+    );
+    expect(result.primaryIssue).toBe('equipment');
+    expect(result.primaryIssue).not.toBe('ref_provided');
+  });
+
+  it('"container damaged, ref ABC" → equipment, not ref_provided', () => {
+    const result = pipeline(
+      'container damaged at depot. ref: ABC1234567 for damage report. Please advise.',
+      'Container Damaged',
+    );
+    expect(result.primaryIssue).toBe('equipment');
+    expect(result.primaryIssue).not.toBe('ref_provided');
+  });
+});
+
+// ─── 16. Provided document patterns — must NOT be missing-doc ────
+describe('Accuracy — Provided doc signals must route to ref_provided, not missing', () => {
+  it('"attached T1" in combined text → NOT t1 (should be ref_provided)', () => {
+    const result = pipeline(
+      'attached T1 document for this shipment — please find it enclosed.',
+      'T1 Attached',
+    );
+    expect(result.primaryIssue).not.toBe('t1');
+  });
+
+  it('"please find attached T1" → NOT t1', () => {
+    const result = pipeline(
+      'please find attached T1 for this transit.',
+      'T1 Attached',
+    );
+    expect(result.primaryIssue).not.toBe('t1');
+  });
+
+  it('"forwarding customs documents" → NOT customs (missing)', () => {
+    const result = pipeline(
+      'forwarding customs documents for this shipment as requested.',
+      'Customs Documents Forwarded',
+    );
+    expect(result.primaryIssue).not.toBe('customs');
+  });
+});
