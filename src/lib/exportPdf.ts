@@ -110,18 +110,19 @@ function tableDefaults(headFill: [number,number,number] = COLORS.bgTableHeader) 
     theme: 'plain' as const,
     styles: {
       font: 'helvetica',
-      fontSize: 8,
-      cellPadding: { top: 3, bottom: 3, left: 5, right: 5 },
+      fontSize: 8.5,
+      cellPadding: { top: 4, bottom: 4, left: 6, right: 6 },
       textColor: COLORS.tableText,
       lineColor: COLORS.borderLight,
       lineWidth: 0.2,
+      overflow: 'linebreak' as const,
     },
     headStyles: {
       fillColor: headFill,
       textColor: COLORS.tableText,
       fontStyle: 'bold' as const,
-      fontSize: 8,
-      cellPadding: { top: 3.5, bottom: 3.5, left: 5, right: 5 },
+      fontSize: 8.5,
+      cellPadding: { top: 4.5, bottom: 4.5, left: 6, right: 6 },
     },
     alternateRowStyles: {
       fillColor: COLORS.bgTableAlt,
@@ -130,6 +131,16 @@ function tableDefaults(headFill: [number,number,number] = COLORS.bgTableHeader) 
     tableLineWidth: 0.3,
     margin: { left: 18, right: 18 },
   };
+}
+
+// ─── Intro paragraph helper ───────────────────────────────────────
+function introText(doc: jsPDF, y: number, text: string, pageWidth: number, margin: number): number {
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  textColor(doc, COLORS.textSecondary);
+  const lines = doc.splitTextToSize(text, pageWidth - margin * 2);
+  doc.text(lines, margin, y);
+  return y + lines.length * 5 + 6;
 }
 
 // ─── Page footer helper ───────────────────────────────────────────
@@ -546,36 +557,32 @@ export async function exportToPdf(analysis: AnalysisResult): Promise<void> {
 
   y = sectionHeader(doc, 18, 'Issue Intelligence', W, MARGIN);
 
-  // Intro sentence
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  textColor(doc, COLORS.textSecondary);
-  doc.text(
+  y = introText(
+    doc, y,
     'This section highlights the operational issue categories generating the highest case volume and workload across the reporting period.',
-    MARGIN, y, { maxWidth: W - MARGIN * 2 },
+    W, MARGIN,
   );
-  y += 10;
 
   autoTable(doc, {
     startY: y,
-    head: [['#', 'Category', 'Cases', '% Total', 'Hours Lost', 'Preventable', 'Trend']],
+    head: [['#', 'Category', 'Cases', '% Total', 'Hrs Lost', 'Preventable', 'Trend']],
     body: issueBreakdown.map((i, n) => [
       n + 1,
       i.label,
-      i.count,
+      i.count.toLocaleString(),
       `${i.percent.toFixed(1)}%`,
       i.hoursLost.toFixed(1),
       i.preventable ? 'Yes' : 'No',
       i.trend,
     ]),
     columnStyles: {
-      0: { cellWidth: 8 },
-      1: { cellWidth: 60 },
-      2: { cellWidth: 18 },
-      3: { cellWidth: 18 },
-      4: { cellWidth: 25 },
-      5: { cellWidth: 18 },
-      6: { cellWidth: 20 },
+      0: { cellWidth: 8,  halign: 'right' as const },
+      1: { cellWidth: 66 },
+      2: { cellWidth: 20, halign: 'right' as const },
+      3: { cellWidth: 18, halign: 'right' as const },
+      4: { cellWidth: 22, halign: 'right' as const },
+      5: { cellWidth: 22, halign: 'center' as const },
+      6: { cellWidth: 18, halign: 'center' as const },
     },
     ...tableDefaults(),
   });
@@ -590,15 +597,21 @@ export async function exportToPdf(analysis: AnalysisResult): Promise<void> {
 
   y = sectionHeader(doc, 18, 'Customer Burden', W, MARGIN);
 
+  y = introText(
+    doc, y,
+    'Customer burden analysis highlights accounts generating the highest case volumes and hours lost. High-risk customers indicate recurring operational friction requiring targeted intervention.',
+    W, MARGIN,
+  );
+
   if (customerBurden.length === 0) {
     noDataRow(doc, y + 4, 'No customer data found in this dataset.');
   } else {
     autoTable(doc, {
       startY: y,
-      head: [['Customer', 'Cases', 'Hours', 'Preventable %', 'Load Ref', 'Customs', 'Top Issue', 'Risk']],
+      head: [['Customer', 'Cases', 'Hours', 'Prev. %', 'Load Ref', 'Customs', 'Top Issue', 'Risk']],
       body: customerBurden.slice(0, 30).map(c => [
         c.name,
-        c.count,
+        c.count.toLocaleString(),
         c.hoursLost.toFixed(1),
         `${c.preventablePct.toFixed(0)}%`,
         c.missingLoadRef || '—',
@@ -607,14 +620,26 @@ export async function exportToPdf(analysis: AnalysisResult): Promise<void> {
         c.risk,
       ]),
       columnStyles: {
-        0: { cellWidth: 55 },
-        1: { cellWidth: 16 },
-        2: { cellWidth: 16 },
-        3: { cellWidth: 22 },
-        4: { cellWidth: 14 },
-        5: { cellWidth: 14 },
-        6: { cellWidth: 25 },
-        7: { cellWidth: 12 },
+        0: { cellWidth: 60 },
+        1: { cellWidth: 16, halign: 'right' as const },
+        2: { cellWidth: 16, halign: 'right' as const },
+        3: { cellWidth: 18, halign: 'right' as const },
+        4: { cellWidth: 14, halign: 'center' as const },
+        5: { cellWidth: 14, halign: 'center' as const },
+        6: { cellWidth: 22 },
+        7: { cellWidth: 14, halign: 'center' as const },
+      },
+      didParseCell: (data) => {
+        // Highlight high-risk rows
+        if (data.column.index === 7 && data.section === 'body') {
+          const val = String(data.cell.raw ?? '').toLowerCase();
+          if (val === 'high') {
+            data.cell.styles.textColor = COLORS.highlightRed;
+            data.cell.styles.fontStyle = 'bold';
+          } else if (val === 'medium') {
+            data.cell.styles.textColor = COLORS.highlightAmber;
+          }
+        }
       },
       ...tableDefaults(),
     });
@@ -633,12 +658,18 @@ export async function exportToPdf(analysis: AnalysisResult): Promise<void> {
   if (transporterPerformance.length === 0) {
     noDataRow(doc, y + 4, 'No transporter data found in this dataset.');
   } else {
-    // Mini bar chart — Top 10 transporters by case volume
+    y = introText(
+      doc, y,
+      'Transporter performance is measured by case volume, delay frequency, and waiting time incidents. High-risk transporters indicate recurring execution failures requiring escalation or SLA review.',
+      W, MARGIN,
+    );
+
+    // Intro label for chart
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     textColor(doc, COLORS.textPrimary);
     doc.text('Top 10 Transporters by Case Volume', MARGIN, y);
-    y += 4;
+    y += 5;
 
     const top10transporters = transporterPerformance
       .slice(0, 10)
@@ -650,10 +681,10 @@ export async function exportToPdf(analysis: AnalysisResult): Promise<void> {
     y = drawHorizBarChart(
       doc, MARGIN, y, W - MARGIN * 2,
       top10transporters, maxTCount,
-      5, 2,
+      6, 3,
       [170, 110, 70] as [number,number,number],
     );
-    y += 4;
+    y += 6;
 
     autoTable(doc, {
       startY: y,
@@ -661,13 +692,34 @@ export async function exportToPdf(analysis: AnalysisResult): Promise<void> {
       body: transporterPerformance.map((t, n) => [
         n + 1,
         t.name,
-        t.count,
+        t.count.toLocaleString(),
         t.delays || '—',
         t.notOnTime || '—',
         t.waitingTime || '—',
         `${t.punctualityScore.toFixed(0)}%`,
         t.risk,
       ]),
+      columnStyles: {
+        0: { cellWidth: 8,  halign: 'right' as const },
+        1: { cellWidth: 58 },
+        2: { cellWidth: 18, halign: 'right' as const },
+        3: { cellWidth: 18, halign: 'right' as const },
+        4: { cellWidth: 22, halign: 'right' as const },
+        5: { cellWidth: 20, halign: 'right' as const },
+        6: { cellWidth: 18, halign: 'right' as const },
+        7: { cellWidth: 14, halign: 'center' as const },
+      },
+      didParseCell: (data) => {
+        if (data.column.index === 7 && data.section === 'body') {
+          const val = String(data.cell.raw ?? '').toLowerCase();
+          if (val === 'high') {
+            data.cell.styles.textColor = COLORS.highlightRed;
+            data.cell.styles.fontStyle = 'bold';
+          } else if (val === 'medium') {
+            data.cell.styles.textColor = COLORS.highlightAmber;
+          }
+        }
+      },
       ...tableDefaults(),
     });
   }
@@ -682,16 +734,51 @@ export async function exportToPdf(analysis: AnalysisResult): Promise<void> {
 
   y = sectionHeader(doc, 18, 'Customs & Compliance', W, MARGIN);
 
+  y = introText(
+    doc, y,
+    'Customs and compliance cases represent documentation gaps and regulatory requirements that block cargo movement. Recurring issues in this category point to process or communication failures with specific customers or transport lanes.',
+    W, MARGIN,
+  );
+
+  // Horizontal bar chart — Customs breakdown
+  const customsBarItems = [
+    { label: 'Customs Documentation', value: cc.customsDocs ?? 0 },
+    { label: 'Portbase Issues',        value: cc.portbaseIssues ?? 0 },
+    { label: 'T1 / Transit Documents', value: cc.t1Issues ?? 0 },
+    { label: 'Bill of Lading (B/L)',   value: cc.blIssues ?? 0 },
+  ].filter(i => i.value > 0).sort((a, b) => b.value - a.value);
+
+  if (customsBarItems.length > 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    textColor(doc, COLORS.textPrimary);
+    doc.text('Compliance Cases by Type', MARGIN, y);
+    y += 5;
+
+    const maxCVal = Math.max(...customsBarItems.map(i => i.value), 1);
+    y = drawHorizBarChart(
+      doc, MARGIN, y, W - MARGIN * 2,
+      customsBarItems, maxCVal,
+      7, 4,
+      COLORS.highlightBlue as [number,number,number],
+    );
+    y += 6;
+  }
+
   autoTable(doc, {
     startY: y,
-    head: [['Category', 'Cases']],
+    head: [['Compliance Category', 'Cases']],
     body: [
-      ['Total Compliance Cases', cc.totalCases],
-      ['Customs Documentation',  cc.customsDocs],
-      ['Portbase Issues',        cc.portbaseIssues],
-      ['Bill of Lading (B/L)',   cc.blIssues],
-      ['T1 / Transit Documents', cc.t1Issues],
+      ['Total Compliance Cases', (cc.totalCases ?? 0).toLocaleString()],
+      ['Customs Documentation',  (cc.customsDocs ?? 0).toLocaleString()],
+      ['Portbase Issues',        (cc.portbaseIssues ?? 0).toLocaleString()],
+      ['Bill of Lading (B/L)',   (cc.blIssues ?? 0).toLocaleString()],
+      ['T1 / Transit Documents', (cc.t1Issues ?? 0).toLocaleString()],
     ],
+    columnStyles: {
+      0: { cellWidth: 120 },
+      1: { cellWidth: 30, halign: 'right' as const },
+    },
     ...tableDefaults(),
   });
 
