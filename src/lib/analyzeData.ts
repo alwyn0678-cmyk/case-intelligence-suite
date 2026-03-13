@@ -291,6 +291,10 @@ export function runAnalysis(
       unknownEntities:      cls.unknownEntities,
       evidence:             cls.evidence,
       sourceFieldsUsed:     cls.sourceFieldsUsed,
+      detectedIntent:       cls.detectedIntent,
+      detectedObject:       cls.detectedObject,
+      triggerPhrase:        cls.triggerPhrase,
+      triggerSourceField:   cls.triggerSourceField,
       // Strict resolved-only model: only use the canonical name produced by
       // the classification engine. If resolution failed (null), the row is
       // unresolved — never fall back to raw r.customer, as that may hold

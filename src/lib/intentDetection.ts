@@ -182,3 +182,84 @@ export function hasStrongFinancialContext(text: string): boolean {
 
 // Financial intent topics — used to skip non-financial fallbacks
 export const FINANCIAL_INTENT_TOPICS = new Set(['rate', 'waiting_time', 'damage']);
+
+// ─── Detected object labels ────────────────────────────────────────
+// Maps each issueId → a human-readable description of the operational
+// object the classifier detected. Shown in the diagnostic export so
+// reviewers understand *what* the classifier found, not just which
+// category it assigned.
+export const DETECTED_OBJECT_MAP: Record<string, string> = {
+  load_ref:          'Load / Booking Reference',
+  ref_provided:      'Load / Booking Reference',
+  transport_order:   'Transport Order / TRO',
+  customs:           'Customs / Compliance Document',
+  portbase:          'Portbase / Port Notification',
+  bl:                'Bill of Lading (B/L)',
+  t1:                'T1 / Transit Document',
+  delay:             'Shipment / Delivery',
+  closing_time:      'Terminal / Vessel Cutoff',
+  amendment:         'Booking / Order Details',
+  waiting_time:      'Waiting Time / Demurrage Charge',
+  rate:              'Invoice / Rate / Charge',
+  damage:            'Cargo / Goods',
+  equipment:         'Container / Equipment',
+  tracking:          'Shipment Status / Visibility',
+  communication:     'Service / Escalation',
+  equipment_release: 'Release Pin / Delivery Order',
+  scheduling:        'Slot / Appointment',
+  pickup_delivery:   'Pickup / Delivery Planning',
+  capacity:          'Capacity / Availability',
+  other:             'Unclassified',
+};
+
+// ─── Trigger phrase extraction ────────────────────────────────────
+
+export interface TriggerInfo {
+  /** Which field produced the classification-winning phrase. */
+  sourceField: string;
+  /** The exact phrase or signal that triggered the classification. */
+  triggerPhrase: string;
+}
+
+const CONTENT_FIELDS = new Set(['description', 'subject', 'isr_details', 'category']);
+const FIELD_PREFIX_RE = /^\[([a-z_]+)\]\s+(.*)/s;
+const SIGNAL_PHRASE_RE = /(?:strong|weak)\s+signal:\s+"([^"]+)"/i;
+
+/**
+ * Parses the evidence array produced by classifyCase and extracts the
+ * most informative trigger phrase and its source field.
+ *
+ * Priority:
+ *   1. First content-field evidence entry with a quoted signal phrase
+ *   2. First content-field evidence entry (phrase = first 80 chars of rest)
+ *   3. load_ref-gate ACCEPTED entry (uses trigger= attribute)
+ *   4. Fallback: empty strings
+ */
+export function extractTriggerInfo(evidence: string[]): TriggerInfo {
+  for (const e of evidence) {
+    const fieldMatch = e.match(FIELD_PREFIX_RE);
+    if (!fieldMatch) continue;
+    const field = fieldMatch[1];
+    if (!CONTENT_FIELDS.has(field)) continue;
+
+    const rest = fieldMatch[2] ?? '';
+    const phraseMatch = rest.match(SIGNAL_PHRASE_RE);
+    return {
+      sourceField:   field,
+      triggerPhrase: phraseMatch ? phraseMatch[1] : rest.replace(/\s+/g, ' ').trim().slice(0, 80),
+    };
+  }
+
+  // load_ref gate accepted — trigger phrase stored as attribute
+  const gateEntry = evidence.find(e => e.includes('[load_ref-gate] ACCEPTED:'));
+  if (gateEntry) {
+    const triggerMatch = gateEntry.match(/trigger="([^"]+)"/);
+    const sourceMatch  = gateEntry.match(/source=(\w+)/);
+    return {
+      sourceField:   sourceMatch?.[1]  ?? 'unknown',
+      triggerPhrase: triggerMatch?.[1] ?? 'load ref gate',
+    };
+  }
+
+  return { sourceField: '', triggerPhrase: '' };
+}

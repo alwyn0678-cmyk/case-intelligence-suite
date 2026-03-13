@@ -48,6 +48,10 @@ const EXPORT_HEADERS = [
   'Routing Alignment',
   'Source Type',
   'Source Fields Used',
+  'Detected Intent',
+  'Detected Object',
+  'Trigger Phrase',
+  'Trigger Source Field',
   'Evidence',
 ];
 
@@ -85,6 +89,10 @@ const COL_WIDTHS: { wch: number }[] = [
   { wch: 18 },  // Routing Alignment
   { wch: 16 },  // Source Type
   { wch: 40 },  // Source Fields Used
+  { wch: 18 },  // Detected Intent
+  { wch: 30 },  // Detected Object
+  { wch: 60 },  // Trigger Phrase
+  { wch: 20 },  // Trigger Source Field
   { wch: 80 },  // Evidence
 ];
 
@@ -147,7 +155,11 @@ function enrichedToRow(r: EnrichedRecord): (string | number)[] {
     r.routingAlignment         ?? '',
     sourceType,
     r.sourceFieldsUsed?.join(', ') ?? '',
-    r.evidence?.join(' | ')    ?? '',
+    r.detectedIntent        ?? '',
+    r.detectedObject        ?? '',
+    r.triggerPhrase         ?? '',
+    r.triggerSourceField    ?? '',
+    r.evidence?.join(' | ') ?? '',
   ];
 }
 

@@ -35,6 +35,16 @@ export interface EnrichedRecord extends NormalisedRecord {
   // ── Evidence trail ────────────────────────────────────────────
   evidence: string[];
   sourceFieldsUsed: string[];
+
+  // ── Classifier transparency (diagnostic) ──────────────────────
+  /** Intent group detected (financial, operational, documentation, …) */
+  detectedIntent: string;
+  /** Human-readable object the classifier found (Invoice, Load Reference, …) */
+  detectedObject: string;
+  /** The exact phrase or signal that triggered the primary classification */
+  triggerPhrase: string;
+  /** Which field the trigger phrase came from (description, subject, …) */
+  triggerSourceField: string;
 }
 
 // ── Example case drilldown ────────────────────────────────────────

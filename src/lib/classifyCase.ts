@@ -21,7 +21,7 @@ import { extractEntities }              from './entityExtraction';
 import { lookupEntity, isInternalISRLabel, isCustomerJunkLabel } from '../config/referenceData';
 import { classifyByRules }              from './issueRules';
 import { fallbackClassify, operationalClueScan } from './fallbackIssueRules';
-import { filterByIntentPriority, TOPIC_INTENT, INTENT_PRIORITY } from './intentDetection';
+import { filterByIntentPriority, TOPIC_INTENT, INTENT_PRIORITY, DETECTED_OBJECT_MAP, extractTriggerInfo } from './intentDetection';
 import { resolveZipToArea, extractZipsFromText } from '../config/zipAreaRules';
 import { normalizeText }                from './textNormalization';
 import { textProvidesRef, validateLoadRefMissing, detectBodyIntent } from './loadRefGuards';
@@ -102,6 +102,16 @@ export interface CaseClassification {
   unresolvedReason: string | null;
   evidence: string[];
   sourceFieldsUsed: string[];
+
+  // ── Classifier transparency (diagnostic) ──────────────────────
+  /** Intent group detected (financial, operational, documentation, …) */
+  detectedIntent: string;
+  /** Human-readable object the classifier found (Invoice, Load Reference, …) */
+  detectedObject: string;
+  /** The exact phrase or signal that triggered the primary classification */
+  triggerPhrase: string;
+  /** Which field the trigger phrase came from (description, subject, …) */
+  triggerSourceField: string;
 }
 
 // ─── Reference extraction helpers ───────────────────────────────
@@ -680,6 +690,11 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   const primaryIssue   = issues[0];
   const secondaryIssue = issues.length > 1 ? issues[1] : null;
 
+  // ── Diagnostic transparency fields ───────────────────────────
+  const detectedIntent      = TOPIC_INTENT[primaryIssue] ?? 'unknown';
+  const detectedObject      = DETECTED_OBJECT_MAP[primaryIssue] ?? primaryIssue;
+  const triggerInfo         = extractTriggerInfo(evidence);
+
   return {
     issues,
     primaryIssue,
@@ -700,5 +715,9 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     unresolvedReason,
     evidence,
     sourceFieldsUsed,
+    detectedIntent,
+    detectedObject,
+    triggerPhrase:       triggerInfo.triggerPhrase,
+    triggerSourceField:  triggerInfo.sourceField,
   };
 }
