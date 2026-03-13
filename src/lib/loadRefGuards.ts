@@ -160,6 +160,15 @@ export const LOAD_REF_PLANNING_BLOCKLIST: string[] = [
   'advise rail',
   'loading window',
   'operational planning',
+  // ── Scheduling / slot allocation ───────────────────────────────
+  'slot allocation',
+  'slot booking',
+  'slot request',
+  'rail slot',
+  'barge slot',
+  'loading slot',
+  'allocation request',
+  'intermodal request',  // intermodal planning / feasibility queries
   // ── Billing / cost contexts ────────────────────────────────────
   'demurrage',
   'detention',           // detention charges
@@ -212,6 +221,9 @@ const BILLING_INTENT_SIGNALS: string[] = [
 const PLANNING_INTENT_SIGNALS: string[] = [
   'feasibility', 'capacity request', 'rail cut', 'barge schedule',
   'preferred load date', 'advise load date', 'loading window', 'operational planning',
+  // Scheduling / slot context — queries for slots or allocations are planning, not load-ref requests
+  'slot allocation', 'slot booking', 'slot request', 'rail slot', 'barge slot',
+  'loading slot', 'allocation request', 'intermodal request',
 ];
 
 /** Routing / re-routing signals. */

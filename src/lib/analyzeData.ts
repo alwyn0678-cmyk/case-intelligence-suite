@@ -1047,6 +1047,26 @@ export function runAnalysis(
       );
     }
 
+    // ── Load-ref gate bypass detection ─────────────────────────────
+    // The hard safety net in classifyCase.ts removes load_ref when the gate
+    // rejects it. This check surfaces any records that somehow have both
+    // gate-rejection evidence AND primaryIssue=load_ref — which should be
+    // impossible after the safety net, but is worth detecting defensively.
+    const gateBypassedCases = records.filter(r =>
+      r.primaryIssue === 'load_ref' &&
+      (r.evidence ?? []).some(e => e.includes('[load_ref-gate] REJECTED')),
+    );
+    if (gateBypassedCases.length > 0) {
+      console.error(
+        `[CIS validation] LOAD_REF_GATE_BYPASSED: ${gateBypassedCases.length} record(s) have load_ref gate rejection in evidence but primaryIssue is still 'load_ref'. Safety net may have failed.`,
+        gateBypassedCases.map(r => ({
+          caseNumber:  r.case_number ?? '—',
+          subject:     r.subject?.slice(0, 80) ?? '—',
+          evidence:    r.evidence,
+        })),
+      );
+    }
+
     // ── Sentence fragment leak scan ────────────────────────────────
     // Detects email body prose that slipped through the customer gates.
     const sentenceFragmentLeaks = customerBurden.filter(c => isSentenceFragment(c.name));

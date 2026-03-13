@@ -613,6 +613,56 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     }
   }
 
+  // ── Section 3: Customs / Compliance operational context check ────
+  //
+  // Customs / T1 / Portbase / BL cases should represent operational delays
+  // caused by transporters requesting missing documents for physical movements.
+  // Internal-only CX conversations that have no transporter, driver, container,
+  // or operational movement context should NOT be counted as compliance issues —
+  // they are likely informational emails or internal process discussions.
+  //
+  // Gate: soft confidence penalty only (not a hard block).
+  // If NO transporter is resolved AND the combined text contains NONE of the
+  // operational context keywords below, reduce confidence and set review flag.
+  // This avoids over-blocking legitimate cases where the transporter name is
+  // unknown but operational context is clearly present.
+  const CUSTOMS_COMPLIANCE_TOPICS = new Set(['customs', 't1', 'portbase', 'bl']);
+  const OPERATIONAL_CONTEXT_KEYWORDS: string[] = [
+    // Transport actors
+    'haulier', 'hauler', 'driver', 'truck', 'lorry', 'transporter', 'carrier',
+    'forwarder', 'freight forwarder', 'customs agent', 'customs broker',
+    // Physical movement
+    'container', 'cntr', 'pickup', 'pick up', 'pick-up', 'delivery',
+    'collect', 'collection', 'loading', 'unloading', 'discharge',
+    // Locations / gates
+    'terminal', 'depot', 'warehouse', 'gate out', 'gate in',
+    // Status signals
+    'blocked', 'held', 'on hold', 'clearance', 'release', 'cargo',
+    'shipment', 'freight', 'transport order', 'movement',
+  ];
+  if (CUSTOMS_COMPLIANCE_TOPICS.has(issues[0])) {
+    const hasTransporterEntity = resolvedTransporter !== null;
+    const normalizedLower = normalizedText.toLowerCase();
+    const hasOperationalContext = OPERATIONAL_CONTEXT_KEYWORDS.some(kw =>
+      normalizedLower.includes(kw),
+    );
+    if (!hasTransporterEntity && !hasOperationalContext) {
+      const penalty = 0.15;
+      confidence = Math.max(confidence - penalty, 0.30);
+      if (!reviewFlag) {
+        reviewFlag = true;
+        unresolvedReason = (
+          `Customs/compliance topic (${issues[0]}) but no transporter entity or ` +
+          `operational movement context found — may be internal/CX only. Manual review recommended.`
+        );
+      }
+      evidence.push(
+        `[customs-context-check] No transporter entity or operational context found ` +
+        `— confidence reduced by ${(penalty * 100).toFixed(0)}%`,
+      );
+    }
+  }
+
   const primaryIssue   = issues[0];
   const secondaryIssue = issues.length > 1 ? issues[1] : null;
 
