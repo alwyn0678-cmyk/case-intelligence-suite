@@ -46,6 +46,12 @@ const PROVIDED_DOC_PATTERNS: string[] = [
   'zolldokumente beigefuegt', 't1 number:', 'our t1',
   'the mrn is', 'mrn number is', 't1 is ',
   'please find the t1', 'please find attached mrn',
+  // GAP F: additional multilingual provision patterns
+  // Dutch
+  't1 bijgevoegd', 'zie bijgevoegd t1', 'mrn bijgevoegd',
+  'douane documenten bijgevoegd',
+  // German
+  't1 im anhang', 'mrn beigefuegt', 'zolldokumente im anhang',
 ];
 
 // ─── Financial subject patterns — absolute early-exit override ────
@@ -58,6 +64,21 @@ const FINANCIAL_SUBJECT_PATTERNS: string[] = [
   'extrakostenrechnung',
   'extra kosten rapport', 'extra kosten report',
   'meerkosten rapport', 'meerkosten report',
+  // Additional financial subject patterns (GAP D)
+  // Specific-enough to be safe as absolute overrides (appear in financial subjects only):
+  // English
+  'extra costs', 'extra cost', 'purchase order', 'po number',
+  'storage costs', 'storage cost',
+  // Dutch
+  'extra kosten', 'opslagkosten', 'wachttijd kosten', 'kosten rapport',
+  'inkooporder', 'bestelnummer',
+  // German
+  'extrakosten', 'lagerkosten', 'standgeld',
+  'kostenbericht', 'bestellnummer',
+  // NOTE: bare 'demurrage', 'detention', 'wartezeit' are intentionally excluded —
+  // they appear in operational waiting-time case subjects and must NOT be forced to rate.
+  // Specific invoice/charge forms ('demurrage invoice', 'demurrage rechnung') remain
+  // in rate strongSignals and FINANCIAL_GUARD_KEYWORDS for body-level detection.
 ];
 import type { IssueState, IssueMatch }  from './issueRules';
 
@@ -885,6 +906,29 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
       issueState = 'missing';
       confidence = Math.max(confidence, 0.80);
       evidence.push(`[sanity-check] ref_provided overridden to ${newIssue} — explicit missing-doc signal detected`);
+    }
+  }
+
+  // ── GAP C: waiting_time + financial charge language → rate ────────────────
+  //
+  // A waiting_time topic should remain as its own category ONLY when the email
+  // describes the operational event of waiting WITHOUT financial claim language.
+  // When the email also contains charge / invoice / billing language, the case
+  // is a financial dispute and must classify as rate.
+  //
+  // "driver waited 4 hours at depot"   → waiting_time (operational, no charge)
+  // "waiting time charges for driver delay" → rate (financial claim)
+  // "demurrage invoice for week 12"    → rate (financial invoice)
+  if (issues[0] === 'waiting_time') {
+    const FINANCIAL_CHARGE_SIGNALS = [
+      'invoice', 'factuur', 'rechnung', 'charge', 'cost', 'kosten',
+      'costs', 'billing', 'payment', 'betaling', 'rechnen',
+    ];
+    const lowerNormWt = normalizedText.toLowerCase();
+    if (FINANCIAL_CHARGE_SIGNALS.some(s => lowerNormWt.includes(s))) {
+      issues = ['rate', ...issues.filter(i => i !== 'waiting_time')];
+      confidence = Math.max(confidence, 0.78);
+      evidence.push('[waiting-time-financial-guard] waiting_time overridden to rate — financial charge language detected');
     }
   }
 

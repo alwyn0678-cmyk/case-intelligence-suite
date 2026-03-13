@@ -177,6 +177,12 @@ export const FINANCIAL_GUARD_KEYWORDS: string[] = [
   'credit note', 'credit memo', 'debit note', 'debit memo',
   'invoice query', 'invoice dispute', 'invoice incorrect', 'invoice error',
   'overcharged', 'overcharge', 'billing query', 'charge dispute',
+  // Storage and waiting-time financial charges
+  'storage cost', 'storage costs', 'opslagkosten', 'lagerkosten',
+  'waiting time charges', 'wachttijd kosten', 'wartezeit kosten',
+  'cost allocation', 'kosten rapport', 'kostenbericht',
+  // Purchase Orders / PO references
+  'purchase order', 'inkooporder', 'bestellnummer',
 ];
 
 export function hasStrongFinancialContext(text: string): boolean {

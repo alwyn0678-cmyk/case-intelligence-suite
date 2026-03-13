@@ -598,6 +598,26 @@ const TOPIC_RULES: TopicRule[] = [
       'price correction', 'price adjustment', 'rate correction',
       'wrong rate applied', 'wrong rate was applied', 'incorrect rate applied',
       'corrected invoice', 'invoice correction',
+      // Purchase Orders / PO references — financial procurement documents
+      // NOTE: use specific forms only — bare 'po' too short (matches substrings)
+      // English
+      'purchase order', 'purchase orders', 'po number', 'po no', 'po#',
+      // Dutch
+      'inkooporder', 'bestelnummer', 'inkoopnummer',
+      // German
+      'bestellnummer', 'einkaufsauftrag', 'bestellauftrag',
+      // Storage and waiting-time costs — financial charge language (not operational event)
+      // "driver waited 4 hours" → waiting_time (operational)
+      // "waiting time charges" / "storage costs invoice" → rate (financial)
+      // English
+      'storage cost', 'storage costs', 'waiting time charges',
+      'waiting time invoice', 'waiting costs invoice', 'cost allocation',
+      // Dutch
+      'opslagkosten', 'wachttijd kosten', 'wachttijd factuur',
+      'detentie kosten', 'demurrage factuur', 'kosten rapport',
+      // German
+      'lagerkosten', 'wartezeit kosten', 'wartezeit rechnung',
+      'standgeld', 'demurrage rechnung', 'kostenbericht',
     ],
     weakSignals: [
       // NOTE: bare 'rate' removed — it matches as substring of 'generated', 'translated',

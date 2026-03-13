@@ -549,3 +549,97 @@ describe('Accuracy — Provided doc signals must route to ref_provided, not miss
     expect(result.primaryIssue).not.toBe('customs');
   });
 });
+
+// ─── 17. Purchase Order / PO → rate ───────────────────────────────
+describe('Accuracy — Purchase Order / PO reference → rate', () => {
+  it('"Purchase Order PO-12345" as subject → rate', () => {
+    const result = pipeline(
+      'please find attached the purchase order for approval',
+      'Purchase Order PO-12345',
+    );
+    expect(result.primaryIssue).toBe('rate');
+  });
+
+  it('"Inkooporder 987654" as subject → rate (Dutch)', () => {
+    const result = pipeline(
+      'bijgaand de inkooporder voor goedkeuring',
+      'Inkooporder 987654',
+    );
+    expect(result.primaryIssue).toBe('rate');
+  });
+});
+
+// ─── 18. Storage / demurrage charges → rate ───────────────────────
+describe('Accuracy — Storage and demurrage charge language → rate', () => {
+  it('"storage costs for container ABCU1234" → rate', () => {
+    const result = pipeline(
+      'storage costs for container ABCU1234567 are being disputed, please advise on billing',
+      'Storage Costs Query',
+    );
+    expect(result.primaryIssue).toBe('rate');
+  });
+
+  it('"demurrage invoice for week 12" → rate', () => {
+    const result = pipeline(
+      'please find attached demurrage invoice for week 12',
+      'Demurrage Invoice Week 12',
+    );
+    expect(result.primaryIssue).toBe('rate');
+  });
+
+  it('"waiting time charges for driver delay" → rate', () => {
+    const result = pipeline(
+      'the driver was waiting for 4 hours, please see attached waiting time charges invoice',
+      'Waiting Time Charges',
+    );
+    expect(result.primaryIssue).toBe('rate');
+  });
+
+  it('"wachttijd kosten factuur" → rate (Dutch)', () => {
+    const result = pipeline(
+      'bijgaand de wachttijd factuur voor de chauffeur',
+      'Wachttijd Kosten Factuur',
+    );
+    expect(result.primaryIssue).toBe('rate');
+  });
+
+  it('"lagerkosten rechnung" → rate (German)', () => {
+    const result = pipeline(
+      'anbei die lagerkosten rechnung fuer diesen container',
+      'Lagerkosten Rechnung',
+    );
+    expect(result.primaryIssue).toBe('rate');
+  });
+});
+
+// ─── 19. Waiting time operational (no charges) → waiting_time ─────
+describe('Accuracy — Waiting time operational event (no charges) → waiting_time', () => {
+  it('"driver waited 4 hours at depot" (no charge language) → NOT rate', () => {
+    const result = pipeline(
+      'driver waited 4 hours at depot terminal, no loading happened',
+      'Driver Waiting at Depot',
+    );
+    // Operational event without financial language must NOT become rate
+    expect(result.primaryIssue).not.toBe('rate');
+  });
+
+  it('pure operational waiting at terminal → NOT rate', () => {
+    const result = pipeline(
+      'The driver waited for 3 hours at Rotterdam terminal. Truck was standing by. No loading could proceed.',
+      'Driver waited at terminal',
+    );
+    expect(result.primaryIssue).not.toBe('rate');
+  });
+});
+
+// ─── 20. Extra Costs Report + financial body → rate ───────────────
+describe('Accuracy — Extra Costs Report with customs body → rate (financial overrides)', () => {
+  it('subject "Extra Costs Report", body has customs reference → rate', () => {
+    const result = pipeline(
+      'related to customs clearance ref 12345',
+      'Extra Costs Report',
+    );
+    expect(result.primaryIssue).toBe('rate');
+    expect(result.primaryIssue).not.toBe('customs');
+  });
+});
