@@ -151,6 +151,22 @@ function enrichedToRow(r: EnrichedRecord): (string | number)[] {
   ];
 }
 
+// ── Shared worksheet builder ─────────────────────────────────────
+
+function buildWorksheet(records: EnrichedRecord[]) {
+  const rows: (string | number)[][] = [
+    EXPORT_HEADERS,
+    ...records.map(enrichedToRow),
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = COL_WIDTHS;
+  for (let col = 0; col < EXPORT_HEADERS.length; col++) {
+    const cellRef = XLSX.utils.encode_cell({ r: 0, c: col });
+    if (ws[cellRef]) ws[cellRef].s = { font: { bold: true } };
+  }
+  return ws;
+}
+
 // ── Public export function ───────────────────────────────────────
 
 /**
@@ -166,28 +182,66 @@ function enrichedToRow(r: EnrichedRecord): (string | number)[] {
 export function exportEnrichedToXlsx(title: string, records: EnrichedRecord[]): void {
   if (records.length === 0) return;
 
-  const rows: (string | number)[][] = [
-    EXPORT_HEADERS,
-    ...records.map(enrichedToRow),
-  ];
-
-  const worksheet = XLSX.utils.aoa_to_sheet(rows);
-
-  worksheet['!cols'] = COL_WIDTHS;
-
-  // Bold header row
-  for (let col = 0; col < EXPORT_HEADERS.length; col++) {
-    const cellRef = XLSX.utils.encode_cell({ r: 0, c: col });
-    if (worksheet[cellRef]) {
-      worksheet[cellRef].s = { font: { bold: true } };
-    }
-  }
-
   const workbook = XLSX.utils.book_new();
   const sheetName = title.slice(0, 31).replace(/[/\\?*[\]]/g, '-');
-  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+  XLSX.utils.book_append_sheet(workbook, buildWorksheet(records), sheetName);
 
   const safeTitle = title.replace(/[/\\?%*:|"<>]/g, '-').replace(/\s+/g, '_');
   const timestamp = new Date().toISOString().slice(0, 10);
   XLSX.writeFile(workbook, `CIS_Classified_${safeTitle}_${timestamp}.xlsx`);
+}
+
+/**
+ * Complete data extract — multi-tab Excel workbook.
+ *
+ * Sheet layout:
+ *   "All Cases"         — every selected record, sorted by category then date
+ *   "<Category label>"  — one sheet per category that has at least 1 record
+ *
+ * @param allRecords    Full classified dataset (analysis.records)
+ * @param selectedIds   Issue IDs to include. Pass empty array to include all.
+ * @param categoryLabels Map of issueId → human label (from issueBreakdown)
+ */
+export function exportAllCategoriesToXlsx(
+  allRecords: EnrichedRecord[],
+  selectedIds: string[],
+  categoryLabels: Record<string, string>,
+): void {
+  // Filter to selected categories (empty = all)
+  const filtered = selectedIds.length === 0
+    ? [...allRecords]
+    : allRecords.filter(r => selectedIds.includes(r.primaryIssue));
+
+  if (filtered.length === 0) return;
+
+  // Sort: by category label, then by date descending
+  filtered.sort((a, b) => {
+    const labelA = categoryLabels[a.primaryIssue] ?? a.primaryIssue;
+    const labelB = categoryLabels[b.primaryIssue] ?? b.primaryIssue;
+    if (labelA !== labelB) return labelA.localeCompare(labelB);
+    const dA = a.date instanceof Date ? a.date.getTime() : 0;
+    const dB = b.date instanceof Date ? b.date.getTime() : 0;
+    return dB - dA;
+  });
+
+  const workbook = XLSX.utils.book_new();
+
+  // Sheet 1: All selected records combined
+  XLSX.utils.book_append_sheet(workbook, buildWorksheet(filtered), 'All Cases');
+
+  // One sheet per category (max sheet name = 31 chars)
+  const issueIds = selectedIds.length === 0
+    ? [...new Set(filtered.map(r => r.primaryIssue))]
+    : selectedIds;
+
+  for (const id of issueIds) {
+    const categoryRecords = filtered.filter(r => r.primaryIssue === id);
+    if (categoryRecords.length === 0) continue;
+    const label = categoryLabels[id] ?? id;
+    const sheetName = label.slice(0, 31).replace(/[/\\?*[\]]/g, '-');
+    XLSX.utils.book_append_sheet(workbook, buildWorksheet(categoryRecords), sheetName);
+  }
+
+  const timestamp = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(workbook, `CIS_Complete_Extract_${timestamp}.xlsx`);
 }
