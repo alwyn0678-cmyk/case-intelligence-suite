@@ -228,6 +228,27 @@ const TOPIC_RULES: TopicRule[] = [
       // Note: 'order no' intentionally excluded — at only 8 chars it matches as a substring
       // inside "transport order not received" → causes transport_order to misclassify as load_ref.
       // Note: 'transport order' intentionally excluded — it is a document (see transport_order topic)
+      // ── Multilingual explicit-missing patterns (EN/NL/DE) ───────────────
+      // English
+      'missing load ref', 'missing load reference', 'please provide load ref',
+      'please send load ref', 'load ref still missing', 'no load ref received',
+      'load reference not provided', 'please send the loadref', 'please send the loadrefs',
+      'please send loadref', 'loadref missing', 'release ref missing',
+      'missing release reference', 'please provide release ref',
+      'loading reference missing', 'reference required for loading',
+      'load ref not received', 'load ref not provided', 'load ref required',
+      'loadref required', 'no loadref', 'no load reference',
+      // Dutch
+      'laadreferentie ontbreekt', 'loadref ontbreekt', 'graag loadref sturen',
+      'graag laadreferentie sturen', 'loadref nog niet ontvangen',
+      'laadreferentie niet ontvangen', 'laadreferentie ontbr',
+      'graag de loadref', 'loadref nog niet', 'laadreferentie nog niet',
+      'laadreferentie missen', 'ontbrekende laadreferentie',
+      // German
+      'ladereferenz fehlt', 'lade referenz fehlt', 'bitte ladereferenz senden',
+      'referenz fehlt', 'ladung referenz fehlt', 'ladereferenz nicht erhalten',
+      'ladereferenz wird benoetigt', 'ladereferenz benoetigt',
+      'ladereferenz nicht vorhanden', 'fehlende ladereferenz',
     ],
     weakSignals: [
       // Explicit "correct/updated ref" phrases — indicate a reference is being supplied.
@@ -265,6 +286,15 @@ const TOPIC_RULES: TopicRule[] = [
       'work order missing', 'missing work order', 'work order not received',
       'work order required', 'please send work order', 'send work order',
       'no work order', 'work order not issued', 'work order not sent',
+      // ── Multilingual (NL/DE) ─────────────────────────────────────────────
+      // Dutch
+      'transportorder', 'transport opdracht', 'transportopdracht',
+      'graag transportopdracht sturen', 'transportorder ontbreekt',
+      'transportopdracht ontbreekt', 'graag transportorder',
+      // German
+      'transportauftrag', 'transportauftrag fehlt',
+      'bitte transportauftrag senden', 'auftrag fehlt',
+      'fahrauftrag', 'fahrauftrag fehlt',
     ],
     weakSignals: [
       'tro', 'carrier instruction', 'carrier order', 'transport confirmation',
@@ -293,6 +323,23 @@ const TOPIC_RULES: TopicRule[] = [
       'import duty', 'export duty', 'ata carnet', 'bonded warehouse',
       // 'duty' alone is kept ONLY as a weak signal — it appears in many non-customs
       // contexts (e.g. "duty of care", "on duty"). Specific forms remain as strong.
+      // ── Multilingual explicit-missing patterns (EN/NL/DE) ─────────────────
+      // English
+      'customs documents missing', 'no customs documents received',
+      'please provide customs documents', 'please send customs documents',
+      'missing customs documents', 'customs docs missing', 'mrn missing',
+      'missing mrn', 'cannot proceed without mrn', 'mrn not received',
+      'mrn not provided', 'mrn required', 'need mrn', 'require mrn',
+      // Dutch
+      'douane documenten ontbreken', 'douane documenten niet ontvangen',
+      'graag douane documenten sturen', 'mrn ontbreekt',
+      'douanedocumenten ontbreken', 'douanepapieren ontbreken',
+      'graag de mrn', 'mrn niet ontvangen',
+      // German
+      'zolldokumente fehlen', 'zollpapiere fehlen',
+      'bitte zollpapiere senden', 'mrn fehlt',
+      'zolldokumente nicht erhalten', 'zollpapiere benoetigt',
+      'bitte mrn senden',
     ],
     weakSignals: [
       'duty',   // general "duty" — keep weak; specific forms ('import duty') are strong
@@ -310,6 +357,17 @@ const TOPIC_RULES: TopicRule[] = [
       'transit pass', 'ncts', 'transit guarantee', 'transit bond',
       'transit closure', 'transit rejection', 'procedure 7100',
       'transit not closed', 'transit open', 'customs transit',
+      // ── Multilingual explicit-missing patterns (EN/NL/DE) ─────────────────
+      // English
+      'please send t1', 'missing t1', 't1 still missing', 't1 not received',
+      't1 not provided', 'driver needs t1', 'cannot proceed without t1',
+      't1 document missing', 'need t1', 'require t1',
+      // Dutch
+      't1 ontbreekt', 'graag t1 sturen', 't1 nog niet ontvangen',
+      't1 niet ontvangen', 'graag de t1', 't1 document ontbreekt',
+      // German
+      't1 fehlt', 'bitte t1 senden', 't1 nicht erhalten',
+      't1 dokument fehlt', 't1 benoetigt',
     ],
     weakSignals: [
       't1', 't2', 'transit procedure', 'transit mrn',
@@ -421,6 +479,15 @@ const TOPIC_RULES: TopicRule[] = [
       'not roadworthy', 'unroadworthy', 'unit defective', 'unit damaged',
       'equipment defect', 'equipment failure', 'equipment fault',
       'container defect', 'container fault', 'trailer defect', 'trailer fault',
+      // ── Multilingual (NL/DE) ─────────────────────────────────────────────
+      // Dutch
+      'container beschadigd', 'container niet ok', 'apparatuur probleem',
+      'container defect', 'reefer defect', 'zegel defect',
+      'container beschadiging', 'equipment probleem',
+      // German
+      'container beschaedigt', 'container defekt', 'equipment problem',
+      'container nicht ok', 'reefer defekt', 'siegel defekt',
+      'schaden am container',
     ],
     weakSignals: [
       'equipment issue', 'container not available', 'no container',
@@ -519,7 +586,14 @@ const TOPIC_RULES: TopicRule[] = [
       'corrected invoice', 'invoice correction',
     ],
     weakSignals: [
-      'rate', 'pricing', 'surcharge', 'freight rate', 'quotation',
+      // NOTE: bare 'rate' removed — it matches as substring of 'generated', 'translated',
+      // 'auto-generated', 'rated', 'rates' (non-financial) etc. causing false positives.
+      // Use word-boundary safe forms: ' rate ', 'rate ', ' rate' — all handled by the
+      // word-boundary helper applied to weakSignals for this topic.
+      // Safe explicit weak forms:
+      ' rate ', 'rate query', 'rate dispute', 'rate correction', 'rate discrepancy',
+      'wrong rate', 'freight rate', 'rate inquiry',
+      'pricing', 'surcharge', 'quotation',
       'tariff', 'refund request', 'payment dispute',
       // Generic billing/invoice language (weak — context window determines final state)
       'invoice', 'billing', 'extra cost', 'extra costs', 'additional charge',
@@ -552,6 +626,11 @@ const TOPIC_RULES: TopicRule[] = [
       'arrival window', 'collection window', 'delivery window',
       'appointment request', 'appointment confirmation',
       'pre-gate appointment',
+      // ── Multilingual (NL/DE) ─────────────────────────────────────────────
+      // Dutch
+      'laadslot', 'afhaaltijd', 'levertijd', 'afhaaldatum', 'leverdatum',
+      // German
+      'ladeslot', 'abholzeit', 'lieferzeit', 'abholtermin', 'liefertermin',
     ],
     weakSignals: [
       'schedule', 'scheduling', 'allocation', 'slot',
@@ -565,6 +644,12 @@ const TOPIC_RULES: TopicRule[] = [
       'last-mile', 'last mile', 'home delivery', 'residential delivery',
       'delivery address', 'pickup address', 'collection address',
       'driver instruction', 'delivery instruction', 'access instruction',
+      // ── Multilingual (NL/DE) ─────────────────────────────────────────────
+      // Dutch
+      'afhaal planning', 'lever planning', 'afhaaldatum', 'leverdatum',
+      'ophaalplanning',
+      // German
+      'abholplanung', 'lieferplanung', 'abholtermin', 'liefertermin',
     ],
     weakSignals: [
       'pickup', 'pick-up', 'pick up', 'delivery planning',

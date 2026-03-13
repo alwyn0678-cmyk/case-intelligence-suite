@@ -25,6 +25,21 @@ import { filterByIntentPriority, TOPIC_INTENT, INTENT_PRIORITY, DETECTED_OBJECT_
 import { resolveZipToArea, extractZipsFromText } from '../config/zipAreaRules';
 import { normalizeText }                from './textNormalization';
 import { textProvidesRef, validateLoadRefMissing, detectBodyIntent } from './loadRefGuards';
+
+// ─── Document-provision patterns (CHANGE G) ──────────────────────
+// When any of these patterns appear in combined text, classify document state
+// as 'provided' and route to ref_provided rather than customs/t1/customs-missing.
+const PROVIDED_DOC_PATTERNS: string[] = [
+  'attached t1', 'please find attached t1', 'mrn attached',
+  'see attached customs', 'forwarding t1', 'sending customs',
+  'customs documents attached', 'hereby attach', 'bijgevoegd',
+  'hierbij de t1', 'hierbij de douane', 'im anhang', 'anbei',
+  't1 in bijlage', 'douane in bijlage', 't1 beigefuegt',
+  'zolldokumente beigefuegt', 'i have attached', 'we have attached',
+  'please find the t1', 'please find the mrn', 'mrn below',
+  't1 number below', 'mrn number', 'mrn:', 'the mrn is',
+  'find attached mrn',
+];
 import type { IssueState, IssueMatch }  from './issueRules';
 
 // ─── Confidence scoring constants ────────────────────────────────
@@ -421,7 +436,11 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
       // Guard: only convert to ref_provided if the load_ref gate would NOT reject this as
       // a planning/billing context. A capacity query that mentions "booking reference BKG12345"
       // in passing should NOT become ref_provided — the ref code is incidental.
-      const refNumPresent = /(?:(?:load\s*)?ref(?:erence)?|loadref|booking\s*ref(?:erence)?)\s*(?:no\.?\s*|#\s*)?[A-Z0-9]{4,}/i.test(normalizedText);
+      // PRECISION FIX: require at least one digit in the reference code segment.
+      // This prevents matching Dutch/German words like "sturen", "zending", "order"
+      // (which are 4+ chars but contain no digit) as reference codes.
+      // Real reference codes like BKG12345, ABC123, MAEU1234567 always contain digits.
+      const refNumPresent = /(?:(?:load\s*)?ref(?:erence)?|loadref|booking\s*ref(?:erence)?)\s*(?:no\.?\s*|#\s*)?[A-Z0-9]*[0-9][A-Z0-9]{3,}/i.test(normalizedText);
       if (refNumPresent) {
         // Pre-check: if the load_ref gate would reject this case, don't convert to ref_provided.
         const caseAGate = validateLoadRefMissing(
@@ -438,6 +457,23 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
           evidence.push('load-ref number present in text → ref_provided');
         }
       }
+    }
+  }
+
+  // ── Document direction guard (CHANGE G) ──────────────────────────────────
+  // When customs/t1 topic is in issues AND the combined text has explicit
+  // document-provision language, reclassify as ref_provided.
+  // This prevents "please find attached T1" from being classified as t1 (missing).
+  const DOC_PROVISION_TOPICS = new Set(['customs', 't1', 'portbase', 'bl']);
+  if (issues.some(i => DOC_PROVISION_TOPICS.has(i))) {
+    const lowerNorm = normalizedText.toLowerCase();
+    const providedDocMatch = PROVIDED_DOC_PATTERNS.find(p => lowerNorm.includes(p));
+    if (providedDocMatch) {
+      issues = issues.map(i => DOC_PROVISION_TOPICS.has(i) ? 'ref_provided' : i);
+      // Ensure ref_provided is unique — deduplicate
+      issues = [...new Set(issues)];
+      issueState = 'provided';
+      evidence.push(`[doc-provision-guard] Provided-doc signal "${providedDocMatch}" detected — reclassified doc topic to ref_provided`);
     }
   }
 

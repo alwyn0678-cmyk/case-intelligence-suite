@@ -198,8 +198,9 @@ function toWeekKey(date: Date | null | undefined): string {
 
 // ── Aggregation helpers ───────────────────────────────────────────
 function topIssueForGroup(records: EnrichedRecord[]): string {
+  // Use primaryIssue only — consistent with issueBreakdown count model.
   const counts: Record<string, number> = {};
-  for (const r of records) for (const iss of r.issues) counts[iss] = (counts[iss] ?? 0) + 1;
+  for (const r of records) counts[r.primaryIssue] = (counts[r.primaryIssue] ?? 0) + 1;
   const id = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'other';
   return TAXONOMY_MAP[id]?.label ?? 'Other';
 }
@@ -314,7 +315,8 @@ export function runAnalysis(
     }
     const wk = weeklyHistory[r.weekKey];
     wk.total++;
-    for (const iss of r.issues) wk.issues[iss] = (wk.issues[iss] ?? 0) + 1;
+    // Use primaryIssue only so weekly issue breakdowns match summary panel counts.
+    wk.issues[r.primaryIssue] = (wk.issues[r.primaryIssue] ?? 0) + 1;
     // Only add RESOLVED, non-operational customers to weekly history.
     // 'Unknown' / null is excluded — it skews trend lines without adding insight.
     const custName = r.resolvedCustomer;
@@ -329,19 +331,18 @@ export function runAnalysis(
   // ─── 3. Issue breakdown ────────────────────────────────────────
   const issueCounts: Record<string, number> = {};
   const issueHours:  Record<string, number> = {};
-  // Drilldown map: keyed by PRIMARY issue only.
-  // Issue counts/hours still sum over all r.issues (primary + secondaries) —
-  // this reflects total exposure per issue family.
-  // Drilldown evidence is restricted to primaryIssue matches so that clicking
-  // "Missing Load Ref" never returns cases whose primary classification is
-  // Delay, Demurrage, or another unrelated category.
+  // DASHBOARD COUNT FIX (CHANGE I):
+  // Both issueCounts and issueRecordsMap are keyed by primaryIssue only.
+  // This ensures the summary panel counts exactly match the drilldown View counts —
+  // both reflect the number of records where primaryIssue === categoryId.
+  // Previously issueCounts looped over r.issues (all matches incl. secondaries),
+  // causing summary counts to be larger than drilldown record counts.
   const issueRecordsMap: Record<string, EnrichedRecord[]> = {};
   for (const r of records) {
-    for (const iss of r.issues) {
-      issueCounts[iss] = (issueCounts[iss] ?? 0) + 1;
-      const tax = TAXONOMY_MAP[iss];
-      issueHours[iss] = (issueHours[iss] ?? 0) + (tax?.hours ?? 0.5);
-    }
+    // Count and hours: primaryIssue only — matches drilldown logic exactly.
+    const primaryTax = TAXONOMY_MAP[r.primaryIssue];
+    issueCounts[r.primaryIssue] = (issueCounts[r.primaryIssue] ?? 0) + 1;
+    issueHours[r.primaryIssue]  = (issueHours[r.primaryIssue]  ?? 0) + (primaryTax?.hours ?? 0.5);
     // Drilldown: only primary issue
     if (!issueRecordsMap[r.primaryIssue]) issueRecordsMap[r.primaryIssue] = [];
     issueRecordsMap[r.primaryIssue].push(r);
@@ -421,17 +422,16 @@ export function runAnalysis(
     // missingLoadRef counts only rows where load_ref IS the primary issue —
     // consistent with Load Reference Intelligence which also uses primaryIssue.
     if (r.primaryIssue === 'load_ref') c.missingLoadRef++;
-    let preventableCount = 0;
-    for (const iss of r.issues) {
-      const tax = TAXONOMY_MAP[iss];
-      c.hoursLost += tax?.hours ?? 0.5;
-      if (tax?.preventable) preventableCount++;
-      if (iss === 'ref_provided')                          c.refProvided++;
-      if (['customs','portbase','bl','t1'].includes(iss)) c.missingCustomsDocs++;
-      if (iss === 'amendment')                             c.amendments++;
-      if (iss === 'delay')                                 c.delays++;
-    }
-    c.preventablePct += preventableCount / r.issues.length;
+    // Use primaryIssue only for per-customer issue counters — consistent with
+    // issueBreakdown count model. Hours use primary issue taxonomy hours.
+    const primaryTax = TAXONOMY_MAP[r.primaryIssue];
+    c.hoursLost += primaryTax?.hours ?? 0.5;
+    const preventableCount = primaryTax?.preventable ? 1 : 0;
+    if (r.primaryIssue === 'ref_provided')                              c.refProvided++;
+    if (['customs','portbase','bl','t1'].includes(r.primaryIssue))     c.missingCustomsDocs++;
+    if (r.primaryIssue === 'amendment')                                 c.amendments++;
+    if (r.primaryIssue === 'delay')                                     c.delays++;
+    c.preventablePct += preventableCount;
   }
 
   // Both gates applied inline at build time so ALL downstream uses
@@ -495,7 +495,7 @@ export function runAnalysis(
     const d = depotMap[name];
     d.count++;
     d.weekCounts[r.weekKey] = (d.weekCounts[r.weekKey] ?? 0) + 1;
-    for (const iss of r.issues) d.hoursLost += TAXONOMY_MAP[iss]?.hours ?? 0.5;
+    d.hoursLost += TAXONOMY_MAP[r.primaryIssue]?.hours ?? 0.5;
   }
 
   const depotPerformance: DepotItem[] = Object.values(depotMap)
@@ -519,7 +519,7 @@ export function runAnalysis(
     const t = terminalMap[name];
     t.count++;
     t.weekCounts[r.weekKey] = (t.weekCounts[r.weekKey] ?? 0) + 1;
-    for (const iss of r.issues) t.hoursLost += TAXONOMY_MAP[iss]?.hours ?? 0.5;
+    t.hoursLost += TAXONOMY_MAP[r.primaryIssue]?.hours ?? 0.5;
   }
 
   const deepseaTerminalData: DeepseaTerminalItem[] = Object.values(terminalMap)
@@ -598,7 +598,7 @@ export function runAnalysis(
     const a = areaMap[area];
     a.count++;
     a.weekCounts[r.weekKey] = (a.weekCounts[r.weekKey] ?? 0) + 1;
-    for (const iss of r.issues) a.hoursLost += TAXONOMY_MAP[iss]?.hours ?? 0.5;
+    a.hoursLost += TAXONOMY_MAP[r.primaryIssue]?.hours ?? 0.5;
   }
 
   const areaHotspots: AreaHotspot[] = Object.values(areaMap)
