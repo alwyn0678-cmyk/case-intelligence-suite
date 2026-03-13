@@ -327,6 +327,51 @@ export const ISSUE_TAXONOMY: TaxonomyItem[] = [
     ],
     hours: 0.5, preventable: false, color: '#a6aec4',
   },
+  // ── Document / operational sub-categories ───────────────────────
+  {
+    id: 'shipping_advice',
+    label: 'Shipping Notice / Status Advice',
+    keywords: [
+      'shipping advice', 'shipment advice', 'departure notice', 'arrival notice',
+      'advice note', 'pre-advice', 'pre advice', 'shipping notice',
+      'avis', 'aankomstbericht', 'vertrekbericht', 'laadbericht', 'losbericht',
+      'versandavis', 'eingangsavis', 'ausgangsavis', 'ladebericht', 'löschbericht',
+    ],
+    hours: 0.25, preventable: false, color: '#7aa2ff',
+  },
+  {
+    id: 'vgm',
+    label: 'VGM / Weight Note',
+    keywords: [
+      'vgm', 'verified gross mass', 'weight note', 'weight certificate',
+      'gross mass', 'container weight', 'vgm declaration',
+      'gewichtsnota', 'gewichtsverklaring', 'gewichtsnote',
+    ],
+    hours: 0.5, preventable: true, color: '#d8a34c',
+  },
+  {
+    id: 'seal',
+    label: 'Seal / Container Details',
+    keywords: [
+      'seal number', 'seal numbers', 'missing seal', 'new seal', 'seal request',
+      'seal broken', 'seal tampered', 'seal details', 'seal required',
+      'zegel nummer', 'zegelnummer', 'zegel ontbreekt', 'nieuw zegel',
+      'siegel nummer', 'siegelnummer', 'siegel fehlt',
+    ],
+    hours: 0.5, preventable: true, color: '#52c7c7',
+  },
+  {
+    id: 'dangerous_goods',
+    label: 'Dangerous Goods / IMO / ADR',
+    keywords: [
+      'dangerous goods', 'hazardous cargo', 'hazardous goods', 'hazmat',
+      'imo class', 'imo number', 'imo declaration', 'adr class', 'un number',
+      'msds', 'sds sheet', 'safety data sheet', 'dg declaration', 'dgd',
+      'gevaarlijke stoffen', 'gevaarlijke goederen', 'veiligheidsblad',
+      'gefahrgut', 'gefährliche güter', 'gefahrstoff', 'sicherheitsdatenblatt',
+    ],
+    hours: 1.0, preventable: true, color: '#dc6d7d',
+  },
   {
     id: 'other',
     label: 'Other / Unclassified',

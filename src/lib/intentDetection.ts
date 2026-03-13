@@ -80,6 +80,11 @@ export const TOPIC_INTENT: Record<string, IntentType> = {
   // Reference
   load_ref:          'reference',
   ref_provided:      'reference',
+  // New sub-categories
+  shipping_advice:   'tracking',
+  vgm:               'documentation',
+  seal:              'operational',
+  dangerous_goods:   'documentation',
   // Fallback
   other:             'unknown',
 };
@@ -219,6 +224,10 @@ export const DETECTED_OBJECT_MAP: Record<string, string> = {
   scheduling:        'Slot / Appointment',
   pickup_delivery:   'Pickup / Delivery Planning',
   capacity:          'Capacity / Availability',
+  shipping_advice:   'Shipping Advice / Status Notice',
+  vgm:               'VGM / Weight Certificate',
+  seal:              'Seal Number / Container Seal',
+  dangerous_goods:   'Dangerous Goods / IMO / ADR Declaration',
   other:             'Unclassified',
 };
 

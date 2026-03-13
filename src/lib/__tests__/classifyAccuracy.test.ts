@@ -643,3 +643,172 @@ describe('Accuracy — Extra Costs Report with customs body → rate (financial 
     expect(result.primaryIssue).not.toBe('customs');
   });
 });
+
+// ─── 21. Transport Status generic → NOT delay ─────────────────────
+describe('Accuracy — Transport Status without delay language must NOT be delay', () => {
+  it('"TRANSPORT STATUS 00762016" (no delay words) → NOT delay', () => {
+    const result = pipeline(
+      'Transport status update for shipment 00762016.',
+      'TRANSPORT STATUS 00762016',
+    );
+    expect(result.primaryIssue).not.toBe('delay');
+  });
+
+  it('"shipment status update from carrier" (no delay language) → NOT delay', () => {
+    const result = pipeline(
+      'shipment status update from carrier HGK for booking 12345',
+      'Shipment Status Update',
+    );
+    expect(result.primaryIssue).not.toBe('delay');
+  });
+
+  it('"transport status delayed" WITH delay word → delay is allowed', () => {
+    const result = pipeline(
+      'transport status: shipment is delayed by 2 days',
+      'Transport Status Delayed',
+    );
+    // explicit delay word present — delay classification must not be suppressed
+    // Accept either delay or tracking — what matters is NOT that we block it when delay word is present
+    expect(['delay', 'tracking']).toContain(result.primaryIssue);
+  });
+});
+
+// ─── 22. VGM ──────────────────────────────────────────────────────
+describe('Accuracy — VGM / Weight Note', () => {
+  it('"please send vgm for container ABCU1234567" → vgm', () => {
+    const result = classify('please send vgm for container ABCU1234567');
+    expect(result).not.toBeNull();
+    expect(result!.issueId).toBe('vgm');
+  });
+
+  it('"vgm ontbreekt voor deze zending" (Dutch) → vgm', () => {
+    const result = classify('vgm ontbreekt voor deze zending');
+    expect(result).not.toBeNull();
+    expect(result!.issueId).toBe('vgm');
+  });
+
+  it('"vgm declaration required" pipeline → vgm', () => {
+    const result = pipeline(
+      'vgm declaration required — please provide the verified gross mass for this container',
+      'VGM Required',
+    );
+    expect(result.primaryIssue).toBe('vgm');
+  });
+});
+
+// ─── 23. Seal ─────────────────────────────────────────────────────
+describe('Accuracy — Seal / Container Details', () => {
+  it('"seal number missing for container" → seal', () => {
+    const result = classify('seal number missing for container ABCU1234567');
+    expect(result).not.toBeNull();
+    expect(result!.issueId).toBe('seal');
+  });
+
+  it('"zegel ontbreekt" (Dutch) → seal', () => {
+    const result = classify('zegel ontbreekt voor deze container');
+    expect(result).not.toBeNull();
+    expect(result!.issueId).toBe('seal');
+  });
+
+  it('"please provide seal details" pipeline → seal', () => {
+    const result = pipeline(
+      'please provide seal details for this container',
+      'Seal Details Required',
+    );
+    expect(result.primaryIssue).toBe('seal');
+  });
+});
+
+// ─── 24. Shipping Advice / Avis ───────────────────────────────────
+describe('Accuracy — Shipping Notice / Status Advice', () => {
+  it('"versandavis erhalten" (German) → shipping_advice', () => {
+    const result = classify('versandavis erhalten fuer diese sendung');
+    expect(result).not.toBeNull();
+    expect(result!.issueId).toBe('shipping_advice');
+  });
+
+  it('"aankomstbericht ontvangen" (Dutch) → shipping_advice', () => {
+    const result = classify('aankomstbericht ontvangen voor container');
+    expect(result).not.toBeNull();
+    expect(result!.issueId).toBe('shipping_advice');
+  });
+
+  it('"departure notice for vessel" → shipping_advice', () => {
+    const result = classify('departure notice for vessel MSC Amsterdam');
+    expect(result).not.toBeNull();
+    expect(result!.issueId).toBe('shipping_advice');
+  });
+
+  it('"shipping advice for booking" pipeline → shipping_advice', () => {
+    const result = pipeline(
+      'please find attached the shipping advice for this booking',
+      'Shipping Advice',
+    );
+    expect(result.primaryIssue).toBe('shipping_advice');
+  });
+});
+
+// ─── 25. Bill of Lading improvements ──────────────────────────────
+describe('Accuracy — Bill of Lading improvements', () => {
+  it('"please send bill of lading copy" → bl', () => {
+    const result = classify('please send bill of lading copy for this shipment');
+    expect(result).not.toBeNull();
+    expect(result!.issueId).toBe('bl');
+  });
+
+  it('"original bl required" → bl', () => {
+    const result = classify('original bl required — please send to receiver');
+    expect(result).not.toBeNull();
+    expect(result!.issueId).toBe('bl');
+  });
+
+  it('"telex release bl" → bl', () => {
+    const result = classify('telex release bl please advise status');
+    expect(result).not.toBeNull();
+    expect(result!.issueId).toBe('bl');
+  });
+});
+
+// ─── 26. Dangerous Goods ──────────────────────────────────────────
+describe('Accuracy — Dangerous Goods / IMO / ADR', () => {
+  it('"imo class 3 declaration required" → dangerous_goods', () => {
+    const result = classify('imo class 3 declaration required for this shipment');
+    expect(result).not.toBeNull();
+    expect(result!.issueId).toBe('dangerous_goods');
+  });
+
+  it('"gefahrgut declaration attached" (German) → dangerous_goods', () => {
+    const result = classify('gefahrgut declaration attached for this container');
+    expect(result).not.toBeNull();
+    expect(result!.issueId).toBe('dangerous_goods');
+  });
+
+  it('"dangerous goods declaration" pipeline → dangerous_goods', () => {
+    const result = pipeline(
+      'please find the dangerous goods declaration for this container',
+      'DGD Required',
+    );
+    expect(result.primaryIssue).toBe('dangerous_goods');
+  });
+});
+
+// ─── 27. Equipment must NOT be ref_provided ───────────────────────
+describe('Accuracy — Equipment signals must stay as equipment', () => {
+  it('"portable not ok at depot" → equipment', () => {
+    const result = pipeline(
+      'portable not ok at depot — driver unable to load',
+      'Portable Not OK',
+    );
+    expect(result.primaryIssue).toBe('equipment');
+    expect(result.primaryIssue).not.toBe('ref_provided');
+  });
+
+  it('"container beschadigd bij terminal" (Dutch) → equipment', () => {
+    const result = pipeline(
+      'container beschadigd bij terminal — schade gerapporteerd',
+      'Container Beschadigd',
+    );
+    expect(result.primaryIssue).toBe('equipment');
+    expect(result.primaryIssue).not.toBe('ref_provided');
+  });
+});

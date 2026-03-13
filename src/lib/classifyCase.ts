@@ -694,9 +694,11 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   if ((fields.description ?? '').trim().length > SUBSTANTIVE_DESC_MIN_LENGTH) {
     const rawDescMatches = classifyByRules(fields.description);
     // HARD ENFORCEMENT: gate-rejected load_ref may never re-enter via description override
-    const descOnlyMatches = loadRefGateRejected
+    // Sort by confidence descending so descPrimary is truly the highest-confidence match
+    const descOnlyMatches = (loadRefGateRejected
       ? rawDescMatches.filter(m => m.issueId !== 'load_ref')
-      : rawDescMatches;
+      : rawDescMatches
+    ).sort((a, b) => b.confidence - a.confidence);
     if (descOnlyMatches.length > 0) {
       const descPrimary = descOnlyMatches[0];
       const overallPrimary = issues[0];
@@ -929,6 +931,45 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
       issues = ['rate', ...issues.filter(i => i !== 'waiting_time')];
       confidence = Math.max(confidence, 0.78);
       evidence.push('[waiting-time-financial-guard] waiting_time overridden to rate — financial charge language detected');
+    }
+  }
+
+  // ── FIX 1: Transport status generic updates must NOT default to Delay ────────
+  //
+  // Subjects like "TRANSPORT STATUS 00762016" from HGK and other carriers are
+  // routine status-update emails — not delay reports. They should classify as
+  // tracking (or ref_provided) rather than delay.
+  //
+  // Guard fires when:
+  //   1. Primary is 'delay'
+  //   2. Text contains a transport-status pattern
+  //   3. Text does NOT contain any explicit delay/failure signal
+  //
+  // On match: override primary to 'tracking'.
+  if (issues[0] === 'delay') {
+    const TRANSPORT_STATUS_PATTERNS = [
+      'transport status', 'shipment status', 'status update', 'transport update',
+      'update transport', 'statusmeldung', 'transportmeldung', 'sendungsstatus',
+    ];
+    const EXPLICIT_DELAY_SIGNALS_LOCAL = [
+      'delayed', 'delay', 'vertraging', 'vertraagd', 'verspätung', 'verspätet',
+      'not loaded', 'niet geladen', 'nicht geladen',
+      'rollover', 'missed cutoff', 'cutoff gemist', 'cutoff verpasst',
+      'failed pickup', 'unable to deliver', 'niet afgeleverd', 'nicht zugestellt',
+      'overdue', 'not on time', 'behind schedule', 'late arrival',
+      'late delivery', 'missed eta', 'no show', 'not arrived',
+      'late collection', 'not collected', 'not delivered', 'running late',
+      'past eta', 'missed appointment', 'driver late', 'driver delayed',
+      'vehicle delayed', 'truck delayed', 'failed delivery', 'failed collection',
+    ];
+    const lnNorm = normalizedText.toLowerCase();
+    const hasTransportStatusPattern = TRANSPORT_STATUS_PATTERNS.some(p => lnNorm.includes(p));
+    const hasExplicitDelay = EXPLICIT_DELAY_SIGNALS_LOCAL.some(s => lnNorm.includes(s));
+    if (hasTransportStatusPattern && !hasExplicitDelay) {
+      issues = ['tracking', ...issues.filter(i => i !== 'delay')];
+      issues = [...new Set(issues)];
+      confidence = Math.max(confidence, 0.72);
+      evidence.push('[transport-status-guard] Transport status pattern without explicit delay signal — overridden to tracking');
     }
   }
 

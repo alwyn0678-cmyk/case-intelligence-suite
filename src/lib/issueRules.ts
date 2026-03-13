@@ -555,6 +555,13 @@ const TOPIC_RULES: TopicRule[] = [
       'bl correction', 'bl amendment', 'bl not received',
       'bl missing', 'hbl', 'mbl', 'house bl', 'master bl',
       'bl release', 'bl not available', 'bl draft',
+      // Additional BL signals (EN/NL/DE)
+      'bl copy', 'bl no', 'bl number', 'bl original', 'bl required',
+      'please send bl', 'original bl required',
+      // NL
+      'cognossement', 'zee vrachtbrief',
+      // DE
+      'konnossement', 'seefrachtbrief',
     ],
     weakSignals: [
       'lading', 'bl error', 'bl incorrect', 'bl discrepancy',
@@ -706,6 +713,67 @@ const TOPIC_RULES: TopicRule[] = [
       'capacity', 'feasibility', 'feasible', 'no slots', 'no availability',
       'cannot accommodate', 'overloaded', 'no space', 'overbooking',
     ],
+  },
+  // ─── New operational / documentation categories ────────────────
+  {
+    topic: 'shipping_advice',
+    strongSignals: [
+      // EN
+      'shipping advice', 'shipment advice', 'departure notice', 'arrival notice',
+      'advice note', 'pre-advice', 'pre advice', 'shipping notice',
+      // NL — 'avis' matched as full word via word-boundary safe patterns below
+      'aankomstbericht', 'vertrekbericht', 'laadbericht', 'losbericht',
+      'aankomst avis', 'vertrek avis', 'losavis',
+      // DE
+      'versandavis', 'eingangsavis', 'ausgangsavis', 'ladebericht', 'löschbericht',
+      'ladeavis', 'löschavis', 'ankunftsavis', 'abgangsavis',
+    ],
+    // 'avis' is short and could match as substring — keep as weak signal only
+    // to prevent false positives on "previous", "advisory", etc.
+    weakSignals: [' avis ', 'notice'],
+  },
+  {
+    topic: 'vgm',
+    strongSignals: [
+      'vgm', 'verified gross mass', 'weight note', 'weight certificate',
+      'gross mass', 'container weight', 'vgm declaration', 'vgm required',
+      'please send vgm', 'vgm missing', 'vgm not received',
+      // NL
+      'gewichtsnota', 'gewichtsverklaring', 'bruttogewicht', 'vgm ontbreekt',
+      // DE
+      'gewichtsnote', 'vgm fehlt', 'vgm nicht erhalten',
+    ],
+    weakSignals: ['weight', 'gewicht'],
+  },
+  {
+    topic: 'seal',
+    strongSignals: [
+      'seal number', 'seal numbers', 'missing seal', 'new seal', 'seal request',
+      'seal broken', 'seal tampered', 'please provide seal', 'seal details',
+      'seal required', 'seal not provided', 'seal missing',
+      // NL
+      'zegel nummer', 'zegelnummer', 'zegel ontbreekt', 'nieuw zegel',
+      'zegel verbroken', 'graag zegel', 'zegel details',
+      // DE
+      'siegel nummer', 'siegelnummer', 'siegel fehlt', 'neues siegel',
+      'siegel gebrochen', 'bitte siegel', 'siegel details',
+    ],
+    weakSignals: ['zegel', 'siegel'],
+  },
+  {
+    topic: 'dangerous_goods',
+    strongSignals: [
+      'dangerous goods', 'hazardous cargo', 'hazardous goods', 'hazmat',
+      'imo class', 'imo number', 'imo declaration', 'adr class', 'un number',
+      'un no', 'msds', 'sds sheet', 'safety data sheet', 'dg declaration',
+      'dgd', 'dangerous goods declaration',
+      // NL
+      'gevaarlijke stoffen', 'gevaarlijke goederen', 'imo klasse', 'adr klasse',
+      'veiligheidsblad',
+      // DE
+      'gefahrgut', 'gefährliche güter', 'gefahrstoff', 'sicherheitsdatenblatt',
+    ],
+    weakSignals: ['imo', 'adr', 'hazardous'],
   },
 ];
 
