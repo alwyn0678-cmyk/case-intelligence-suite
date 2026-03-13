@@ -417,12 +417,26 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
       issueState = 'provided';
       evidence.push('[description] body provides explicit ref — overrides subject signal → ref_provided');
     } else if (issueState === 'unknown') {
-      // Case A: no description-level evidence, but a ref code immediately follows keyword
+      // Case A: no description-level evidence, but a ref code immediately follows keyword.
+      // Guard: only convert to ref_provided if the load_ref gate would NOT reject this as
+      // a planning/billing context. A capacity query that mentions "booking reference BKG12345"
+      // in passing should NOT become ref_provided — the ref code is incidental.
       const refNumPresent = /(?:(?:load\s*)?ref(?:erence)?|loadref|booking\s*ref(?:erence)?)\s*(?:no\.?\s*|#\s*)?[A-Z0-9]{4,}/i.test(normalizedText);
       if (refNumPresent) {
-        issues = issues.map(i => i === 'load_ref' ? 'ref_provided' : i);
-        issueState = 'provided';
-        evidence.push('load-ref number present in text → ref_provided');
+        // Pre-check: if the load_ref gate would reject this case, don't convert to ref_provided.
+        const caseAGate = validateLoadRefMissing(
+          fields.subject    ?? '',
+          fields.description ?? '',
+          fields.isr_details ?? '',
+        );
+        // Only convert to ref_provided when the gate doesn't have a planning-context rejection
+        // OR when it accepts (the ref code is meaningful in context, not incidental).
+        const gatePlanningBlock = !caseAGate.valid && caseAGate.rejectReason?.includes('Planning/operational context');
+        if (!gatePlanningBlock) {
+          issues = issues.map(i => i === 'load_ref' ? 'ref_provided' : i);
+          issueState = 'provided';
+          evidence.push('load-ref number present in text → ref_provided');
+        }
       }
     }
   }
@@ -634,6 +648,50 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
       confidence       = 0.10;
       reviewFlag       = true;
       unresolvedReason = unresolvedReason ?? 'load_ref gate rejected; safety net applied — no remaining classification.';
+    }
+  }
+
+  // ── Planning context guard for compliance topics ──────────────────────
+  //
+  // Customs / T1 / Portbase / BL should only classify as compliance issues when
+  // there is explicit document-missing or document-request language. Planning /
+  // feasibility / scheduling emails that mention a compliance term incidentally
+  // (e.g. "Is there capacity? We also need to arrange customs clearance") should
+  // NOT classify as compliance — the compliance term is contextual, not the core issue.
+  //
+  // This guard fires when:
+  //   1. Primary is a compliance topic
+  //   2. Text contains strong planning / feasibility / scheduling language
+  //   3. Text does NOT contain explicit doc-missing / doc-request language
+  //
+  // Effect: reduce confidence by 0.25 (min 0.30) so the planning category can win
+  // if it has meaningful confidence, and flag for review.
+  const PLANNING_COMPLIANCE_TOPICS = new Set(['customs', 't1', 'portbase', 'bl']);
+  const PLANNING_CONTEXT_KEYWORDS_FOR_DOC = [
+    'feasibility', 'capacity', 'slot', 'scheduling', 'loading date', 'load date',
+    'rail cut', 'barge schedule', 'loading window', 'intermodal',
+    'can we load', 'please advise if', 'is it possible', 'is there capacity',
+    'no capacity', 'fully booked',
+  ];
+  const EXPLICIT_DOC_MISSING_SIGNALS = [
+    'missing', 'not received', 'not provided', 'required', 'needed',
+    'please send', 'please provide', 'please forward', 'not available',
+    'not found', 'outstanding', 'still waiting for', 'request',
+  ];
+
+  if (PLANNING_COMPLIANCE_TOPICS.has(issues[0])) {
+    const lowerNorm = normalizedText.toLowerCase();
+    const hasPlanning = PLANNING_CONTEXT_KEYWORDS_FOR_DOC.some(kw => lowerNorm.includes(kw));
+    const hasDocMissing = EXPLICIT_DOC_MISSING_SIGNALS.some(kw => lowerNorm.includes(kw));
+    if (hasPlanning && !hasDocMissing) {
+      confidence = Math.max(confidence - 0.25, 0.30);
+      evidence.push(
+        `[planning-compliance-guard] Planning context detected for ${issues[0]} without explicit doc-missing language — confidence reduced`,
+      );
+      if (!reviewFlag) {
+        reviewFlag = true;
+        unresolvedReason = `Planning/feasibility context detected for compliance topic (${issues[0]}) without explicit missing-document evidence. Verify manually.`;
+      }
     }
   }
 

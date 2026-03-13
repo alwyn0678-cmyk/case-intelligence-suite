@@ -37,7 +37,10 @@
 export const PROVIDED_REF_PATTERNS: RegExp[] = [
   // ── Explicit value follows keyword ──────────────────────────────
   // "ref is BKG12345", "load ref: BKG12345", "reference: BKG12345"
-  /(?:load\s*ref(?:erence)?|booking\s*ref(?:erence)?|ref(?:erence)?)\s*(?:is|are|was|:)\s*[A-Z0-9]{4,}/i,
+  // NOTE: the code pattern [A-Z0-9]{4,} must contain at least one digit OR be all-uppercase
+  // to distinguish actual reference codes from regular words ("missing", "provided", etc.).
+  // Pattern: must contain a digit OR be followed by word-boundary with uppercase start.
+  /(?:load\s*ref(?:erence)?|booking\s*ref(?:erence)?|ref(?:erence)?)\s*(?:is|are|was|:)\s*(?=[A-Z0-9]*[0-9][A-Z0-9]*)[A-Z0-9]{4,}/i,
   // "reference no BKG1234", "ref # BKG1234", "load ref no. 12345"
   /(?:reference|load\s*ref|booking\s*ref)\s*(?:no\.?\s*|#\s*|:\s*)[A-Z0-9]{4,}/i,
   // "ref no. ABC123", "reference no 12345"
@@ -57,7 +60,8 @@ export const PROVIDED_REF_PATTERNS: RegExp[] = [
   // "attached herewith ref", "please find attached reference"
   /(?:attached|herewith|find\s+enclosed|please\s+find\s+attached).{0,80}(?:ref(?:erence)?|load|booking)/i,
   // "load ref attached", "booking ref attached", "reference is attached"
-  /(?:ref(?:erence)?|load\s*ref|booking\s*ref).{0,60}(?:attached|enclosed|herewith|sent|forwarded|provided)/i,
+  // Excludes "not attached", "not provided", "not sent" etc. — negated forms are missing-ref assertions.
+  /(?:ref(?:erence)?|load\s*ref|booking\s*ref).{0,60}(?<!not\s)(?<!not been\s)(?:attached|enclosed|herewith|sent|forwarded|provided)/i,
 
   // ── Correct / updated / confirmed ────────────────────────────────
   // "correct ref is BKG123", "corrected load ref", "correct booking ref"
@@ -73,7 +77,9 @@ export const PROVIDED_REF_PATTERNS: RegExp[] = [
 
   // ── Explicit statement: "the load ref is..." without a code ──────
   // Catches "the load ref is as follows" / "the load ref is shown below"
-  /\bthe\s+(?:load\s*)?ref(?:erence)?\s+is\b/i,
+  // Negative lookahead excludes "the load ref is missing/absent/not/required/needed"
+  // which are missing-ref assertions, NOT provided-ref statements.
+  /\bthe\s+(?:load\s*)?ref(?:erence)?\s+is\b(?!\s*(?:missing|absent|not|required|needed|still|unknown|unavailable|incorrect|wrong|invalid))/i,
   // "load ref below", "booking ref below" (bare "below" after keyword)
   /(?:load\s*ref|booking\s*ref|ref(?:erence)?)\s+below\b/i,
 ];
@@ -182,6 +188,25 @@ export const LOAD_REF_PLANNING_BLOCKLIST: string[] = [
   'rate inquiry',
   // ── Routing / transport planning ───────────────────────────────
   'routing',             // routing check / route planning
+  // ── Work order / transport order context ───────────────────────
+  // "work order missing" is a transport-order case, not a load-ref case.
+  // If the description mentions work order without any load-ref specific language,
+  // block Missing Load Reference.
+  'work order',
+  'workorder',
+  // ── Question / inquiry forms ────────────────────────────────────
+  // "Do we need load ref?" is a planning question, not an assertion that load ref is absent.
+  // These must not trigger Missing Load Reference — they belong in other/communication/tracking.
+  'do we need load ref',
+  'do we need a load ref',
+  'do we need the load ref',
+  'is load ref required',
+  'is a load ref required',
+  'is the load ref required',
+  'is load reference required',
+  'do you require load ref',
+  'do you need load ref',
+  'will you need load ref',
 ];
 
 // ─── Body intent detection ────────────────────────────────────────

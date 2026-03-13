@@ -360,3 +360,306 @@ export function auditHotspotLabels(labels: string[]): HotspotLabelReport {
   }
   return { allowed, suppressed, suppressedCount: suppressed.length };
 }
+
+// ─── Financial False-Negative Detection ──────────────────────────
+
+/**
+ * Flags cases where financial language is present but the primary classification
+ * is NOT a financial topic (rate, waiting_time, damage).
+ *
+ * A financial false-negative means the classifier missed financial intent and
+ * assigned a lower-priority category instead.
+ *
+ * @example
+ * validateFinancialFalseNegative('delay', 'selfbilling report for week 12 attached')
+ * // → { isFalseNegative: true, financialTrigger: 'selfbilling' }
+ *
+ * validateFinancialFalseNegative('rate', 'invoice query regarding overcharge')
+ * // → { isFalseNegative: false, financialTrigger: null }
+ */
+const FINANCIAL_TOPICS = new Set(['rate', 'waiting_time', 'damage']);
+
+const FINANCIAL_TRIGGER_KEYWORDS: string[] = [
+  'selfbilling', 'self billing', 'self-billing',
+  'dch invoice', 'dch billing', 'dch report',
+  'extra cost invoice', 'extra costs invoice',
+  'invoice query', 'invoice dispute', 'invoice incorrect', 'invoice missing',
+  'billing dispute', 'billing query', 'billing error',
+  'credit note', 'debit note', 'credit memo', 'debit memo',
+  'overcharged', 'overcharge', 'charge dispute',
+  'wrong invoice', 'incorrect invoice',
+  'demurrage invoice', 'detention invoice', 'storage invoice',
+  'price correction', 'rate dispute', 'rate discrepancy',
+];
+
+export interface FinancialFalseNegativeResult {
+  isFalseNegative: boolean;
+  financialTrigger: string | null;
+}
+
+export function validateFinancialFalseNegative(
+  primaryIssue: string,
+  combinedText: string,
+): FinancialFalseNegativeResult {
+  if (FINANCIAL_TOPICS.has(primaryIssue)) {
+    return { isFalseNegative: false, financialTrigger: null };
+  }
+  if (!combinedText) return { isFalseNegative: false, financialTrigger: null };
+  const lower = combinedText.toLowerCase();
+  for (const kw of FINANCIAL_TRIGGER_KEYWORDS) {
+    if (lower.includes(kw)) {
+      return { isFalseNegative: true, financialTrigger: kw };
+    }
+  }
+  return { isFalseNegative: false, financialTrigger: null };
+}
+
+// ─── Planning / Documentation False Positive Detection ───────────
+
+/**
+ * Flags cases where strong planning/feasibility/scheduling language is present
+ * but the classification is a compliance documentation topic (customs/t1/portbase/bl)
+ * WITHOUT any explicit document-missing language.
+ *
+ * A planning-doc false positive means a planning email got classified as a
+ * compliance issue because it mentioned a compliance term incidentally.
+ *
+ * @example
+ * validatePlanningDocFalsePositive('customs', 'Is there capacity for this load? We need to arrange customs clearance.')
+ * // → { isFalsePositive: true, planningTrigger: 'capacity', docMissingTrigger: null }
+ *
+ * validatePlanningDocFalsePositive('customs', 'Customs documents missing — please send MRN')
+ * // → { isFalsePositive: false, planningTrigger: null, docMissingTrigger: null }
+ */
+const COMPLIANCE_DOC_TOPICS = new Set(['customs', 't1', 'portbase', 'bl']);
+
+const PLANNING_TRIGGER_KEYWORDS: string[] = [
+  'feasibility', 'capacity', 'slot', 'scheduling', 'loading date', 'load date',
+  'rail cut', 'barge schedule', 'loading window', 'intermodal',
+  'can we load', 'is it possible', 'is there capacity',
+  'no capacity', 'fully booked',
+];
+
+const DOC_MISSING_KEYWORDS: string[] = [
+  'missing', 'not received', 'not provided', 'required', 'needed',
+  'please send', 'please provide', 'please forward',
+  'not available', 'not found', 'outstanding',
+];
+
+export interface PlanningDocFalsePositiveResult {
+  isFalsePositive: boolean;
+  planningTrigger: string | null;
+  docMissingTrigger: string | null;
+}
+
+export function validatePlanningDocFalsePositive(
+  primaryIssue: string,
+  combinedText: string,
+): PlanningDocFalsePositiveResult {
+  if (!COMPLIANCE_DOC_TOPICS.has(primaryIssue)) {
+    return { isFalsePositive: false, planningTrigger: null, docMissingTrigger: null };
+  }
+  if (!combinedText) return { isFalsePositive: false, planningTrigger: null, docMissingTrigger: null };
+  const lower = combinedText.toLowerCase();
+
+  const planningTrigger = PLANNING_TRIGGER_KEYWORDS.find(kw => lower.includes(kw)) ?? null;
+  const docMissingTrigger = DOC_MISSING_KEYWORDS.find(kw => lower.includes(kw)) ?? null;
+
+  if (planningTrigger && !docMissingTrigger) {
+    return { isFalsePositive: true, planningTrigger, docMissingTrigger: null };
+  }
+  return { isFalsePositive: false, planningTrigger, docMissingTrigger };
+}
+
+// ─── Equipment False Reference Detection ─────────────────────────
+
+/**
+ * Flags cases where equipment/container issue language is present but the
+ * primary classification is ref_provided.
+ *
+ * Equipment condition failures (portable not ok, container damage, etc.) must
+ * classify as equipment/equipment_release, not as Reference Update / Info Provided.
+ *
+ * @example
+ * validateEquipmentFalseReference('ref_provided', 'portable not ok reported by driver')
+ * // → { isFalseReference: true, equipmentTrigger: 'portable not ok' }
+ */
+const EQUIPMENT_TRIGGER_KEYWORDS: string[] = [
+  'portable not ok', 'not portable', 'container damaged', 'equipment issue',
+  'container issue', 'container not ok', 'reefer issue', 'seal broken',
+  'damaged box', 'door issue', 'chassis issue', 'defective unit',
+  'damage reported', 'technical issue with container', 'equipment not ok',
+  'unit not ok', 'trailer not ok', 'not roadworthy', 'unit defective',
+  'equipment defect', 'container defect', 'trailer defect',
+  'equipment failure', 'equipment fault', 'container fault',
+];
+
+export interface EquipmentFalseReferenceResult {
+  isFalseReference: boolean;
+  equipmentTrigger: string | null;
+}
+
+export function validateEquipmentFalseReference(
+  primaryIssue: string,
+  combinedText: string,
+): EquipmentFalseReferenceResult {
+  if (primaryIssue !== 'ref_provided') {
+    return { isFalseReference: false, equipmentTrigger: null };
+  }
+  if (!combinedText) return { isFalseReference: false, equipmentTrigger: null };
+  const lower = combinedText.toLowerCase();
+  const trigger = EQUIPMENT_TRIGGER_KEYWORDS.find(kw => lower.includes(kw)) ?? null;
+  return { isFalseReference: trigger !== null, equipmentTrigger: trigger };
+}
+
+// ─── Transport Order / Load Reference Conflation Detection ────────
+
+/**
+ * Flags cases where transport order / work order language is present but the
+ * classification is load_ref (Missing Load Reference) without any explicit
+ * load-ref-missing phrase.
+ *
+ * Transport orders and work orders are distinct from load references.
+ * They must not be conflated.
+ *
+ * @example
+ * validateTransportOrderFalseLoadRef('load_ref', 'work order missing please send order')
+ * // → { isConflated: true, transportOrderTrigger: 'work order', hasLoadRefMissing: false }
+ */
+const TRANSPORT_ORDER_KEYWORDS_FOR_VALIDATOR: string[] = [
+  'transport order', 'work order', 'workorder', 'haulier order',
+  'driver instruction', 'driver order', 'movement order',
+];
+
+const LOAD_REF_EXPLICIT_MISSING_SHORT: string[] = [
+  'missing load ref', 'no load ref', 'load ref missing', 'load reference missing',
+  'please provide load ref', 'load ref not provided', 'load ref required',
+  'missing booking ref', 'no booking ref', 'booking ref missing',
+];
+
+export interface TransportOrderFalseLoadRefResult {
+  isConflated: boolean;
+  transportOrderTrigger: string | null;
+  hasLoadRefMissing: boolean;
+}
+
+export function validateTransportOrderFalseLoadRef(
+  primaryIssue: string,
+  combinedText: string,
+): TransportOrderFalseLoadRefResult {
+  if (primaryIssue !== 'load_ref') {
+    return { isConflated: false, transportOrderTrigger: null, hasLoadRefMissing: false };
+  }
+  if (!combinedText) return { isConflated: false, transportOrderTrigger: null, hasLoadRefMissing: false };
+  const lower = combinedText.toLowerCase();
+
+  const transportOrderTrigger = TRANSPORT_ORDER_KEYWORDS_FOR_VALIDATOR.find(kw => lower.includes(kw)) ?? null;
+  const hasLoadRefMissing = LOAD_REF_EXPLICIT_MISSING_SHORT.some(kw => lower.includes(kw));
+
+  if (transportOrderTrigger && !hasLoadRefMissing) {
+    return { isConflated: true, transportOrderTrigger, hasLoadRefMissing: false };
+  }
+  return { isConflated: false, transportOrderTrigger, hasLoadRefMissing };
+}
+
+// ─── Reference Category Overuse Detection ────────────────────────
+
+/**
+ * Flags when the ref_provided category exceeds 5% of the total dataset.
+ *
+ * ref_provided (Reference Update / Info Provided) should be a residual bucket.
+ * If it exceeds 5% of all classified records, it indicates the classifier is
+ * over-applying the document-provision fork or has weak negative guards.
+ *
+ * @example
+ * validateRefCategoryOveruse(50, 1000)
+ * // → { isOverused: true, percentage: 5.0, threshold: 5.0 }
+ *
+ * validateRefCategoryOveruse(30, 1000)
+ * // → { isOverused: false, percentage: 3.0, threshold: 5.0 }
+ */
+export interface RefCategoryOveruseResult {
+  isOverused: boolean;
+  percentage: number;
+  threshold: number;
+  refProvidedCount: number;
+  totalCount: number;
+}
+
+/** Target maximum percentage for ref_provided. */
+export const REF_PROVIDED_OVERUSE_THRESHOLD = 5.0;
+
+export function validateRefCategoryOveruse(
+  refProvidedCount: number,
+  totalCount: number,
+  threshold = REF_PROVIDED_OVERUSE_THRESHOLD,
+): RefCategoryOveruseResult {
+  if (totalCount === 0) {
+    return { isOverused: false, percentage: 0, threshold, refProvidedCount: 0, totalCount: 0 };
+  }
+  const percentage = (refProvidedCount / totalCount) * 100;
+  return {
+    isOverused: percentage >= threshold,
+    percentage: parseFloat(percentage.toFixed(1)),
+    threshold,
+    refProvidedCount,
+    totalCount,
+  };
+}
+
+// ─── Week Range In Data Validation ────────────────────────────────
+
+/**
+ * Validates that the displayed dashboard week range is supported by the
+ * actual uploaded data — not extended by outlier/parse-error weeks.
+ *
+ * A valid week range:
+ *   - Has at least minDensity records per week for all boundary weeks
+ *   - Has no outlier weeks (weeks with fewer than minDensity records)
+ *     that are more than 4 weeks outside the dense range
+ *
+ * @param weeklyTotals   Map of weekKey → record count for that week
+ * @param displayedRange The human-readable range string the dashboard shows
+ * @param minDensity     Minimum records per week to be considered "dense" (default: 2)
+ */
+export interface WeekRangeValidationResult {
+  valid: boolean;
+  denseWeekCount: number;
+  outlierWeekCount: number;
+  outlierWeeks: string[];
+  displayedRange: string;
+}
+
+export function validateWeekRangeInData(
+  weeklyTotals: Record<string, number>,
+  displayedRange: string,
+  minDensity = 2,
+): WeekRangeValidationResult {
+  const allWeeks = Object.keys(weeklyTotals).sort();
+  const denseWeeks = allWeeks.filter(w => (weeklyTotals[w] ?? 0) >= minDensity);
+  const outlierWeeks = allWeeks.filter(w => (weeklyTotals[w] ?? 0) < minDensity);
+
+  // Check if any outlier week falls far outside the dense range
+  let valid = true;
+  if (denseWeeks.length > 0 && outlierWeeks.length > 0) {
+    const denseFirst = denseWeeks[0];
+    const denseLast  = denseWeeks[denseWeeks.length - 1];
+    for (const w of outlierWeeks) {
+      // If an outlier week is more than 4 positions away from the dense range edges, flag
+      const isBefore = w < denseFirst;
+      const isAfter  = w > denseLast;
+      if (isBefore || isAfter) {
+        valid = false;
+        break;
+      }
+    }
+  }
+
+  return {
+    valid,
+    denseWeekCount:   denseWeeks.length,
+    outlierWeekCount: outlierWeeks.length,
+    outlierWeeks,
+    displayedRange,
+  };
+}

@@ -82,7 +82,10 @@ const PROVIDED_SIGNALS = [
   'confirmed', 'confirmation', 'done', 'completed',
   // Specific "ref no X" patterns — "ref no" means "reference number" not negation
   'ref no ', 'ref no.', 'reference no ', 'reference no.',
-  'ref is ', 'reference is ', 'ref: ', 'loadref: ', 'load ref: ',
+  // Note: 'ref is ' and 'reference is ' removed — too broad, fire on
+  // "load ref is missing", "the reference is required", etc. (missing-ref assertions).
+  // Use 'ref: ', 'load ref: ', 'loadref: ' which require a colon (unambiguously provided).
+  'ref: ', 'loadref: ', 'load ref: ',
   'ref #', 'reference #',
   // "has been provided" / "was provided" are unambiguous
   'has been provided', 'was provided', 'already provided',
@@ -257,6 +260,11 @@ const TOPIC_RULES: TopicRule[] = [
       'transport order required', 'please send transport order', 'send transport order',
       'send us the transport order', 'send the transport order',
       'no transport order', 'transport order not issued', 'transport order not sent',
+      // Work order = same operational concept as transport order
+      'work order', 'workorder', 'work-order',
+      'work order missing', 'missing work order', 'work order not received',
+      'work order required', 'please send work order', 'send work order',
+      'no work order', 'work order not issued', 'work order not sent',
     ],
     weakSignals: [
       'tro', 'carrier instruction', 'carrier order', 'transport confirmation',
@@ -504,13 +512,22 @@ const TOPIC_RULES: TopicRule[] = [
       'invoice not received', 'invoice missing', 'invoice outstanding',
       // Commercial invoice (financial document — NOT a customs clearance signal)
       'commercial invoice query', 'commercial invoice dispute', 'commercial invoice incorrect',
+      // Price corrections — explicitly financial, must not be classified as transport_order
+      // even when the subject mentions "transport order" alongside "price correction"
+      'price correction', 'price adjustment', 'rate correction',
+      'wrong rate applied', 'wrong rate was applied', 'incorrect rate applied',
+      'corrected invoice', 'invoice correction',
     ],
     weakSignals: [
       'rate', 'pricing', 'surcharge', 'freight rate', 'quotation',
       'tariff', 'refund request', 'payment dispute',
       // Generic billing/invoice language (weak — context window determines final state)
       'invoice', 'billing', 'extra cost', 'extra costs', 'additional charge',
-      'cost report', 'charge',
+      'cost report',
+      // Note: bare 'charge' intentionally removed — too broad (fires on "in charge of",
+      // "handling charge of", "fuel charge not relevant" etc.). Specific forms like
+      // 'additional charge', 'charge dispute', 'charge query', 'wrong charge' remain
+      // as either strong or appropriately scoped signals above.
     ],
   },
   {
@@ -602,13 +619,17 @@ const TOPIC_RULES: TopicRule[] = [
 const DOC_TOPICS = new Set(['load_ref', 'customs', 't1', 'portbase', 'bl']);
 
 function resolveIssueId(topic: string, state: IssueState): string {
-  if (state === 'provided' || state === 'informational') {
+  // All doc topics fork to ref_provided when state=provided (document explicitly supplied).
+  if (state === 'provided') {
     if (DOC_TOPICS.has(topic)) return 'ref_provided';
   }
-  // For load_ref only: state=amended means a corrected ref is being supplied → ref_provided.
-  // For other doc topics (customs/t1/portbase/bl), amended means a correction is requested,
-  // which is still a compliance issue — do NOT fork to ref_provided.
-  if (topic === 'load_ref' && state === 'amended') {
+  // load_ref only: informational ("FYI the load ref is X") and amended ("corrected ref")
+  // also fork to ref_provided.
+  // Other doc topics (customs/t1/portbase/bl) do NOT fork on informational —
+  // "please note that customs documents were sent" is a compliance/informational event,
+  // not a ref_provided event. Keeping it as customs/t1/portbase/bl preserves compliance
+  // tracking accuracy and prevents ref_provided from becoming a catch-all bucket.
+  if (topic === 'load_ref' && (state === 'informational' || state === 'amended')) {
     return 'ref_provided';
   }
   return topic;
