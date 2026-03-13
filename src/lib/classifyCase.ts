@@ -934,6 +934,43 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     }
   }
 
+  // ── GAP D: Delay low-confidence dampening ───────────────────────────────────
+  //
+  // When delay is the primary classification but confidence is below 0.65 AND the
+  // text contains NONE of the strong timing-failure signals that confirm a genuine
+  // operational delay, reduce confidence by 0.15 (min 0.30).
+  //
+  // This prevents informational emails that casually mention "delay" from being
+  // classified as Delay / Not On Time without genuine failure evidence.
+  //
+  // "delay" appearing in a status update or background note → dampened.
+  // "truck not arriving", "missed vessel", "vertraging" → genuine → not dampened.
+  if (issues[0] === 'delay' && confidence < 0.65) {
+    const STRONG_TIMING_FAILURE_SIGNALS: string[] = [
+      'truck not arriving', 'barge delay', 'train delay', 'missed vessel',
+      'missed cutoff', 'missed cco', 'driver delayed', 'arrival delay',
+      'container late', 'not on time', 'late delivery', 'late arrival',
+      'late pickup', 'vertraging', 'vertraagd', 'verspätung', 'verspätet',
+      'niet op tijd', 'nicht pünktlich', 'rollover',
+      // Also include the strong signals from the delay rule
+      'delayed', 'overdue', 'behind schedule', 'no show', 'not arrived',
+      'late collection', 'not collected', 'not delivered', 'running late',
+      'past eta', 'missed appointment', 'driver late', 'vehicle delayed',
+      'truck delayed', 'failed delivery', 'failed collection',
+      'missed time slot', 'delivery window missed',
+    ];
+    const lnDelay = normalizedText.toLowerCase();
+    const hasStrongTimingSignal = STRONG_TIMING_FAILURE_SIGNALS.some(s => lnDelay.includes(s));
+    if (!hasStrongTimingSignal) {
+      confidence = Math.max(confidence - 0.15, 0.30);
+      if (!reviewFlag) {
+        reviewFlag = true;
+        unresolvedReason = 'Delay classification at low confidence without strong timing-failure signal — verify manually.';
+      }
+      evidence.push('[delay-confidence-guard] Low-confidence delay without strong timing-failure signal — confidence reduced');
+    }
+  }
+
   // ── FIX 1: Transport status generic updates must NOT default to Delay ────────
   //
   // Subjects like "TRANSPORT STATUS 00762016" from HGK and other carriers are

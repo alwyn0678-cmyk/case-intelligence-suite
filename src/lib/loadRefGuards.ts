@@ -181,6 +181,18 @@ export const LOAD_REF_EXPLICIT_MISSING: string[] = [
   'ladereferenz benoetigt',
   'ladereferenz nicht vorhanden',
   'fehlende ladereferenz',
+  // ── Additional informal missing-ref phrases ───────────────────
+  // These are specific enough to unambiguously mean "load ref is absent".
+  // English
+  'driver needs load ref',
+  'ref required for loading',
+  'ref required for pickup',
+  'ladereferenz noch nicht erhalten',
+  'referenz fehlt für ladung',
+  'fahrer braucht referenz',
+  // Dutch
+  'referentie voor laden nodig',
+  'chauffeur heeft referentie nodig',
 ];
 
 /**

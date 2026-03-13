@@ -22,6 +22,7 @@ import {
   validateFinancialSubstringFalsePositive,
   validateProvidedDocMisclassified,
   validateEquipmentAsRefProvided,
+  validateLoadRefRatio,
 } from '../validators';
 
 // ── Pipeline helper ───────────────────────────────────────────────
@@ -789,6 +790,160 @@ describe('Accuracy — Dangerous Goods / IMO / ADR', () => {
       'DGD Required',
     );
     expect(result.primaryIssue).toBe('dangerous_goods');
+  });
+});
+
+// ─── 28. PO → rate, not transport_order ───────────────────────────
+describe('Accuracy — Purchase Order / PO must route to rate, not transport_order', () => {
+  it('"please confirm purchase order PO-99887 against invoice" → rate', () => {
+    const result = pipeline(
+      'please confirm purchase order PO-99887 against invoice for this shipment',
+      'Purchase Order PO-99887',
+    );
+    expect(result.primaryIssue).toBe('rate');
+    expect(result.primaryIssue).not.toBe('transport_order');
+  });
+
+  it('"po number on invoice does not match" → rate', () => {
+    const result = pipeline(
+      'po number on invoice does not match what was agreed — please advise',
+      'PO Number Discrepancy',
+    );
+    expect(result.primaryIssue).toBe('rate');
+    expect(result.primaryIssue).not.toBe('transport_order');
+  });
+
+  it('"inkooporder 12345 factuur" (NL) → rate', () => {
+    const result = pipeline(
+      'inkooporder 12345 klopt niet met de factuur — graag aanpassen',
+      'Inkooporder 12345',
+    );
+    expect(result.primaryIssue).toBe('rate');
+    expect(result.primaryIssue).not.toBe('transport_order');
+  });
+});
+
+// ─── 29. Missed vessel → genuine delay ────────────────────────────
+describe('Accuracy — Missed vessel / rollover must classify as delay or closing_time', () => {
+  it('"container missed vessel departure" → delay or closing_time', () => {
+    const result = pipeline(
+      'container missed vessel departure due to late arrival at terminal',
+      'Missed Vessel',
+    );
+    expect(['delay', 'closing_time']).toContain(result.primaryIssue);
+  });
+
+  it('"rollover from vessel — container not loaded" → delay or closing_time', () => {
+    const result = pipeline(
+      'container rolled over from vessel — not loaded this sailing, missed departure',
+      'Rollover from Vessel',
+    );
+    expect(['delay', 'closing_time']).toContain(result.primaryIssue);
+  });
+});
+
+// ─── 30. Amendment / Correction improvements ──────────────────────
+describe('Accuracy — Amendment / Correction (additional signals)', () => {
+  it('"booking amendment required for shipment ABCD" → amendment', () => {
+    const result = pipeline(
+      'booking amendment required for shipment ABCD1234 — please update the details',
+      'Booking Amendment Required',
+    );
+    expect(result.primaryIssue).toBe('amendment');
+  });
+
+  it('"boekingswijziging nodig voor zending" (NL) → amendment', () => {
+    const result = pipeline(
+      'boekingswijziging nodig voor zending — graag aanpassen',
+      'Boekingswijziging',
+    );
+    expect(result.primaryIssue).toBe('amendment');
+  });
+
+  it('"buchungsänderung erforderlich" (DE) → amendment', () => {
+    const result = pipeline(
+      'buchungsänderung erforderlich für diese sendung — bitte aktualisieren',
+      'Buchungsänderung',
+    );
+    expect(result.primaryIssue).toBe('amendment');
+  });
+
+  it('"booking amendment required, routing update needed" → amendment', () => {
+    const result = pipeline(
+      'routing update needed for booking — delivery location has changed, please amend booking',
+      'Routing Update Required',
+    );
+    expect(result.primaryIssue).toBe('amendment');
+  });
+});
+
+// ─── 31. Informal load-ref missing patterns ───────────────────────
+describe('Accuracy — Informal load-ref missing patterns', () => {
+  it('"driver needs load ref" → load_ref', () => {
+    const result = pipeline(
+      'driver needs load ref to proceed with loading',
+      'Driver Needs Load Ref',
+    );
+    expect(result.primaryIssue).toBe('load_ref');
+  });
+
+  it('"ref required for loading" → load_ref', () => {
+    const result = pipeline(
+      'ref required for loading — please provide urgently',
+      'Ref Required for Loading',
+    );
+    expect(result.primaryIssue).toBe('load_ref');
+  });
+
+  it('"referentie voor laden nodig" (NL) → load_ref', () => {
+    const result = pipeline(
+      'referentie voor laden nodig — chauffeur wacht',
+      'Referentie voor laden nodig',
+    );
+    expect(result.primaryIssue).toBe('load_ref');
+  });
+
+  it('"fahrer braucht referenz" (DE) → load_ref', () => {
+    const result = pipeline(
+      'fahrer braucht referenz für beladung — bitte senden',
+      'Fahrer braucht Referenz',
+    );
+    expect(result.primaryIssue).toBe('load_ref');
+  });
+});
+
+// ─── 32. validateLoadRefRatio ─────────────────────────────────────
+describe('Validators — validateLoadRefRatio', () => {
+  it('balanced dataset (1:1) → not flagged', () => {
+    const records = [
+      { primaryIssue: 'load_ref', combinedText: 'load ref missing' },
+      { primaryIssue: 'customs',  combinedText: 'customs docs missing' },
+    ];
+    const result = validateLoadRefRatio(records);
+    expect(result.classifiedCount).toBe(1);
+    expect(result.keywordMatchCount).toBe(1);
+    expect(result.flagged).toBe(false);
+  });
+
+  it('high ratio → flagged', () => {
+    const records = [
+      { primaryIssue: 'load_ref',  combinedText: 'load ref missing' },
+      { primaryIssue: 'other',     combinedText: 'laadreferentie ontbreekt' },
+      { primaryIssue: 'ref_provided', combinedText: 'load reference provided' },
+      { primaryIssue: 'customs',   combinedText: 'no load ref received' },
+    ];
+    // 4 keyword matches, 1 classified → ratio 4.0 > threshold 3 → flagged
+    const result = validateLoadRefRatio(records);
+    expect(result.keywordMatchCount).toBeGreaterThanOrEqual(3);
+    expect(result.classifiedCount).toBe(1);
+    expect(result.flagged).toBe(true);
+  });
+
+  it('empty dataset → ratio 0, not flagged', () => {
+    const result = validateLoadRefRatio([]);
+    expect(result.flagged).toBe(false);
+    expect(result.keywordMatchCount).toBe(0);
+    expect(result.classifiedCount).toBe(0);
   });
 });
 

@@ -249,6 +249,14 @@ const TOPIC_RULES: TopicRule[] = [
       'referenz fehlt', 'ladung referenz fehlt', 'ladereferenz nicht erhalten',
       'ladereferenz wird benoetigt', 'ladereferenz benoetigt',
       'ladereferenz nicht vorhanden', 'fehlende ladereferenz',
+      // ── Additional informal missing-ref phrases ──────────────────
+      // EN
+      'driver needs load ref', 'ref required for loading', 'ref required for pickup',
+      // NL
+      'referentie voor laden nodig', 'chauffeur heeft referentie nodig',
+      // DE
+      'ladereferenz noch nicht erhalten', 'referenz fehlt für ladung',
+      'fahrer braucht referenz',
     ],
     weakSignals: [
       // Explicit "correct/updated ref" phrases — indicate a reference is being supplied.
@@ -428,6 +436,17 @@ const TOPIC_RULES: TopicRule[] = [
       'booking cancelled', 'booking cancellation', 'cancel booking',
       'order cancelled', 'shipment cancelled', 'transport cancelled',
       'loading cancelled', 'pickup cancelled', 'delivery cancelled',
+      // ── Additional amendment/correction signals ─────────────────
+      // English
+      'schedule adjustment', 'correction to planning', 'delivery change',
+      'routing update', 'operational correction', 'amend booking',
+      'correction to order',
+      // Dutch
+      'boeking wijziging', 'boekingswijziging', 'correctie op boeking',
+      'levering wijziging', 'planning correctie',
+      // German
+      'buchungsänderung', 'buchungskorrektur', 'planungskorrektur',
+      'änderung der buchung',
     ],
     weakSignals: [
       'correction', 'amend', 'change request', 'modification',

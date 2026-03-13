@@ -661,6 +661,66 @@ export function validateMissingLoadRefUndercount(
   return misclassified;
 }
 
+// ─── Load Reference Keyword-to-Classification Ratio ──────────────
+
+/**
+ * Dataset-level sanity check: compares the number of records that contain
+ * load-reference keywords against the number classified as load_ref.
+ *
+ * If the ratio exceeds `threshold` (default: 3×), the classifier may be
+ * under-detecting Missing Load Reference cases — worth reviewing.
+ *
+ * @param records   Enriched/classified records with primaryIssue and text fields
+ * @param threshold Ratio above which under-detection is flagged (default: 3)
+ *
+ * @example
+ * validateLoadRefRatio([
+ *   { primaryIssue: 'load_ref', combinedText: 'load ref missing' },
+ *   { primaryIssue: 'other',    combinedText: 'laadreferentie ontbreekt' },
+ * ])
+ * // → { keywordMatchCount: 2, classifiedCount: 1, ratio: 2, flagged: false, message: '...' }
+ */
+export interface LoadRefRatioResult {
+  keywordMatchCount: number;
+  classifiedCount: number;
+  ratio: number;
+  flagged: boolean;
+  message: string;
+}
+
+const LOAD_REF_RATIO_KEYWORDS: string[] = [
+  'loadref', 'load ref', 'load reference', 'release ref', 'release reference',
+  'ladereferenz', 'laadreferentie',
+];
+
+export function validateLoadRefRatio(
+  records: Array<{ primaryIssue: string; combinedText?: string; subject?: string | null; description?: string | null }>,
+  threshold = 3,
+): LoadRefRatioResult {
+  const keywordMatchCount = records.filter(r => {
+    const text = (
+      (r.combinedText ?? '') + ' ' +
+      (r.subject ?? '') + ' ' +
+      (r.description ?? '')
+    ).toLowerCase();
+    return LOAD_REF_RATIO_KEYWORDS.some(kw => text.includes(kw));
+  }).length;
+  const classifiedCount = records.filter(r => r.primaryIssue === 'load_ref').length;
+  const ratio = classifiedCount === 0
+    ? (keywordMatchCount > 0 ? Infinity : 0)
+    : keywordMatchCount / classifiedCount;
+  const flagged = ratio > threshold;
+  return {
+    keywordMatchCount,
+    classifiedCount,
+    ratio: isFinite(ratio) ? parseFloat(ratio.toFixed(1)) : Infinity,
+    flagged,
+    message: flagged
+      ? `Potential under-detection: ${keywordMatchCount} keyword matches but only ${classifiedCount} classified as Missing Load Reference (ratio ${isFinite(ratio) ? ratio.toFixed(1) : '∞'}x)`
+      : `Load reference detection appears balanced (ratio ${isFinite(ratio) ? ratio.toFixed(1) : '∞'}x)`,
+  };
+}
+
 // ─── Financial Substring False Positive Detection ────────────────
 
 /**
