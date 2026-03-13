@@ -396,6 +396,17 @@ const OCEAN_CARRIER_PATTERNS: RegExp[] = [
  *
  * Use this function at every customer-assignment decision point.
  */
+// Terminal/port operator names that may appear in customer fields but are NOT customers.
+// These are port authorities and terminal operators — operational entities like depots.
+const TERMINAL_OPERATOR_PATTERNS: RegExp[] = [
+  /\bhutchison\s+ports?\b/i,        // Hutchison Ports [city] B.V., Hutchison Ports Venlo, etc.
+  /\bapm\s+terminals?\b/i,          // APM Terminals [city] — should match entity dict but belt-and-suspenders
+  /\bdp\s+world\b/i,                // DP World [city]
+  /\beuroport\b/i,                  // Europort [terminal]
+  /\bport\s+authority\b/i,          // Port Authority [of...]
+  /\bhavenbedrijf\b/i,              // Dutch: port company (Havenbedrijf Rotterdam)
+];
+
 export function isBlockedFromCustomerRole(name: string): boolean {
   if (!name) return false;
   if (isKnownOperationalEntity(name)) return true;
@@ -406,6 +417,8 @@ export function isBlockedFromCustomerRole(name: string): boolean {
   if (hit && hit.entry.entityType === 'carrier') return true;
   // Block ocean carrier names not explicitly in the entity dictionary
   if (OCEAN_CARRIER_PATTERNS.some(p => p.test(name))) return true;
+  // Block terminal/port operator names
+  if (TERMINAL_OPERATOR_PATTERNS.some(p => p.test(name))) return true;
   return false;
 }
 
@@ -623,6 +636,27 @@ const CUSTOMER_JUNK_EXACT = new Set<string>([
   'logistique',
   'transitaire',
   'transporteur',
+  // Service-type role labels (internal team/route labels, not customers)
+  'service representative dry',
+  'service representative wet',
+  'service representative reefer',
+  'service intermodal',
+  'service intermodal rotterdam',
+  'service neuss',
+  'service duisburg',
+  'service rotterdam',
+  'service hamburg',
+  'service dry',
+  'service wet',
+  'service reefer',
+  'service bulk',
+  // Single-word non-company values
+  'manager',
+  'management',
+  'now',
+  'dry',
+  'wet',
+  'reefer',
   // Generic non-value placeholders
   'unknown',
   'n/a',
@@ -678,6 +712,12 @@ const JUNK_SINGLE_WORDS = new Set<string>([
   'general','unknown','test','demo','placeholder','blank','null','none',
   'fleet','drayage','multimodal','consolidation','repositioning','empties',
   'haulage','groupage','crossdock',
+  // Person/role titles (not company names)
+  'manager','management','director','supervisor','coordinator','operator',
+  // Cargo type labels (used internally to classify service routes, not customers)
+  'dry','wet','reefer','bulk','breakbulk',
+  // Time/status placeholders
+  'now','pending','open','closed','active','inactive',
   // German operational vocabulary (frequently appear as junk customer labels)
   'spedition',      // German: freight forwarding company
   'spediteur',      // German: freight forwarder (person/company)
@@ -764,6 +804,14 @@ const CUSTOMER_JUNK_PATTERNS: RegExp[] = [
   // Portal / system / interface as the only content (not a company name)
   // e.g. "Portal.", "System", "Platform"
   /^(portal|system|platform|application|app|software|database|server|interface|module|dashboard|tool|solution|service\s+portal|customer\s+portal|web\s+portal)\.?\s*$/i,
+
+  // "Service Representative [anything]" — internal service-role labels, not customers.
+  // e.g. "Service Representative Dry", "Service Representative Reefer"
+  /^service\s+representative\b/i,
+
+  // "Service [cargo-type or city]" — internal service-route labels, not customers.
+  // e.g. "Service Dry", "Service Intermodal Rotterdam", "Service Neuss", "Service Reefer"
+  /^service\s+(dry|wet|reefer|bulk|breakbulk|intermodal|ro-ro|inland|barge|rail|neuss|duisburg|rotterdam|hamburg|antwerp|germany|netherlands|europe)\b/i,
 ];
 
 /**

@@ -227,6 +227,33 @@ npm run lint     # ESLint
 | `src/lib/parseFile.ts` | Excel column mapping and normalisation |
 | `src/components/ui/ExampleCasesPanel.tsx` | Evidence drilldown modal |
 
+## Data integrity rules
+
+### Week range
+The reported period is derived **strictly from the uploaded Excel data**. Only weeks with at least 2 records contribute to the displayed range — single-row outliers from Excel date-parsing errors cannot extend the period. Charts use the last 16 weeks for display. The `weekCount` field in the summary reflects the number of data-dense weeks, not the raw ISO week span.
+
+### Missing Load Reference precision
+A case is classified as *Missing Load Reference* only if it passes a 5-step gate:
+
+1. **Explicit missing phrase** in description/ISR (`"please provide load ref"`, `"load ref missing"`, etc.) → accept immediately
+2. **Body intent** — if description is substantive and classifies as billing, planning, or routing → reject
+3. **Planning blocklist** — demurrage, rate, feasibility, routing, capacity, etc. → reject
+4. **Proximity check** — `"load ref"` near a missing/request signal within 5 tokens → accept
+5. **Subject-level fallback** — subject contains missing indicator; subject has reduced weight (0.30 vs 0.88) → accept cautiously
+
+If the gate rejects, `load_ref` is removed from **all** candidate issue lists — it cannot re-enter via fallback, description-override, or recovery pass. `missingLoadRef` counts in Customer Burden and Load Reference Intelligence use only `primaryIssue === 'load_ref'` rows (not secondary matches), keeping totals consistent.
+
+### Customer Burden cleanliness
+A name appears in Customer Burden only after passing three gates in sequence:
+
+1. **Not a known operational entity** — transporter, depot, deepsea terminal, carrier, ocean carrier, or port operator (Hutchison Ports, APM Terminals, DP World, etc.)
+2. **Not an internal/junk label** — ISR address-book patterns, service-role labels (`Service Representative Dry`, `Service Neuss`, `Service Intermodal Rotterdam`), single-word operational vocabulary, sentence fragments, generic placeholders
+3. **Positive company name** — has a recognised legal suffix (GmbH, B.V., Ltd, etc.) or at least one non-junk word
+
+The same dual gate is applied to the Load Reference Intelligence offender list and to issue drilldown customer breakdowns.
+
+---
+
 ## Output validation
 
 In development mode (`npm run dev`), the app runs structural checks after every analysis and logs any violations to the browser console.
@@ -235,8 +262,11 @@ In development mode (`npm run dev`), the app runs structural checks after every 
 
 | Rule | Description |
 |------|-------------|
+| `DATE_OUTLIER_WEEKS` | Weeks with < 2 records excluded from reported period (likely date-parsing errors) |
 | `LOAD_REF_FALSE_POSITIVE` | Case classified as Missing Load Ref but description contains a provided-ref pattern |
 | `TRANSPORT_ORDER_AS_LOAD_REF` | Case with "transport order" phrasing that landed in load_ref |
+| `LOAD_REF_TOTAL_MISMATCH` | `loadRefIntelligence.totalMissing` does not equal `records.filter(r => r.primaryIssue === 'load_ref')` |
+| `SERVICE_LABEL_IN_LOAD_REF_INTELLIGENCE` | Service/internal label in Load Ref top offenders list |
 | `NO_CASE_NUMBERS_IN_DATASET` | No Case Number column found — drilldown links will show "—" |
 | `LOW_CASE_NUMBER_COVERAGE` | Fewer than 50% of records have a Case Number |
 

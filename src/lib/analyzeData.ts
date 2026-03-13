@@ -16,6 +16,11 @@ import {} from './textNormalization';
 
 const MAX_CHART_WEEKS = 16;
 
+// Minimum records a week must contain to be included in the summary week range.
+// Weeks with fewer records are likely date-parsing outliers (e.g. an Excel serial
+// date that lands in the wrong year) and must not expand the reported period.
+const MIN_WEEK_DENSITY = 2;
+
 // ─────────────────────────────────────────────────────────────────
 // Non-operational area labels to suppress from Area Hotspots.
 // These come from the NL/BE ZIP rules and are too granular or
@@ -309,7 +314,7 @@ export function runAnalysis(
     // Only add RESOLVED, non-operational customers to weekly history.
     // 'Unknown' / null is excluded — it skews trend lines without adding insight.
     const custName = r.resolvedCustomer;
-    if (custName && !isBlockedFromCustomerRole(custName)) {
+    if (custName && !isBlockedFromCustomerRole(custName) && isPositiveCustomerCandidate(custName)) {
       wk.customers[custName] = (wk.customers[custName] ?? 0) + 1;
     }
     if (r.resolvedTransporter) wk.transporters[r.resolvedTransporter] = (wk.transporters[r.resolvedTransporter] ?? 0) + 1;
@@ -409,12 +414,14 @@ export function runAnalysis(
     const c = custMap[name];
     c.count++;
     c.weekCounts[r.weekKey] = (c.weekCounts[r.weekKey] ?? 0) + 1;
+    // missingLoadRef counts only rows where load_ref IS the primary issue —
+    // consistent with Load Reference Intelligence which also uses primaryIssue.
+    if (r.primaryIssue === 'load_ref') c.missingLoadRef++;
     let preventableCount = 0;
     for (const iss of r.issues) {
       const tax = TAXONOMY_MAP[iss];
       c.hoursLost += tax?.hours ?? 0.5;
       if (tax?.preventable) preventableCount++;
-      if (iss === 'load_ref')                              c.missingLoadRef++;
       if (iss === 'ref_provided')                          c.refProvided++;
       if (['customs','portbase','bl','t1'].includes(iss)) c.missingCustomsDocs++;
       if (iss === 'amendment')                             c.amendments++;
@@ -657,7 +664,7 @@ export function runAnalysis(
     const custCounts: Record<string, number> = {};
     for (const r of issRecs) {
       const name = r.resolvedCustomer;
-      if (name && !isBlockedFromCustomerRole(name)) custCounts[name] = (custCounts[name] ?? 0) + 1;
+      if (name && !isBlockedFromCustomerRole(name) && isPositiveCustomerCandidate(name)) custCounts[name] = (custCounts[name] ?? 0) + 1;
     }
 
     const transCounts: Record<string, number> = {};
@@ -886,9 +893,21 @@ export function runAnalysis(
   const unknownEntityCount = unknownEntities.reduce((s, e) => s + e.count, 0);
   const unknownCustomerCount = unknownCustomerCaseCount;
 
-  const weekRange = sortedWeeks.length > 0
-    ? `${sortedWeeks[0].replace('-W', ' W')} – ${sortedWeeks[sortedWeeks.length - 1].replace('-W', ' W')}`
+  // Week range: use only "dense" weeks (≥ MIN_WEEK_DENSITY records) so that
+  // one or two rows with misparse dates cannot extend the reported period by
+  // weeks or months. The full sortedWeeks list is still used for trends and
+  // chart data — this only affects the human-readable summary range display.
+  const denseWeeks = sortedWeeks.filter(wk => (weeklyHistory[wk]?.total ?? 0) >= MIN_WEEK_DENSITY);
+  const rangeWeeks = denseWeeks.length > 0 ? denseWeeks : sortedWeeks;
+
+  const weekRange = rangeWeeks.length > 0
+    ? `${rangeWeeks[0].replace('-W', ' W')} – ${rangeWeeks[rangeWeeks.length - 1].replace('-W', ' W')}`
     : 'All records';
+
+  // Outlier-week detection: if raw sortedWeeks spans significantly more than
+  // denseWeeks, date-parsing outliers are present. Record the count for the
+  // validation block below.
+  const outlierWeekCount = sortedWeeks.length - denseWeeks.length;
 
   const qw = quickWin(issueBreakdown, customerBurden);
 
@@ -906,7 +925,7 @@ export function runAnalysis(
     topArea:            topArea?.name ?? 'N/A',
     topAreaCount:       topArea?.count ?? 0,
     weekRange,
-    weekCount:          sortedWeeks.length,
+    weekCount:          rangeWeeks.length,
     quickWin:           qw,
     narrative: buildNarrative(totalCases, sortedWeeks.length, weekRange, topIssue, topCustomer, preventablePct, totalHoursLost, reviewFlagCount, unknownEntityCount),
     reviewFlagCount,
@@ -934,6 +953,39 @@ export function runAnalysis(
     } else if (cnReport.pct < 0.5 && records.length > 0) {
       console.warn(
         `[CIS validation] LOW_CASE_NUMBER_COVERAGE — only ${(cnReport.pct * 100).toFixed(0)}% of records have a Case Number (${cnReport.preserved}/${cnReport.total}).`,
+      );
+    }
+
+    // ── Week-range span check ──────────────────────────────────────
+    // If raw sortedWeeks spans more than denseWeeks, outlier weeks exist.
+    // This usually means Excel date-parsing errors (serial-date misparsing).
+    if (outlierWeekCount > 0) {
+      console.warn(
+        `[CIS validation] DATE_OUTLIER_WEEKS: ${outlierWeekCount} week(s) have fewer than ${MIN_WEEK_DENSITY} records and are excluded from the reported period. ` +
+        `Displayed range: ${weekRange}. Raw week span: ${sortedWeeks[0] ?? '?'} – ${sortedWeeks[sortedWeeks.length - 1] ?? '?'}. ` +
+        `Check the uploaded Excel for rows with malformed or missing date values.`,
+      );
+    }
+
+    // ── Service-label leak in Load Ref Intelligence offenders ──────
+    // The topOffenders list already uses both gates, but surface any that
+    // slip through so they can be blocked in the reference data layer.
+    const loadRefServiceLeaks = loadRefIntelligence.topOffenders.filter(o =>
+      /^service\s+/i.test(o.name) || /^(manager|now|dry|reefer|wet)$/i.test(o.name.trim()),
+    );
+    if (loadRefServiceLeaks.length > 0) {
+      console.error(
+        `[CIS validation] SERVICE_LABEL_IN_LOAD_REF_INTELLIGENCE: ${loadRefServiceLeaks.length} service/internal label(s) in Load Ref top offenders.`,
+        loadRefServiceLeaks.map(o => o.name),
+      );
+    }
+
+    // ── Gate-rejected load_ref must not contribute to Missing LR total ──
+    // Verify the loadRefIntelligence total equals records with primaryIssue=load_ref.
+    const primaryLoadRefCount = records.filter(r => r.primaryIssue === 'load_ref').length;
+    if (loadRefIntelligence.totalMissing !== primaryLoadRefCount) {
+      console.error(
+        `[CIS validation] LOAD_REF_TOTAL_MISMATCH: loadRefIntelligence.totalMissing=${loadRefIntelligence.totalMissing} does not equal records with primaryIssue=load_ref (${primaryLoadRefCount}).`,
       );
     }
 
