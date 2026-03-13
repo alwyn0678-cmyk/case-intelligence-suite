@@ -4,7 +4,7 @@ import { HBarChart } from '../components/ui/ChartWrapper';
 import { ExampleCasesPanel } from '../components/ui/ExampleCasesPanel';
 import { isBlockedFromCustomerRole, isPositiveCustomerCandidate } from '../config/referenceData';
 import { exportEnrichedToXlsx } from '../lib/exportAllCases';
-import type { AnalysisResult, CustomerBurdenItem } from '../types/analysis';
+import type { AnalysisResult, CustomerBurdenItem, ExampleCase } from '../types/analysis';
 
 interface Props { analysis: AnalysisResult }
 
@@ -34,6 +34,7 @@ export function CustomerPage({ analysis }: Props) {
   const top15 = customerBurden.slice(0, 15);
 
   const [selected, setSelected] = useState<CustomerBurdenItem | null>(null);
+  const [loadRefCases, setLoadRefCases] = useState<ExampleCase[] | null>(null);
 
   const chartData = top15.map(c => ({ name: c.name, count: c.count }));
 
@@ -169,19 +170,159 @@ export function CustomerPage({ analysis }: Props) {
         </>
       )}
 
-      {/* Load ref offenders */}
-      {loadRefIntelligence.topOffenders.length > 0 && (
-        <div className="bg-[#171922] border border-[#2a2f3f] rounded-lg p-5">
-          <p className="text-sm font-medium text-[#eceff7] mb-1">Load Reference Offenders</p>
-          <p className="text-xs text-[#a6aec4] mb-4">{loadRefIntelligence.totalMissing} cases with missing load reference &middot; ~{loadRefIntelligence.estimatedRework.toFixed(0)}h rework</p>
-          <div className="grid grid-cols-2 gap-2">
-            {loadRefIntelligence.topOffenders.slice(0, 10).map(o => (
-              <div key={o.name} className="flex justify-between items-center px-3 py-2 bg-[#1d2030] rounded">
-                <span className="text-sm text-[#eceff7] truncate mr-2">{o.name}</span>
-                <span className="text-sm text-[#dc6d7d] font-medium shrink-0">{o.count}</span>
+      {/* ── Load Reference Intelligence ──────────────────────────── */}
+      {(loadRefIntelligence.totalMissing > 0 || loadRefIntelligence.totalProvided > 0) && (
+        <div className="space-y-4">
+
+          {/* Load ref example cases modal */}
+          {loadRefCases && (
+            <ExampleCasesPanel
+              title="Load Reference Cases"
+              subtitle={`${loadRefIntelligence.totalMissing} missing · ${loadRefIntelligence.totalProvided} provided/updated`}
+              cases={loadRefCases}
+              onClose={() => setLoadRefCases(null)}
+            />
+          )}
+
+          {/* Section header */}
+          <div className="bg-[#171922] border border-[#2a2f3f] rounded-lg p-5">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <p className="text-sm font-medium text-[#eceff7]">Load Reference Intelligence</p>
+                <p className="text-xs text-[#a6aec4] mt-0.5">
+                  Missing load references require manual follow-up and create rework. Use this panel to identify which customers, transporters, and depots generate the most missing reference cases.
+                </p>
               </div>
-            ))}
+              {loadRefIntelligence.exampleCases.length > 0 && (
+                <button
+                  onClick={() => setLoadRefCases(loadRefIntelligence.exampleCases)}
+                  className="shrink-0 text-xs text-[#7aa2ff] hover:text-[#8fb3ff] font-medium whitespace-nowrap"
+                >
+                  View all cases
+                </button>
+              )}
+            </div>
+
+            {/* KPI stat row */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { label: 'Missing Load Refs', value: loadRefIntelligence.totalMissing.toLocaleString(), accent: '#dc6d7d' },
+                { label: 'Provided / Updated', value: loadRefIntelligence.totalProvided.toLocaleString(), accent: '#52c7c7' },
+                { label: 'Est. Rework Hours', value: `~${loadRefIntelligence.estimatedRework.toFixed(0)}h`, accent: '#d8a34c' },
+                { label: 'Avg Confidence', value: `${(loadRefIntelligence.avgConfidence * 100).toFixed(0)}%`, accent: '#8b7cff' },
+              ].map(k => (
+                <div key={k.label} className="bg-[#1d2030] rounded-lg p-3">
+                  <p className="text-xs text-[#a6aec4] uppercase tracking-wide mb-1">{k.label}</p>
+                  <p className="text-xl font-semibold" style={{ color: k.accent }}>{k.value}</p>
+                </div>
+              ))}
+            </div>
           </div>
+
+          {/* Two-column breakdown: Customers + Transporters */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+            {/* Top customers with missing load refs */}
+            {loadRefIntelligence.topOffenders.length > 0 && (
+              <div className="bg-[#171922] border border-[#2a2f3f] rounded-lg p-5">
+                <p className="text-sm font-medium text-[#eceff7] mb-1">Top Customers — Missing Load Refs</p>
+                <p className="text-xs text-[#a6aec4] mb-3">Customers with the most cases where a load reference was absent at submission</p>
+                <div className="space-y-1.5">
+                  {loadRefIntelligence.topOffenders.slice(0, 10).map((o, idx) => {
+                    const pct = loadRefIntelligence.totalMissing > 0 ? (o.count / loadRefIntelligence.totalMissing * 100) : 0;
+                    return (
+                      <div key={o.name} className="flex items-center gap-2">
+                        <span className="text-xs text-[#a6aec4] w-5 shrink-0 text-right">{idx + 1}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-xs text-[#eceff7] truncate mr-2" title={o.name}>{o.name}</span>
+                            <span className="text-xs text-[#dc6d7d] font-medium shrink-0">{o.count}</span>
+                          </div>
+                          <div className="h-1 bg-[#2a2f3f] rounded-full overflow-hidden">
+                            <div className="h-1 bg-[#dc6d7d]/60 rounded-full" style={{ width: `${Math.min(pct, 100)}%` }} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Top transporters with missing load refs */}
+            <div className="bg-[#171922] border border-[#2a2f3f] rounded-lg p-5">
+              <p className="text-sm font-medium text-[#eceff7] mb-1">Top Transporters — Missing Load Refs</p>
+              <p className="text-xs text-[#a6aec4] mb-3">Which transport partners are most often associated with missing reference cases</p>
+              {loadRefIntelligence.topTransporters.length === 0 ? (
+                <p className="text-xs text-[#a6aec4]/60 italic">
+                  No transporter data resolved for these cases. Ensure a Transporter or Haulier column is included in the upload.
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {loadRefIntelligence.topTransporters.slice(0, 10).map((t, idx) => {
+                    const pct = loadRefIntelligence.totalMissing > 0 ? (t.count / loadRefIntelligence.totalMissing * 100) : 0;
+                    return (
+                      <div key={t.name} className="flex items-center gap-2">
+                        <span className="text-xs text-[#a6aec4] w-5 shrink-0 text-right">{idx + 1}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-xs text-[#eceff7] truncate mr-2" title={t.name}>{t.name}</span>
+                            <span className="text-xs text-[#d8a34c] font-medium shrink-0">{t.count}</span>
+                          </div>
+                          <div className="h-1 bg-[#2a2f3f] rounded-full overflow-hidden">
+                            <div className="h-1 bg-[#d8a34c]/60 rounded-full" style={{ width: `${Math.min(pct, 100)}%` }} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Depot breakdown (only shown if depot data present) */}
+          {loadRefIntelligence.topDepots.length > 0 && (
+            <div className="bg-[#171922] border border-[#2a2f3f] rounded-lg p-5">
+              <p className="text-sm font-medium text-[#eceff7] mb-1">Top Depots — Missing Load Refs</p>
+              <p className="text-xs text-[#a6aec4] mb-3">Inland depots and terminals most associated with missing reference cases</p>
+              <div className="grid grid-cols-2 gap-2">
+                {loadRefIntelligence.topDepots.slice(0, 10).map(d => (
+                  <div key={d.name} className="flex justify-between items-center px-3 py-2 bg-[#1d2030] rounded">
+                    <span className="text-xs text-[#eceff7] truncate mr-2" title={d.name}>{d.name}</span>
+                    <span className="text-xs text-[#8b7cff] font-medium shrink-0">{d.count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Weekly missing trend */}
+          {Object.keys(loadRefIntelligence.weeklyMissing).length >= 2 && (
+            <div className="bg-[#171922] border border-[#2a2f3f] rounded-lg p-5">
+              <p className="text-sm font-medium text-[#eceff7] mb-3">Weekly Trend — Missing Load References</p>
+              <div className="flex items-end gap-1.5 h-16">
+                {analysis.chartWeeks.map(wk => {
+                  const count = loadRefIntelligence.weeklyMissing[wk] ?? 0;
+                  const max   = Math.max(...analysis.chartWeeks.map(w => loadRefIntelligence.weeklyMissing[w] ?? 0), 1);
+                  const heightPct = Math.round((count / max) * 100);
+                  return (
+                    <div key={wk} className="flex-1 flex flex-col items-center gap-1" title={`${wk.replace(/^\d{4}-/, '')}: ${count}`}>
+                      <div className="w-full flex flex-col justify-end" style={{ height: '48px' }}>
+                        <div
+                          className="w-full rounded-t"
+                          style={{ height: `${heightPct}%`, minHeight: count > 0 ? '3px' : '0', background: '#dc6d7d80' }}
+                        />
+                      </div>
+                      <span className="text-[9px] text-[#a6aec4]/60 rotate-[-45deg] origin-top-left whitespace-nowrap" style={{ fontSize: '9px' }}>
+                        {wk.replace(/^\d{4}-/, '')}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

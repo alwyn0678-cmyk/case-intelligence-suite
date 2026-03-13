@@ -571,19 +571,42 @@ export function runAnalysis(
   const loadRefRecords     = records.filter(r => r.primaryIssue === 'load_ref');
   const refProvidedRecords = records.filter(r => r.primaryIssue === 'ref_provided');
   const loadRefByCustomer: Record<string, number> = {};
+  const loadRefByTransporter: Record<string, number> = {};
+  const loadRefByDepot: Record<string, number> = {};
+  const loadRefByWeek: Record<string, number> = {};
+  let loadRefConfidenceSum = 0;
   for (const r of loadRefRecords) {
-    const name = r.resolvedCustomer;
-    if (!name) continue;
-    // Apply full dual-gate: both negative block and positive company-name check.
-    if (isBlockedFromCustomerRole(name)) continue;
-    if (!isPositiveCustomerCandidate(name)) continue;
-    loadRefByCustomer[name] = (loadRefByCustomer[name] ?? 0) + 1;
+    // Customer breakdown — apply full dual-gate
+    const custName = r.resolvedCustomer;
+    if (custName && !isBlockedFromCustomerRole(custName) && isPositiveCustomerCandidate(custName)) {
+      loadRefByCustomer[custName] = (loadRefByCustomer[custName] ?? 0) + 1;
+    }
+    // Transporter breakdown — count all resolved transporters
+    const tpName = r.resolvedTransporter;
+    if (tpName) {
+      loadRefByTransporter[tpName] = (loadRefByTransporter[tpName] ?? 0) + 1;
+    }
+    // Depot breakdown
+    const depotName = r.resolvedDepot;
+    if (depotName) {
+      loadRefByDepot[depotName] = (loadRefByDepot[depotName] ?? 0) + 1;
+    }
+    // Weekly trend
+    loadRefByWeek[r.weekKey] = (loadRefByWeek[r.weekKey] ?? 0) + 1;
+    // Confidence accumulation
+    loadRefConfidenceSum += r.confidence;
   }
+  const loadRefAvgConfidence = loadRefRecords.length > 0 ? loadRefConfidenceSum / loadRefRecords.length : 0;
   const loadRefIntelligence: LoadRefIntelligence = {
-    totalMissing:    loadRefRecords.length,
-    totalProvided:   refProvidedRecords.length,
-    estimatedRework: loadRefRecords.length * 0.5,
-    topOffenders:    Object.entries(loadRefByCustomer).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count })),
+    totalMissing:     loadRefRecords.length,
+    totalProvided:    refProvidedRecords.length,
+    estimatedRework:  loadRefRecords.length * 0.5,
+    topOffenders:     Object.entries(loadRefByCustomer).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count })),
+    topTransporters:  Object.entries(loadRefByTransporter).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count })),
+    topDepots:        Object.entries(loadRefByDepot).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count })),
+    weeklyMissing:    loadRefByWeek,
+    avgConfidence:    loadRefAvgConfidence,
+    exampleCases:     buildExampleCases(loadRefRecords),
   };
 
   // ─── 11. Area hotspots ────────────────────────────────────────

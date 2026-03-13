@@ -161,7 +161,18 @@ export interface LoadRefIntelligence {
   totalMissing: number;
   totalProvided: number;
   estimatedRework: number;
+  /** Top customers generating missing load reference cases */
   topOffenders: Array<{ name: string; count: number }>;
+  /** Top transporters associated with missing load reference cases */
+  topTransporters: Array<{ name: string; count: number }>;
+  /** Top depots associated with missing load reference cases */
+  topDepots: Array<{ name: string; count: number }>;
+  /** Per-week count of missing load reference cases (for trend sparkline) */
+  weeklyMissing: Record<string, number>;
+  /** Average confidence score across missing load ref cases (0–1) */
+  avgConfidence: number;
+  /** Representative example cases for the load reference intelligence panel */
+  exampleCases: ExampleCase[];
 }
 
 export interface IsrVsExternal {
