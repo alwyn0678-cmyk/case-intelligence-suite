@@ -75,6 +75,8 @@ const FINANCIAL_SUBJECT_PATTERNS: string[] = [
   // German
   'extrakosten', 'lagerkosten', 'standgeld',
   'kostenbericht', 'bestellnummer',
+  // PO amount / value mismatch — subject patterns for invoice-vs-PO discrepancy
+  'po mismatch', 'po amount', 'po discrepancy', 'po bedrag', 'po betrag',
   // NOTE: bare 'demurrage', 'detention', 'wartezeit' are intentionally excluded —
   // they appear in operational waiting-time case subjects and must NOT be forced to rate.
   // Specific invoice/charge forms ('demurrage invoice', 'demurrage rechnung') remain

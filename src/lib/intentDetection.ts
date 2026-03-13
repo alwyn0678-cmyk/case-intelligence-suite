@@ -188,6 +188,9 @@ export const FINANCIAL_GUARD_KEYWORDS: string[] = [
   'cost allocation', 'kosten rapport', 'kostenbericht',
   // Purchase Orders / PO references
   'purchase order', 'inkooporder', 'bestellnummer',
+  // PO amount / value mismatch
+  'po amount mismatch', 'po mismatch', 'po discrepancy', 'po bedrag',
+  'po betrag', 'po abweichung', 'po differenz',
 ];
 
 export function hasStrongFinancialContext(text: string): boolean {

@@ -967,3 +967,58 @@ describe('Accuracy — Equipment signals must stay as equipment', () => {
     expect(result.primaryIssue).not.toBe('ref_provided');
   });
 });
+
+// ─── 33. PO amount mismatch → rate, NOT transport_order ───────────
+describe('Accuracy — PO amount mismatch must route to rate', () => {
+  it('"po amount mismatch on invoice 12345" → rate', () => {
+    const result = pipeline(
+      'po amount mismatch on invoice 12345 — the invoiced amount does not match the purchase order',
+      'PO Amount Mismatch',
+    );
+    expect(result.primaryIssue).toBe('rate');
+    expect(result.primaryIssue).not.toBe('transport_order');
+  });
+
+  it('"po value incorrect, invoice does not match po" → rate', () => {
+    const result = pipeline(
+      'po value incorrect — invoice does not match po amount, please review and correct',
+      'PO Value Incorrect',
+    );
+    expect(result.primaryIssue).toBe('rate');
+    expect(result.primaryIssue).not.toBe('transport_order');
+  });
+
+  it('"po bedrag verschil factuur ontvangen" (NL) → rate', () => {
+    const result = pipeline(
+      'po bedrag verschil — factuur ontvangen maar bedrag klopt niet met inkooporder',
+      'PO Bedrag Verschil',
+    );
+    expect(result.primaryIssue).toBe('rate');
+    expect(result.primaryIssue).not.toBe('transport_order');
+  });
+
+  it('"po abweichung in rechnung" (DE) → rate', () => {
+    const result = pipeline(
+      'po abweichung in rechnung festgestellt — betrag stimmt nicht mit bestellauftrag überein',
+      'PO Abweichung',
+    );
+    expect(result.primaryIssue).toBe('rate');
+    expect(result.primaryIssue).not.toBe('transport_order');
+  });
+
+  it('"po discrepancy" rule-level match → rate', () => {
+    const result = classify('po discrepancy on invoice — please advise');
+    expect(result).not.toBeNull();
+    expect(result!.issueId).toBe('rate');
+    expect(result!.issueId).not.toBe('transport_order');
+  });
+
+  it('"transport order ref po number invoice mismatch" → rate, not transport_order', () => {
+    const result = pipeline(
+      'transport order ref po number 99887 invoice mismatch — invoiced amount differs from po',
+      'PO Invoice Mismatch',
+    );
+    expect(result.primaryIssue).toBe('rate');
+    expect(result.primaryIssue).not.toBe('transport_order');
+  });
+});

@@ -632,6 +632,18 @@ const TOPIC_RULES: TopicRule[] = [
       'inkooporder', 'bestelnummer', 'inkoopnummer',
       // German
       'bestellnummer', 'einkaufsauftrag', 'bestellauftrag',
+      // PO amount / value mismatch — invoice-vs-PO discrepancy (always financial)
+      // English
+      'po amount mismatch', 'po mismatch', 'purchase order mismatch',
+      'invoice po mismatch', 'po value incorrect', 'po value mismatch',
+      'invoice does not match po', 'po difference', 'po discrepancy',
+      'po not matching', 'po amount differs',
+      // Dutch
+      'po bedrag fout', 'po bedrag verschil', 'po bedrag komt niet overeen',
+      'factuur komt niet overeen met po', 'po verschil',
+      // German
+      'po betrag falsch', 'rechnung stimmt nicht mit po überein',
+      'po differenz', 'po abweichung',
       // Storage and waiting-time costs — financial charge language (not operational event)
       // "driver waited 4 hours" → waiting_time (operational)
       // "waiting time charges" / "storage costs invoice" → rate (financial)
