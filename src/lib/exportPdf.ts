@@ -110,8 +110,8 @@ function tableDefaults(headFill: [number,number,number] = COLORS.bgTableHeader) 
     theme: 'plain' as const,
     styles: {
       font: 'helvetica',
-      fontSize: 8.5,
-      cellPadding: { top: 4, bottom: 4, left: 6, right: 6 },
+      fontSize: 8,
+      cellPadding: { top: 3.5, bottom: 3.5, left: 3, right: 3 },
       textColor: COLORS.tableText,
       lineColor: COLORS.borderLight,
       lineWidth: 0.2,
@@ -121,8 +121,8 @@ function tableDefaults(headFill: [number,number,number] = COLORS.bgTableHeader) 
       fillColor: headFill,
       textColor: COLORS.tableText,
       fontStyle: 'bold' as const,
-      fontSize: 8.5,
-      cellPadding: { top: 4.5, bottom: 4.5, left: 6, right: 6 },
+      fontSize: 8,
+      cellPadding: { top: 4, bottom: 4, left: 3, right: 3 },
     },
     alternateRowStyles: {
       fillColor: COLORS.bgTableAlt,
@@ -576,13 +576,14 @@ export async function exportToPdf(analysis: AnalysisResult): Promise<void> {
       i.trend,
     ]),
     columnStyles: {
-      0: { cellWidth: 8,  halign: 'right' as const },
-      1: { cellWidth: 66 },
+      // total: 9+62+20+17+22+22+22 = 174mm
+      0: { cellWidth: 9,  halign: 'right' as const },
+      1: { cellWidth: 62 },
       2: { cellWidth: 20, halign: 'right' as const },
-      3: { cellWidth: 18, halign: 'right' as const },
+      3: { cellWidth: 17, halign: 'right' as const },
       4: { cellWidth: 22, halign: 'right' as const },
       5: { cellWidth: 22, halign: 'center' as const },
-      6: { cellWidth: 18, halign: 'center' as const },
+      6: { cellWidth: 22, halign: 'center' as const },
     },
     ...tableDefaults(),
   });
@@ -620,13 +621,14 @@ export async function exportToPdf(analysis: AnalysisResult): Promise<void> {
         c.risk,
       ]),
       columnStyles: {
-        0: { cellWidth: 60 },
+        // total: 50+16+17+17+15+15+30+14 = 174mm
+        0: { cellWidth: 50 },
         1: { cellWidth: 16, halign: 'right' as const },
-        2: { cellWidth: 16, halign: 'right' as const },
-        3: { cellWidth: 18, halign: 'right' as const },
-        4: { cellWidth: 14, halign: 'center' as const },
-        5: { cellWidth: 14, halign: 'center' as const },
-        6: { cellWidth: 22 },
+        2: { cellWidth: 17, halign: 'right' as const },
+        3: { cellWidth: 17, halign: 'right' as const },
+        4: { cellWidth: 15, halign: 'center' as const },
+        5: { cellWidth: 15, halign: 'center' as const },
+        6: { cellWidth: 30 },
         7: { cellWidth: 14, halign: 'center' as const },
       },
       didParseCell: (data) => {
@@ -700,8 +702,9 @@ export async function exportToPdf(analysis: AnalysisResult): Promise<void> {
         t.risk,
       ]),
       columnStyles: {
-        0: { cellWidth: 8,  halign: 'right' as const },
-        1: { cellWidth: 58 },
+        // total: 9+55+18+18+22+20+18+14 = 174mm
+        0: { cellWidth: 9,  halign: 'right' as const },
+        1: { cellWidth: 55 },
         2: { cellWidth: 18, halign: 'right' as const },
         3: { cellWidth: 18, halign: 'right' as const },
         4: { cellWidth: 22, halign: 'right' as const },
@@ -776,7 +779,8 @@ export async function exportToPdf(analysis: AnalysisResult): Promise<void> {
       ['T1 / Transit Documents', (cc.t1Issues ?? 0).toLocaleString()],
     ],
     columnStyles: {
-      0: { cellWidth: 120 },
+      // total: 144+30 = 174mm
+      0: { cellWidth: 144 },
       1: { cellWidth: 30, halign: 'right' as const },
     },
     ...tableDefaults(),
