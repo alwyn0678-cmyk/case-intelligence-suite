@@ -29,7 +29,7 @@ export const ISSUE_TAXONOMY: TaxonomyItem[] = [
     // Distinct from a load reference number. Cases requesting or providing a TRO
     // belong here, not under Missing Load Reference.
     id: 'transport_order',
-    label: 'Transport Order Request',
+    label: 'Transport Order',
     keywords: [
       'transport order','transport instruction','haulier order','haulier instruction',
       'transport booking order','driver order','driver instruction',

@@ -57,7 +57,7 @@ describe('Precision — Rate overrides transport-order subject', () => {
   });
 });
 
-// ─── 2. Work order missing → Transport Order Request ─────────────
+// ─── 2. Work order missing → Transport Order ─────────────────────
 describe('Precision — Work order must classify as transport_order', () => {
   it('workorder still missing, please send order → transport_order', () => {
     const result = pipeline(

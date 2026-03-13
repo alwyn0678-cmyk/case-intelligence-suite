@@ -24,6 +24,7 @@ import {
   validateEquipmentAsRefProvided,
   validateLoadRefRatio,
 } from '../validators';
+import { TAXONOMY_MAP } from '../taxonomy';
 
 // ── Pipeline helper ───────────────────────────────────────────────
 function pipeline(
@@ -1020,5 +1021,17 @@ describe('Accuracy — PO amount mismatch must route to rate', () => {
     );
     expect(result.primaryIssue).toBe('rate');
     expect(result.primaryIssue).not.toBe('transport_order');
+  });
+});
+
+// ─── 34. Taxonomy label rename ─────────────────────────────────────
+describe('Taxonomy — transport_order display label', () => {
+  it('transport_order label is "Transport Order" (not "Transport Order Request")', () => {
+    expect(TAXONOMY_MAP['transport_order'].label).toBe('Transport Order');
+    expect(TAXONOMY_MAP['transport_order'].label).not.toContain('Request');
+  });
+
+  it('transport_order issueId is unchanged at "transport_order"', () => {
+    expect(TAXONOMY_MAP['transport_order'].id).toBe('transport_order');
   });
 });
