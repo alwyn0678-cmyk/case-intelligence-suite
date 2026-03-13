@@ -99,11 +99,10 @@ describe('Customs / Documentation', () => {
     expect(result!.state).toBe('missing');
   });
 
-  it('attached customs docs → customs / provided', () => {
+  it('attached customs docs → ref_provided (document was sent)', () => {
     const result = classify('please find attached the customs documents');
     expect(result).not.toBeNull();
-    expect(result!.issueId).toBe('customs');
-    expect(result!.state).toBe('provided');
+    expect(result!.issueId).toBe('ref_provided');
   });
 
   it('customs clearance required → customs', () => {
@@ -128,11 +127,10 @@ describe('T1 / Transit Document', () => {
     expect(result!.issueId).toBe('t1');
   });
 
-  it('T1 document sent → t1 / provided', () => {
+  it('T1 document sent → ref_provided (document was sent)', () => {
     const result = classify('T1 document has been sent — please confirm receipt');
     expect(result).not.toBeNull();
-    expect(result!.issueId).toBe('t1');
-    expect(result!.state).toBe('provided');
+    expect(result!.issueId).toBe('ref_provided');
   });
 });
 

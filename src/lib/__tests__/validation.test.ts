@@ -15,7 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import { classifyByRules } from '../issueRules';
 import { validateLoadRefMissing } from '../loadRefGuards';
-import { isSentenceFragment } from '../validators';
+import { isSentenceFragment, validateCustomsProvided } from '../validators';
 import { TAXONOMY_MAP } from '../taxonomy';
 import { classifyCase } from '../classifyCase';
 import type { NormalisedRecord } from '../../types';
@@ -137,13 +137,12 @@ describe('Validation — Reference Update / Info Provided', () => {
 // ─── Case block 4: Customs ───────────────────────────────────────
 
 describe('Validation — Customs / Documentation', () => {
-  it('customs docs attached → customs / provided', () => {
+  it('customs docs attached → ref_provided (document was sent)', () => {
     const text = 'please find attached the customs documents as requested';
     const result = classify(text);
-    printResult(text, result, 'customs', 'provided');
+    printResult(text, result, 'ref_provided', 'provided');
     expect(result).not.toBeNull();
-    expect(result!.issueId).toBe('customs');
-    expect(result!.state).toBe('provided');
+    expect(result!.issueId).toBe('ref_provided');
   });
 
   it('customs docs missing → customs / missing', () => {
@@ -168,13 +167,12 @@ describe('Validation — T1 / Transit Document', () => {
     expect(result!.state).toBe('missing');
   });
 
-  it('T1 document attached → t1 / provided', () => {
+  it('T1 document attached → ref_provided (document was sent)', () => {
     const text = 'please find attached the T1 transit document — transit entry closed';
     const result = classify(text);
-    printResult(text, result, 't1', 'provided');
+    printResult(text, result, 'ref_provided', 'provided');
     expect(result).not.toBeNull();
-    expect(result!.issueId).toBe('t1');
-    expect(result!.state).toBe('provided');
+    expect(result!.issueId).toBe('ref_provided');
   });
 });
 
@@ -720,6 +718,223 @@ describe('Pipeline regression — gate-rejected load_ref never survives to prima
     ].join('\n  '));
     expect(result.primaryIssue).not.toBe('load_ref');
     expect(result.issues).not.toContain('load_ref');
+  });
+
+});
+
+// ─── Case block 15: Customs / T1 / Portbase — provided vs requested ───────────
+//
+// The central rule: if the document IS being provided, the case belongs in
+// ref_provided (Reference Update / Info Provided), NOT in Customs / Compliance.
+// The resolveIssueId fork in issueRules.ts implements this at classifier level.
+
+describe('Customs / T1 / Portbase — provided vs requested', () => {
+
+  // ── Classifier-level: document PROVIDED → ref_provided ──────────
+
+  it('CLASSIFIER — "please find attached customs documents" → ref_provided, NOT customs', () => {
+    const result = classify('please find attached customs documents');
+    console.log([
+      '',
+      `Input: "please find attached customs documents"`,
+      `Object: ${result?.issueId ?? '(none)'}  State: ${result?.state ?? '(none)'}`,
+      `Result: ${result?.issueId === 'ref_provided' ? '✓ PASS' : `✗ FAIL — got ${result?.issueId}`}`,
+    ].join('\n  '));
+    expect(result?.issueId).toBe('ref_provided');
+  });
+
+  it('CLASSIFIER — "herewith customs docs" → ref_provided, NOT customs', () => {
+    const result = classify('herewith customs docs');
+    console.log([
+      '',
+      `Input: "herewith customs docs"`,
+      `Object: ${result?.issueId ?? '(none)'}  State: ${result?.state ?? '(none)'}`,
+      `Result: ${result?.issueId === 'ref_provided' ? '✓ PASS' : `✗ FAIL — got ${result?.issueId}`}`,
+    ].join('\n  '));
+    expect(result?.issueId).toBe('ref_provided');
+  });
+
+  it('CLASSIFIER — "attached MRN" → ref_provided, NOT customs', () => {
+    const result = classify('please see attached MRN for this shipment');
+    console.log([
+      '',
+      `Input: "please see attached MRN for this shipment"`,
+      `Object: ${result?.issueId ?? '(none)'}  State: ${result?.state ?? '(none)'}`,
+      `Result: ${result?.issueId === 'ref_provided' ? '✓ PASS' : `✗ FAIL — got ${result?.issueId}`}`,
+    ].join('\n  '));
+    expect(result?.issueId).toBe('ref_provided');
+  });
+
+  it('CLASSIFIER — "T1 document sent" → ref_provided, NOT t1', () => {
+    const result = classify('T1 document has been sent to you');
+    console.log([
+      '',
+      `Input: "T1 document has been sent to you"`,
+      `Object: ${result?.issueId ?? '(none)'}  State: ${result?.state ?? '(none)'}`,
+      `Result: ${result?.issueId === 'ref_provided' ? '✓ PASS' : `✗ FAIL — got ${result?.issueId}`}`,
+    ].join('\n  '));
+    expect(result?.issueId).toBe('ref_provided');
+  });
+
+  it('CLASSIFIER — "Portbase confirmed" → ref_provided, NOT portbase', () => {
+    const result = classify('Portbase confirmed for vessel arrival');
+    console.log([
+      '',
+      `Input: "Portbase confirmed for vessel arrival"`,
+      `Object: ${result?.issueId ?? '(none)'}  State: ${result?.state ?? '(none)'}`,
+      `Result: ${result?.issueId === 'ref_provided' ? '✓ PASS' : `✗ FAIL — got ${result?.issueId}`}`,
+    ].join('\n  '));
+    expect(result?.issueId).toBe('ref_provided');
+  });
+
+  it('CLASSIFIER — "Portbase has been updated" → ref_provided, NOT portbase', () => {
+    const result = classify('Portbase has been updated with the new arrival time');
+    console.log([
+      '',
+      `Input: "Portbase has been updated with the new arrival time"`,
+      `Object: ${result?.issueId ?? '(none)'}  State: ${result?.state ?? '(none)'}`,
+      `Result: ${result?.issueId === 'ref_provided' ? '✓ PASS' : `✗ FAIL — got ${result?.issueId}`}`,
+    ].join('\n  '));
+    expect(result?.issueId).toBe('ref_provided');
+  });
+
+  it('CLASSIFIER — "BL issued and sent" → ref_provided, NOT bl', () => {
+    const result = classify('Bill of lading has been sent to you as requested');
+    console.log([
+      '',
+      `Input: "Bill of lading has been sent to you as requested"`,
+      `Object: ${result?.issueId ?? '(none)'}  State: ${result?.state ?? '(none)'}`,
+      `Result: ${result?.issueId === 'ref_provided' ? '✓ PASS' : `✗ FAIL — got ${result?.issueId}`}`,
+    ].join('\n  '));
+    expect(result?.issueId).toBe('ref_provided');
+  });
+
+  // ── Classifier-level: document REQUESTED → correct compliance category ─────
+
+  it('CLASSIFIER — "customs documents missing" → customs, NOT ref_provided', () => {
+    const result = classify('customs documents missing — please send urgently');
+    console.log([
+      '',
+      `Input: "customs documents missing — please send urgently"`,
+      `Object: ${result?.issueId ?? '(none)'}  State: ${result?.state ?? '(none)'}`,
+      `Result: ${result?.issueId === 'customs' ? '✓ PASS' : `✗ FAIL — got ${result?.issueId}`}`,
+    ].join('\n  '));
+    expect(result?.issueId).toBe('customs');
+  });
+
+  it('CLASSIFIER — "please send MRN" → customs, NOT ref_provided', () => {
+    const result = classify('please send MRN — not received');
+    console.log([
+      '',
+      `Input: "please send MRN — not received"`,
+      `Object: ${result?.issueId ?? '(none)'}  State: ${result?.state ?? '(none)'}`,
+      `Result: ${result?.issueId === 'customs' ? '✓ PASS' : `✗ FAIL — got ${result?.issueId}`}`,
+    ].join('\n  '));
+    expect(result?.issueId).toBe('customs');
+  });
+
+  it('CLASSIFIER — "T1 missing" → t1, NOT ref_provided', () => {
+    const result = classify('T1 missing — transit document not received');
+    console.log([
+      '',
+      `Input: "T1 missing — transit document not received"`,
+      `Object: ${result?.issueId ?? '(none)'}  State: ${result?.state ?? '(none)'}`,
+      `Result: ${result?.issueId === 't1' ? '✓ PASS' : `✗ FAIL — got ${result?.issueId}`}`,
+    ].join('\n  '));
+    expect(result?.issueId).toBe('t1');
+  });
+
+  it('CLASSIFIER — "Portbase release missing" → portbase, NOT ref_provided', () => {
+    const result = classify('Portbase release missing — please update');
+    console.log([
+      '',
+      `Input: "Portbase release missing — please update"`,
+      `Object: ${result?.issueId ?? '(none)'}  State: ${result?.state ?? '(none)'}`,
+      `Result: ${result?.issueId === 'portbase' ? '✓ PASS' : `✗ FAIL — got ${result?.issueId}`}`,
+    ].join('\n  '));
+    expect(result?.issueId).toBe('portbase');
+  });
+
+  it('CLASSIFIER — "BL not received" → bl, NOT ref_provided', () => {
+    const result = classify('bill of lading not received — please resend');
+    console.log([
+      '',
+      `Input: "bill of lading not received — please resend"`,
+      `Object: ${result?.issueId ?? '(none)'}  State: ${result?.state ?? '(none)'}`,
+      `Result: ${result?.issueId === 'bl' ? '✓ PASS' : `✗ FAIL — got ${result?.issueId}`}`,
+    ].join('\n  '));
+    expect(result?.issueId).toBe('bl');
+  });
+
+  // ── validateCustomsProvided helper ──────────────────────────────
+
+  it('validateCustomsProvided — "please find attached customs documents" → isContaminated', () => {
+    const result = validateCustomsProvided('customs', 'missing', 'please find attached customs documents');
+    console.log([
+      '',
+      `Input: customs / missing / "please find attached customs documents"`,
+      `isContaminated: ${result.isContaminated}  trigger: ${result.trigger}`,
+      `Result: ${result.isContaminated ? '✓ PASS' : '✗ FAIL'}`,
+    ].join('\n  '));
+    expect(result.isContaminated).toBe(true);
+  });
+
+  it('validateCustomsProvided — "MRN not received" → NOT contaminated', () => {
+    const result = validateCustomsProvided('customs', 'missing', 'MRN not received — please send urgently');
+    console.log([
+      '',
+      `Input: customs / missing / "MRN not received — please send urgently"`,
+      `isContaminated: ${result.isContaminated}`,
+      `Result: ${!result.isContaminated ? '✓ PASS' : '✗ FAIL'}`,
+    ].join('\n  '));
+    expect(result.isContaminated).toBe(false);
+  });
+
+  it('validateCustomsProvided — non-compliance issue → NOT contaminated (wrong topic)', () => {
+    const result = validateCustomsProvided('delay', 'delayed', 'please find attached customs documents');
+    console.log([
+      '',
+      `Input: delay / delayed / "please find attached customs documents"`,
+      `isContaminated: ${result.isContaminated}  (delay is not a compliance topic)`,
+      `Result: ${!result.isContaminated ? '✓ PASS' : '✗ FAIL'}`,
+    ].join('\n  '));
+    expect(result.isContaminated).toBe(false);
+  });
+
+  // ── Pipeline-level: full classifyCase confirms the fork works end-to-end ─────
+
+  it('PIPELINE — "herewith customs docs" → primaryIssue=ref_provided', () => {
+    const record = makeRecord({
+      subject: 'Customs Documents',
+      description: 'Please find herewith the customs documentation for container TCKU123.',
+    });
+    const result = classifyCase(record);
+    console.log([
+      '',
+      `Subject:     "${record.subject}"`,
+      `Description: "${record.description}"`,
+      `Primary issue: ${result.primaryIssue}`,
+      `Issue state:   ${result.issueState}`,
+      `Result: ${result.primaryIssue === 'ref_provided' ? '✓ PASS' : `✗ FAIL — got ${result.primaryIssue}`}`,
+    ].join('\n  '));
+    expect(result.primaryIssue).toBe('ref_provided');
+  });
+
+  it('PIPELINE — "MRN not received" → primaryIssue=customs', () => {
+    const record = makeRecord({
+      subject: 'MRN Missing',
+      description: 'MRN not received — please send the customs entry number for this shipment.',
+    });
+    const result = classifyCase(record);
+    console.log([
+      '',
+      `Subject:     "${record.subject}"`,
+      `Description: "${record.description}"`,
+      `Primary issue: ${result.primaryIssue}`,
+      `Issue state:   ${result.issueState}`,
+      `Result: ${result.primaryIssue === 'customs' ? '✓ PASS' : `✗ FAIL — got ${result.primaryIssue}`}`,
+    ].join('\n  '));
+    expect(result.primaryIssue).toBe('customs');
   });
 
 });

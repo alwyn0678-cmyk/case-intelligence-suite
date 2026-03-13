@@ -11,7 +11,7 @@ import type {
 import { buildForecast } from './forecast';
 import { isApprovedTransporter, isBlockedFromCustomerRole, isInternalISRLabel, isAllowedAreaLabel, validateOutputGuards, isPositiveCustomerCandidate } from '../config/referenceData';
 
-import { isLoadRefFalsePositive, detectsTransportOrder, validateCaseNumberPreservation, isSentenceFragment, validateDrilldownIntegrity } from './validators';
+import { isLoadRefFalsePositive, detectsTransportOrder, validateCaseNumberPreservation, isSentenceFragment, validateDrilldownIntegrity, validateCustomsProvided } from './validators';
 import {} from './textNormalization';
 
 const MAX_CHART_WEEKS = 16;
@@ -986,6 +986,27 @@ export function runAnalysis(
     if (loadRefIntelligence.totalMissing !== primaryLoadRefCount) {
       console.error(
         `[CIS validation] LOAD_REF_TOTAL_MISMATCH: loadRefIntelligence.totalMissing=${loadRefIntelligence.totalMissing} does not equal records with primaryIssue=load_ref (${primaryLoadRefCount}).`,
+      );
+    }
+
+    // ── Customs / Compliance document-provided contamination scan ──
+    // After the resolveIssueId fork in issueRules.ts, any record whose body
+    // shows a document-provision event (attached MRN, herewith customs docs,
+    // T1 sent, etc.) should be classified as ref_provided, NOT as
+    // customs/t1/portbase/bl. This scan surfaces any that slipped through.
+    const customsProvidedLeaks = records.filter(r =>
+      validateCustomsProvided(r.primaryIssue, r.issueState, r.description ?? '').isContaminated,
+    );
+    if (customsProvidedLeaks.length > 0) {
+      console.error(
+        `[CIS validation] CUSTOMS_PROVIDED_IN_COMPLIANCE: ${customsProvidedLeaks.length} case(s) classified as customs/t1/portbase/bl but body shows a document-provision event.`,
+        customsProvidedLeaks.map(r => ({
+          caseNumber:  r.case_number ?? '—',
+          primaryIssue: r.primaryIssue,
+          issueState:   r.issueState,
+          subject:     r.subject?.slice(0, 80) ?? '—',
+          descSnippet: r.description?.slice(0, 120) ?? '—',
+        })),
       );
     }
 

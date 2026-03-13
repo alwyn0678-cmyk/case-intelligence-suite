@@ -272,6 +272,64 @@ export function isSentenceFragment(text: string): boolean {
   return false;
 }
 
+// ─── Customs / Compliance Provided-State Validation ───────────────
+
+/**
+ * Document-provision patterns: phrases that indicate a customs/T1/Portbase/BL
+ * document IS BEING PROVIDED — not requested.
+ *
+ * If any of these appear in the description of a case whose primaryIssue is
+ * 'customs', 't1', 'portbase', or 'bl', the classification is wrong — the
+ * resolveIssueId fork in issueRules.ts should have mapped it to 'ref_provided'.
+ */
+export const CUSTOMS_PROVIDED_PATTERNS: RegExp[] = [
+  /\bplease\s+find\s+attached\b/i,
+  /\bherewith\b/i,
+  /\bhereby\b/i,
+  /\bcustoms\s+docs?\s+(attached|enclosed|herewith|sent|forwarded|below)\b/i,
+  /\b(attached|enclosed)\s+(mrn|t1|customs|b\/l|bl)\b/i,
+  /\b(mrn|t1|bl|b\/l|customs\s+docs?)\s+(attached|enclosed|sent|forwarded)\b/i,
+  /\bplease\s+see\s+attached\s+(mrn|t1|customs|bl)\b/i,
+  /\bfind\s+(below|attached)\s+(the\s+)?(mrn|t1|customs|bl)\b/i,
+];
+
+export interface CustomsProvidedResult {
+  /** True if the record shows a document-provision event but is classified as a compliance issue. */
+  isContaminated: boolean;
+  /** The pattern that triggered this, if any. */
+  trigger: string | null;
+}
+
+/**
+ * Returns true when a case classified as customs/t1/portbase/bl has a body
+ * that shows the document was PROVIDED — meaning resolveIssueId should have
+ * forked it to ref_provided.
+ *
+ * @example
+ * validateCustomsProvided('customs', 'missing', 'Please find attached customs documents')
+ * // → { isContaminated: true, trigger: 'please find attached' }
+ *
+ * validateCustomsProvided('customs', 'missing', 'MRN not received — please send')
+ * // → { isContaminated: false, trigger: null }
+ */
+export function validateCustomsProvided(
+  primaryIssue: string,
+  issueState: string,
+  description: string,
+): CustomsProvidedResult {
+  const COMPLIANCE_TOPICS = new Set(['customs', 't1', 'portbase', 'bl']);
+  if (!COMPLIANCE_TOPICS.has(primaryIssue)) return { isContaminated: false, trigger: null };
+  if (issueState === 'provided') return { isContaminated: false, trigger: null }; // already correct
+  if (!description || description.trim().length <= 10) return { isContaminated: false, trigger: null };
+
+  for (const p of CUSTOMS_PROVIDED_PATTERNS) {
+    if (p.test(description)) {
+      return { isContaminated: true, trigger: p.source };
+    }
+  }
+  return { isContaminated: false, trigger: null };
+}
+
 // ─── Hotspot Label Validation ─────────────────────────────────────
 
 import { isAllowedAreaLabel } from '../config/referenceData';

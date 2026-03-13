@@ -88,6 +88,14 @@ const PROVIDED_SIGNALS = [
   'has been provided', 'was provided', 'already provided',
   'has been sent', 'was sent', 'already sent',
   'resolved',
+  // Completion/status signals — document/system has been updated or cleared.
+  // Used to catch "Portbase updated", "portbase ok", "portbase cleared" etc.
+  // Short-form but specific enough to be safe within a per-topic context window.
+  'has been updated', 'was updated', 'is updated', 'now updated',
+  'has been cleared', 'was cleared', 'is cleared', 'now cleared',
+  'all ok', 'is ok', 'now ok',
+  'is complete', 'has been completed', 'now complete',
+  'is done', 'has been done',
 ];
 
 // "AMENDED" signals — a correction or update is being made
@@ -219,8 +227,8 @@ const TOPIC_RULES: TopicRule[] = [
       // Note: 'transport order' intentionally excluded — it is a document (see transport_order topic)
     ],
     weakSignals: [
-      // Explicit "correct/updated ref" phrases — indicate a reference is being supplied
-      // (state=amended → resolveIssueId produces ref_provided).
+      // Explicit "correct/updated ref" phrases — indicate a reference is being supplied.
+      // Note: for load_ref, state=amended stays as load_ref; ref_provided only triggers on provided/informational.
       'correct ref', 'corrected ref', 'updated ref', 'update ref',
       // Booking reference terminology — weak so planning emails with "booking reference"
       // don't beat a closing_time or capacity topic that fires at strong (0.85).
@@ -265,6 +273,8 @@ const TOPIC_RULES: TopicRule[] = [
       'customs hold', 'customs delay', 'customs release', 'customs check',
       'customs inspection', 'customs exam', 'import declaration',
       'export declaration', 'mrn', 'customs entry', 'customs documents',
+      // Short-form aliases used in operational emails
+      'customs docs', 'customs doc', 'customs documentation',
       'customs paperwork', 'customs broker', 'clearing agent', 'customs agent',
       'eur1', 'certificate of origin', 'phytosanitary', 'health cert',
       'import license', 'export license', 'commercial invoice',
@@ -524,11 +534,41 @@ const TOPIC_RULES: TopicRule[] = [
 ];
 
 // ─── Resolve final issueId based on topic + state ──────────────────
-// The "ref_provided" category distinguishes "load ref was given" from "load ref is missing".
-// transport_order stays as transport_order regardless of state — the state
-// (missing/provided) is captured in issueState but the taxonomy id doesn't fork.
+//
+// DOCUMENT-PROVISION FORK (critical for Customs / Compliance accuracy):
+//
+// For document/reference topics (load_ref, customs, t1, portbase, bl),
+// if the email body shows that a document IS BEING PROVIDED (not requested),
+// the case belongs in "Reference Update / Info Provided" — NOT in the
+// compliance/missing section.
+//
+// Examples of state=provided that fork away from Customs/Compliance:
+//   "please find attached customs documents"  → ref_provided ✓
+//   "herewith customs docs"                   → ref_provided ✓
+//   "attached MRN"                            → ref_provided ✓
+//   "T1 document sent"                        → ref_provided ✓
+//   "Portbase confirmed"                      → ref_provided ✓
+//   "BL issued"                               → ref_provided ✓
+//
+// Examples of state=missing that stay in compliance:
+//   "customs documents missing"               → customs ✓
+//   "please send MRN"                         → customs ✓
+//   "T1 not received"                         → t1 ✓
+//   "Portbase release missing"                → portbase ✓
+//   "BL not received"                         → bl ✓
+//
+// transport_order stays as transport_order regardless of state —
+// the state (missing/provided) is captured in issueState only.
+const DOC_TOPICS = new Set(['load_ref', 'customs', 't1', 'portbase', 'bl']);
+
 function resolveIssueId(topic: string, state: IssueState): string {
-  if (topic === 'load_ref' && (state === 'provided' || state === 'informational' || state === 'amended')) {
+  if (state === 'provided' || state === 'informational') {
+    if (DOC_TOPICS.has(topic)) return 'ref_provided';
+  }
+  // For load_ref only: state=amended means a corrected ref is being supplied → ref_provided.
+  // For other doc topics (customs/t1/portbase/bl), amended means a correction is requested,
+  // which is still a compliance issue — do NOT fork to ref_provided.
+  if (topic === 'load_ref' && state === 'amended') {
     return 'ref_provided';
   }
   return topic;
