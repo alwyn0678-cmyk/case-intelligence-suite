@@ -435,6 +435,14 @@ TAXONOMY: list[dict] = [
         "color": "#8bb9c9",
     },
     {
+        "id": "ref_provided",
+        "label": "Reference Update / Info Provided",
+        "keywords": [],
+        "hours": 0.25,
+        "preventable": False,
+        "color": "#6fc3a0",
+    },
+    {
         "id": "other",
         "label": "Other / Unclassified",
         "keywords": [],
@@ -806,36 +814,771 @@ def _resolve_zip_to_area(raw_zip: str, context: str = "") -> str | None:
     return None
 
 
-LOAD_REF_MISSING_PHRASES = [
-    "please provide load ref", "please send load ref", "load ref missing",
-    "load ref not received", "no load ref", "missing load ref", "load ref required",
-    "load ref needed", "please provide reference", "reference missing",
-    "no reference provided", "reference not provided", "reference not received",
-    "please provide booking", "booking missing", "no booking ref",
-    "booking number missing", "booking not received", "please send reference",
-    "ref not provided", "ref missing", "no ref", "without reference",
-    "without load ref", "without booking", "ref not available",
+# ─────────────────────────────────────────────────────────────────
+# INTENT-AWARE CLASSIFICATION ENGINE
+# Ported from src/lib/issueRules.ts + fallbackIssueRules.ts
+# ─────────────────────────────────────────────────────────────────
+
+STRONG_SIGNAL_CONFIDENCE = 0.85
+WEAK_SIGNAL_CONFIDENCE   = 0.55
+STATE_DETECTION_BONUS    = 0.10
+MAX_CONFIDENCE           = 0.98
+CONTEXT_WINDOW_BEFORE    = 120
+CONTEXT_WINDOW_AFTER     = 160
+
+# ── Intent phrase lists ────────────────────────────────────────────
+_MISSING_SIGNALS = [
+    'please provide', 'please send', 'please share', 'please forward',
+    'please supply', 'kindly provide', 'kindly send',
+    'please add', 'please include', 'kindly add',
+    'can you send', 'can you provide', 'can you share', 'can you advise',
+    'please advise', 'please let us know', 'could you please', 'could you advise',
+    'we need', 'we require', 'we are waiting', 'still waiting',
+    'not received', 'not provided', 'not yet received', 'not yet sent',
+    'not available', 'not found', 'not in', 'not attached',
+    'missing', 'absent', 'no ',
+    'without ', 'lack of', 'lacking',
+    'needed', 'required', 'request for', 'requesting',
+    "haven't received", 'have not received', 'did not receive',
+    "hasn't been", 'has not been',
+    'urgent', 'asap', 'as soon as possible',
+]
+_PROVIDED_SIGNALS = [
+    'see below', 'find below', 'please find below',
+    'find attached', 'please find attached', 'see attached',
+    'as requested', 'as per your request', 'as per request',
+    'herewith', 'hereby', 'please find herewith',
+    'attached', 'enclosed', 'sending', 'sent', 'forwarded',
+    'here is', 'here are', 'find enclosed',
+    'providing', 'supplied', 'sharing',
+    'please see', 'see below for', 'details below',
+    'confirmed', 'confirmation', 'done', 'completed',
+    'ref no ', 'ref no.', 'reference no ', 'reference no.',
+    'ref: ', 'loadref: ', 'load ref: ',
+    'ref #', 'reference #',
+    'has been provided', 'was provided', 'already provided',
+    'has been sent', 'was sent', 'already sent',
+    'resolved',
+    'has been updated', 'was updated', 'is updated', 'now updated',
+    'has been cleared', 'was cleared', 'is cleared', 'now cleared',
+    'all ok', 'is ok', 'now ok',
+    'is complete', 'has been completed', 'now complete',
+    'is done', 'has been done',
+]
+_AMENDED_SIGNALS = [
+    'please correct', 'please update', 'please amend', 'please change',
+    'please revise', 'please modify',
+    'correction', 'correction needed', 'needs to be corrected',
+    'updated to', 'revised', 'amended', 'corrected', 'modified',
+    'wrong', 'incorrect', 'error in', 'mistake in',
+    'should be', 'instead of', 'replace with', 'change from',
+    'update required', 'needs updating',
+    'cancelled', 'cancellation', 'cancel booking', 'cancelling',
+]
+_DELAYED_SIGNALS = [
+    'still waiting', 'still not', 'not yet', 'overdue',
+    'late', 'delayed', 'behind schedule', 'passed eta',
+    'expected yesterday', 'expected today', 'should have arrived',
+    'should have been', 'was due', 'was expected',
+    'not arrived', 'not collected', 'not delivered',
+    'driver late', 'truck late', 'vehicle late',
+    'running late', 'chasing', 'following up', 'follow up',
+]
+_ESCALATED_SIGNALS = [
+    'escalate', 'escalating', 'escalation',
+    'complaint', 'complaining', 'complain',
+    'unhappy', 'dissatisfied', 'frustrated',
+    'management', 'director', 'senior',
+    'unacceptable', 'not acceptable', 'very urgent',
+    'extremely urgent', 'highest priority',
+]
+_INFORMATIONAL_SIGNALS = [
+    'for your information', 'fyi', 'for your records', 'for your reference',
+    'please note', 'just to let you know', 'informing you',
+    'confirming that', 'to confirm', 'update on', 'status update',
+    'please be advised', 'advising', 'notifying',
+    'no action required', 'no action needed', 'no further action',
+]
+_NEGATION_GUARD = [
+    'not provided', 'not received', 'not yet received', 'not yet sent',
+    'not attached', 'not available', 'not found', 'not yet',
+    'has not been', 'have not', "hasn't been", 'did not receive',
+    'cannot', 'not confirmed', 'not issued', 'not in system',
 ]
 
-PROVIDED_REF_PHRASES = [
-    "load ref is", "load ref:", "load ref -", "load ref–",
-    "booking ref is", "booking ref:", "bkg:", "bkg is",
-    "reference is", "ref is", "ref:", "ref no:", "ref no is",
-    "please find", "please see", "please find below", "hereby",
-    "find attached", "attached is", "as requested", "as discussed",
-    "please note", "for your information", "fyi",
-    "please be informed", "please be advised",
+def _detect_state_windowed(window: str) -> str:
+    """Detect issue state from a per-topic context window (with negation guard)."""
+    t = window.lower()
+    has_negation = any(p in t for p in _NEGATION_GUARD)
+
+    if any(p in t for p in _ESCALATED_SIGNALS):   return 'escalated'
+    if any(p in t for p in _AMENDED_SIGNALS):      return 'amended'
+    if not has_negation:
+        if any(p in t for p in _PROVIDED_SIGNALS): return 'provided'
+    if any(p in t for p in _MISSING_SIGNALS):      return 'missing'
+    if has_negation:                                return 'missing'
+    if any(p in t for p in _DELAYED_SIGNALS):      return 'delayed'
+    if any(p in t for p in _INFORMATIONAL_SIGNALS):return 'informational'
+    return 'unknown'
+
+# Document topics that fork to ref_provided when state=provided
+_DOC_TOPICS = {'load_ref', 'customs', 't1', 'portbase', 'bl'}
+
+def _resolve_issue_id(topic: str, state: str) -> str:
+    if state == 'provided' and topic in _DOC_TOPICS:
+        return 'ref_provided'
+    if topic == 'load_ref' and state in ('informational', 'amended'):
+        return 'ref_provided'
+    return topic
+
+# ── Topic rules (ported from TOPIC_RULES in issueRules.ts) ────────
+_TOPIC_RULES: list[dict] = [
+    {
+        'topic': 'load_ref',
+        'strong': [
+            'load ref', 'loadref', 'load reference',
+            'missing load ref', 'missing load reference', 'please provide load ref',
+            'please send load ref', 'load ref still missing', 'no load ref received',
+            'load reference not provided', 'please send the loadref', 'please send loadref',
+            'loadref missing', 'release ref missing', 'missing release reference',
+            'please provide release ref', 'loading reference missing',
+            'ref required for loading', 'load ref not received', 'load ref not provided',
+            'load ref required', 'loadref required', 'no loadref', 'no load reference',
+            # Dutch
+            'laadreferentie ontbreekt', 'loadref ontbreekt', 'graag loadref sturen',
+            'graag laadreferentie sturen', 'loadref nog niet ontvangen',
+            'laadreferentie niet ontvangen', 'graag de loadref', 'loadref nog niet',
+            'laadreferentie nog niet',
+            # German
+            'ladereferenz fehlt', 'lade referenz fehlt', 'bitte ladereferenz senden',
+            'referenz fehlt', 'ladereferenz nicht erhalten', 'ladereferenz benoetigt',
+            'fehlende ladereferenz',
+            # Informal
+            'driver needs load ref', 'ref required for pickup',
+            'chauffeur heeft referentie nodig', 'fahrer braucht referenz',
+        ],
+        'weak': [
+            'correct ref', 'corrected ref', 'updated ref', 'update ref',
+            'booking ref', 'booking reference',
+            'booking number', 'reference number', 'ref number', 'ref no',
+            'order reference', 'order number', 'po number', 'purchase order',
+            'job reference', 'job number', 'shipment reference', 'shipment ref',
+            'consignment number', 'consignment ref', 'load number',
+            'ref missing', 'no reference provided', 'without load reference',
+            'missing reference', 'ref not received', 'ref not provided',
+            'load number missing',
+        ],
+    },
+    {
+        'topic': 'transport_order',
+        'strong': [
+            'transport order', 'transport instruction', 'haulier order', 'haulier instruction',
+            'transport booking order', 'driver order', 'driver instruction',
+            'missing transport order', 'transport order missing', 'transport order not received',
+            'transport order required', 'please send transport order', 'send transport order',
+            'send us the transport order', 'no transport order', 'transport order not issued',
+            'work order', 'workorder', 'work-order',
+            'work order missing', 'missing work order', 'work order not received',
+            'work order required', 'please send work order', 'no work order',
+            # Dutch/German
+            'transportorder', 'transport opdracht', 'transportopdracht',
+            'graag transportopdracht sturen', 'transportorder ontbreekt',
+            'transportauftrag', 'transportauftrag fehlt', 'bitte transportauftrag senden',
+            'fahrauftrag', 'fahrauftrag fehlt',
+        ],
+        'weak': ['tro', 'carrier instruction', 'carrier order', 'transport confirmation',
+                 'haulage instruction', 'movement order'],
+    },
+    {
+        'topic': 'customs',
+        'strong': [
+            'customs', 'douane', 'zoll', 'customs clearance',
+            'customs hold', 'customs delay', 'customs release', 'customs check',
+            'customs inspection', 'customs exam', 'import declaration',
+            'export declaration', 'mrn', 'customs entry', 'customs documents',
+            'customs docs', 'customs doc', 'customs documentation', 'customs paperwork',
+            'customs broker', 'clearing agent', 'customs agent',
+            'eur1', 'certificate of origin', 'phytosanitary', 'health cert',
+            'import license', 'export license',
+            'hs code', 'tariff code', 'commodity code', 'eori',
+            'import duty', 'export duty', 'ata carnet', 'bonded warehouse',
+            'customs documents missing', 'no customs documents received',
+            'please provide customs documents', 'please send customs documents',
+            'missing customs documents', 'customs docs missing', 'mrn missing',
+            'missing mrn', 'cannot proceed without mrn', 'mrn not received',
+            'mrn not provided', 'mrn required', 'need mrn', 'require mrn',
+            'portbase customs missing', 'portbase customs docs missing',
+            # Dutch
+            'douane documenten ontbreken', 'douane documenten niet ontvangen',
+            'graag douane documenten sturen', 'mrn ontbreekt',
+            'douanedocumenten ontbreken', 'douanepapieren ontbreken',
+            # German
+            'zolldokumente fehlen', 'zollpapiere fehlen',
+            'bitte zollpapiere senden', 'mrn fehlt',
+        ],
+        'weak': [
+            'duty',
+            'missing documents', 'documents missing', 'documentation missing',
+            'documents not received', 'packing list missing',
+            'certificate missing', 'compliance documents', 'regulatory documents',
+        ],
+    },
+    {
+        'topic': 't1',
+        'strong': [
+            't1 document', 'transit document', 'community transit',
+            'transit declaration', 'transit entry', 't1 missing', 't1 error',
+            'transit pass', 'ncts', 'transit guarantee', 'transit bond',
+            'transit closure', 'transit rejection', 'procedure 7100',
+            'transit not closed', 'transit open', 'customs transit',
+            'please send t1', 'missing t1', 't1 still missing', 't1 not received',
+            't1 not provided', 'driver needs t1', 'cannot proceed without t1',
+            't1 document missing', 'need t1', 'require t1',
+            # Dutch/German
+            't1 ontbreekt', 'graag t1 sturen', 't1 nog niet ontvangen',
+            't1 niet ontvangen', 'graag de t1', 't1 document ontbreekt',
+            't1 fehlt', 'bitte t1 senden', 't1 nicht erhalten',
+            't1 dokument fehlt', 't1 benoetigt',
+        ],
+        'weak': ['t1', 't2', 'transit procedure', 'transit mrn',
+                 'transit movement', 'transit status', 'in transit'],
+    },
+    {
+        'topic': 'delay',
+        'strong': [
+            'delayed', 'not on time', 'late arrival', 'late delivery',
+            'missed eta', 'overdue', 'behind schedule', 'no show',
+            'not arrived', 'late collection', 'not collected', 'not delivered',
+            'running late', 'past eta', 'missed appointment',
+            'driver late', 'driver delayed', 'vehicle delayed', 'truck delayed',
+            'not on-time', 'failed delivery', 'failed collection',
+            'missed time slot', 'delivery window missed',
+            'hasn\'t arrived', 'have not arrived', 'still not here',
+            'not yet delivered', 'not yet collected', 'driver no show',
+        ],
+        'weak': [
+            'delay', 'late', 'still waiting', 'expected today', 'expected yesterday',
+            'where is my', 'not yet arrived', 'postponed', 'rescheduled',
+            'held up', 'stuck', 'on hold',
+        ],
+    },
+    {
+        'topic': 'closing_time',
+        'strong': [
+            'cutoff', 'cut-off', 'cut off', 'closing time', 'closing deadline',
+            'missed cutoff', 'after cutoff', 'vgm deadline', 'vgm cutoff',
+            'gate cutoff', 'gate cut off', 'terminal cutoff', 'missed closing',
+            'missed vessel', 'missed ship', 'missed sailing', 'missed departure',
+            'missed loading', 'sailed without', 'vessel already departed',
+            'too late for vessel',
+        ],
+        'weak': [
+            'deadline', 'closing', 'gate closed', 'terminal closed', 'vessel cutoff',
+            'departure cutoff', 'submission deadline', 'filing deadline', 'vgm',
+        ],
+    },
+    {
+        'topic': 'amendment',
+        'strong': [
+            'amendment', 'booking amendment', 'booking change',
+            'address correction', 'wrong address', 'incorrect address',
+            'consignee change', 'shipper change', 'wrong weight',
+            'incorrect weight', 'wrong volume', 'wrong dimensions',
+            'wrong description', 'incorrect description', 'wrong consignee',
+            'wrong shipper', 'wrong port', 'wrong destination',
+            'routing change', 'please correct', 'please amend',
+            'please update the booking', 'rebook', 're-book',
+            'booking cancelled', 'booking cancellation', 'cancel booking',
+            'order cancelled', 'shipment cancelled', 'transport cancelled',
+            'loading cancelled', 'pickup cancelled', 'delivery cancelled',
+            'schedule adjustment', 'correction to planning', 'delivery change',
+            'routing update', 'operational correction', 'amend booking',
+            # Dutch/German
+            'boeking wijziging', 'boekingswijziging', 'correctie op boeking',
+            'buchungsänderung', 'buchungskorrektur', 'änderung der buchung',
+        ],
+        'weak': [
+            'correction', 'amend', 'change request', 'modification',
+            'update booking', 'rate correction', 'wrong details',
+            'incorrect details', 'booking error', 'booking mistake',
+            'please update', 'needs updating',
+        ],
+    },
+    {
+        'topic': 'waiting_time',
+        'strong': [
+            'waiting time', 'demurrage', 'detention', 'wait time',
+            'waiting costs', 'standing time', 'free time exceeded',
+            'container detention', 'chassis detention', 'demurrage charge',
+            'detention charge', 'free period exceeded', 'storage charge',
+            'quay rent', 'extra storage days', 'storage days exceeded',
+        ],
+        'weak': [
+            'waiting at terminal', 'waiting at port', 'waiting at depot',
+            'long wait', 'extended wait', 'idle time', 'congestion',
+            'port congestion', 'terminal congestion', 'queue', 'queuing',
+            'waiting to load', 'waiting to unload',
+        ],
+    },
+    {
+        'topic': 'equipment_release',
+        'strong': [
+            'release order', 'pin code', 'pickup authorisation',
+            'release pin', 'delivery order', 'pin not received',
+            'pin not working', 'pin expired', 'pin invalid',
+            'accepted at terminal', 'terminal acceptance',
+            'terminal release', 'gate out', 'container release',
+            'cargo release', 'release not received',
+        ],
+        'weak': [
+            'release', 'acceptance', 'cannot pick up', 'cannot collect',
+            'collection rejected', 'gate refused',
+        ],
+    },
+    {
+        'topic': 'equipment',
+        'strong': [
+            'reefer failure', 'temperature deviation', 'temperature alarm',
+            'temperature exceedance', 'cold chain failure', 'genset failure',
+            'container damage', 'trailer damage', 'broken seal',
+            'seal missing', 'seal discrepancy', 'faulty unit',
+            'defective container', 'container unavailable', 'equipment shortage',
+            'truck breakdown', 'vehicle breakdown', 'mechanical failure',
+            'portable not ok', 'portable not in order', 'portable not acceptable',
+            'equipment not ok', 'equipment not in order', 'equipment not acceptable',
+            'unit not ok', 'unit not in order', 'unit not acceptable',
+            'container not ok', 'container not in order', 'container not acceptable',
+            'trailer not ok', 'not roadworthy', 'unit defective', 'unit damaged',
+            'equipment defect', 'equipment failure', 'equipment fault',
+            'container defect', 'container fault', 'trailer defect', 'trailer fault',
+            # Dutch/German
+            'container beschadigd', 'container niet ok', 'container defect',
+            'reefer defect', 'container beschaedigt', 'container defekt', 'reefer defekt',
+        ],
+        'weak': [
+            'equipment issue', 'container not available', 'no container',
+            'reefer', 'seal broken', 'flat tyre', 'tyre issue',
+            'wrong container type', 'wrong equipment type',
+        ],
+    },
+    {
+        'topic': 'tracking',
+        'strong': [
+            'where is my', 'where are my', 'shipment status', 'track and trace',
+            'proof of delivery', 'pod not received', 'pod missing',
+            'delivery confirmation', 'delivery proof', 'signed delivery',
+            'eta update', 'current eta', 'revised eta', 'expected arrival',
+        ],
+        'weak': [
+            'tracking', 'where is', 'status update', 'no update',
+            'visibility', 'no tracking', 'not visible', 'no information',
+            'whereabouts', 'location query', 'eta', 'pod',
+        ],
+    },
+    {
+        'topic': 'communication',
+        'strong': [
+            'no response', 'no reply', 'not answered', 'unanswered',
+            'cannot reach', 'not reachable', 'unresponsive',
+            'poor communication', 'no feedback', 'lack of response',
+            'urgent escalation', 'service complaint', 'service failure',
+        ],
+        'weak': [
+            'escalation', 'complaint', 'dissatisfied', 'follow-up', 'follow up',
+            'no contact', 'not informed', 'not notified', 'no notification',
+            'chasing', 'second reminder', 'third reminder', 'as per my previous',
+        ],
+    },
+    {
+        'topic': 'portbase',
+        'strong': [
+            'portbase', 'port notification', 'pre-notification', 'port clearance',
+            'pcs message', 'ata notification', 'atd notification',
+            'pre arrival notification', 'port entry rejected',
+            'arrival notification', 'departure notification',
+            'portbase customs missing', 'portbase customs docs missing',
+        ],
+        'weak': [
+            'port system', 'terminal notification', 'port pre-arrival',
+            'vessel notification', 'port admin', 'port documentation',
+            'port registration', 'port permit', 'berth notification',
+        ],
+    },
+    {
+        'topic': 'bl',
+        'strong': [
+            'bill of lading', 'b/l', 'sea waybill', 'original bl',
+            'telex release', 'surrender bl', 'express bl',
+            'bl correction', 'bl amendment', 'bl not received',
+            'bl missing', 'hbl', 'mbl', 'house bl', 'master bl',
+            'bl release', 'bl not available', 'bl draft',
+            'bl copy', 'bl no', 'bl number', 'bl original', 'bl required',
+            'please send bl', 'original bl required',
+            # Dutch/German
+            'cognossement', 'zee vrachtbrief', 'konnossement', 'seefrachtbrief',
+        ],
+        'weak': [
+            'lading', 'bl error', 'bl incorrect', 'bl discrepancy',
+            'waybill', 'cmr note', 'consignment note',
+            'shipping document', 'cargo release', 'original documents',
+            'original required',
+        ],
+    },
+    {
+        'topic': 'rate',
+        'strong': [
+            'rate query', 'rate dispute', 'invoice query', 'overcharge',
+            'billing query', 'charge dispute', 'incorrect invoice',
+            'rate discrepancy', 'invoice incorrect', 'wrong invoice',
+            'invoice dispute', 'overcharged', 'undercharged', 'charge query',
+            'selfbilling', 'self billing', 'self-billing', 'selfbill', 'self bill',
+            'dch invoice', 'dch billing', 'dch report', 'dch cost',
+            'extra cost invoice', 'extra costs invoice', 'extra costs report',
+            'extra cost report', 'extrakostenrechnung',
+            'extra kosten rapport', 'meerkosten rapport',
+            'additional cost invoice', 'additional costs invoice',
+            'billing report', 'billing issue', 'billing error', 'billing dispute',
+            'cost invoice', 'waiting cost invoice', 'waiting costs invoice',
+            'demurrage invoice', 'detention invoice', 'storage invoice',
+            'credit note', 'credit memo', 'debit note', 'debit memo',
+            'invoice not received', 'invoice missing', 'invoice outstanding',
+            'commercial invoice query', 'commercial invoice dispute',
+            'price correction', 'price adjustment', 'rate correction',
+            'wrong rate applied', 'incorrect rate applied', 'corrected invoice', 'invoice correction',
+            'purchase order', 'po number', 'po no',
+            # Dutch/German
+            'inkooporder', 'bestelnummer', 'bestellnummer',
+            'po bedrag fout', 'po verschil', 'po abweichung',
+            'storage cost', 'storage costs', 'waiting time charges',
+            'waiting time invoice', 'waiting costs invoice',
+            'opslagkosten', 'wachttijd kosten', 'lagerkosten', 'wartezeit kosten',
+        ],
+        'weak': [
+            ' rate ', 'rate query', 'rate dispute', 'rate correction', 'rate discrepancy',
+            'wrong rate', 'freight rate', 'rate inquiry',
+            'pricing', 'surcharge', 'quotation',
+            'tariff', 'refund request', 'payment dispute',
+            'invoice', 'billing', 'extra cost', 'extra costs', 'additional charge',
+            'cost report',
+        ],
+    },
+    {
+        'topic': 'damage',
+        'strong': [
+            'cargo loss', 'lost cargo', 'missing cargo', 'shortfall',
+            'cargo claim', 'theft reported', 'goods stolen',
+            'claim submitted', 'claim filed', 'insurance claim',
+            'delivery shortage', 'wrong goods delivered', 'quantity short',
+        ],
+        'weak': [
+            'damage', 'damaged', 'broken', 'contamination',
+            'missing goods', 'shortage', 'goods missing', 'pilferage',
+            'partial loss', 'total loss',
+        ],
+    },
+    {
+        'topic': 'scheduling',
+        'strong': [
+            'planning slot', 'time slot request', 'booking slot',
+            'terminal slot', 'depot slot', 'slot allocation',
+            'arrival window', 'collection window', 'delivery window',
+            'appointment request', 'appointment confirmation',
+            'pre-gate appointment',
+            # Dutch/German
+            'laadslot', 'afhaaltijd', 'levertijd', 'afhaaldatum', 'leverdatum',
+            'ladeslot', 'abholzeit', 'lieferzeit', 'abholtermin', 'liefertermin',
+        ],
+        'weak': [
+            'schedule', 'scheduling', 'allocation', 'slot',
+            'time window', 'appointment',
+        ],
+    },
+    {
+        'topic': 'pickup_delivery',
+        'strong': [
+            'pickup planning', 'delivery planning', 'collection planning',
+            'last-mile', 'last mile', 'home delivery', 'residential delivery',
+            'delivery address', 'pickup address', 'collection address',
+            'driver instruction', 'delivery instruction', 'access instruction',
+            # Dutch/German
+            'afhaal planning', 'lever planning', 'ophaalplanning',
+            'abholplanung', 'lieferplanung',
+        ],
+        'weak': [
+            'pickup', 'pick-up', 'pick up', 'delivery planning',
+            'collection planning', 'route planning',
+            'load date', 'loading date', 'loaddate', 'load day',
+            'please advise load', 'advise loading',
+        ],
+    },
+    {
+        'topic': 'capacity',
+        'strong': [
+            'no capacity', 'not feasible', 'no space available', 'fully booked',
+            'cannot accept this shipment', 'capacity not available', 'no slots available',
+            'capacity constraint', 'at capacity', 'overbooked',
+            'unable to accommodate', 'capacity limitation', 'capacity problem',
+            'maximum capacity', 'no room available', 'no slot available',
+        ],
+        'weak': [
+            'capacity', 'feasibility', 'feasible', 'no slots', 'no availability',
+            'cannot accommodate', 'overloaded', 'no space', 'overbooking',
+        ],
+    },
+    {
+        'topic': 'shipping_advice',
+        'strong': [
+            'shipping advice', 'shipment advice', 'departure notice', 'arrival notice',
+            'advice note', 'pre-advice', 'pre advice', 'shipping notice',
+            # Dutch/German
+            'aankomstbericht', 'vertrekbericht', 'laadbericht', 'losbericht',
+            'aankomst avis', 'vertrek avis', 'losavis',
+            'versandavis', 'eingangsavis', 'ausgangsavis', 'ladebericht', 'löschbericht',
+            'ankunftsavis', 'abgangsavis',
+        ],
+        'weak': [' avis ', 'notice'],
+    },
+    {
+        'topic': 'vgm',
+        'strong': [
+            'vgm', 'verified gross mass', 'weight note', 'weight certificate',
+            'gross mass', 'container weight', 'vgm declaration', 'vgm required',
+            'please send vgm', 'vgm missing', 'vgm not received',
+            # Dutch/German
+            'gewichtsnota', 'gewichtsverklaring', 'bruttogewicht', 'vgm ontbreekt',
+            'gewichtsnote', 'vgm fehlt', 'vgm nicht erhalten',
+        ],
+        'weak': ['weight', 'gewicht'],
+    },
+    {
+        'topic': 'seal',
+        'strong': [
+            'seal number', 'seal numbers', 'missing seal', 'new seal', 'seal request',
+            'seal broken', 'seal tampered', 'please provide seal', 'seal details',
+            'seal required', 'seal not provided', 'seal missing',
+            # Dutch/German
+            'zegel nummer', 'zegelnummer', 'zegel ontbreekt', 'nieuw zegel',
+            'zegel verbroken', 'graag zegel', 'zegel details',
+            'siegel nummer', 'siegelnummer', 'siegel fehlt', 'neues siegel',
+            'siegel gebrochen', 'bitte siegel', 'siegel details',
+        ],
+        'weak': ['zegel', 'siegel'],
+    },
+    {
+        'topic': 'dangerous_goods',
+        'strong': [
+            'dangerous goods', 'hazardous cargo', 'hazardous goods', 'hazmat',
+            'imo class', 'imo number', 'imo declaration', 'adr class', 'un number',
+            'un no', 'msds', 'sds sheet', 'safety data sheet', 'dg declaration',
+            'dgd', 'dangerous goods declaration',
+            # Dutch/German
+            'gevaarlijke stoffen', 'gevaarlijke goederen', 'imo klasse', 'adr klasse',
+            'veiligheidsblad', 'gefahrgut', 'gefährliche güter', 'gefahrstoff',
+            'sicherheitsdatenblatt',
+        ],
+        'weak': ['imo', 'adr', 'hazardous'],
+    },
 ]
 
-PLANNING_BLOCKLIST = [
-    "demurrage", "detention", "storage", "rate", "invoice", "billing",
-    "price", "pricing", "surcharge", "payment", "credit note",
-    "feasibility", "capacity", "availability", "slot request",
-    "is it possible", "can you", "can we",
+def _classify_by_rules(text: str) -> list[dict]:
+    """
+    Primary classifier: per-topic context-window intent detection.
+    Returns list of {issueId, state, confidence} sorted by confidence desc.
+    """
+    t = text.lower()
+    matches = []
+
+    for rule in _TOPIC_RULES:
+        base_conf = 0.0
+        first_pos = -1
+
+        for sig in rule['strong']:
+            pos = t.find(sig)
+            if pos != -1:
+                base_conf = max(base_conf, STRONG_SIGNAL_CONFIDENCE)
+                if first_pos == -1:
+                    first_pos = pos
+
+        if base_conf < STRONG_SIGNAL_CONFIDENCE:
+            for sig in rule['weak']:
+                pos = t.find(sig)
+                if pos != -1:
+                    base_conf = max(base_conf, WEAK_SIGNAL_CONFIDENCE)
+                    if first_pos == -1:
+                        first_pos = pos
+
+        if base_conf == 0 or first_pos == -1:
+            continue
+
+        # Per-topic context window (120 chars before, 160 after first match)
+        win_start = max(0, first_pos - CONTEXT_WINDOW_BEFORE)
+        win_end   = min(len(text), first_pos + CONTEXT_WINDOW_AFTER)
+        window    = text[win_start:win_end]
+
+        state = _detect_state_windowed(window)
+        conf  = min(base_conf + (STATE_DETECTION_BONUS if state != 'unknown' else 0), MAX_CONFIDENCE)
+        issue_id = _resolve_issue_id(rule['topic'], state)
+
+        matches.append({'issueId': issue_id, 'state': state, 'confidence': conf})
+
+    return sorted(matches, key=lambda m: m['confidence'], reverse=True)
+
+
+# ── Fallback regex rules (ported from fallbackIssueRules.ts) ──────
+_FALLBACK_RULES: list[dict] = [
+    # Delay / timing
+    {'issueId': 'delay',             'state': 'delayed',
+     'pattern': re.compile(r'\b(not yet|still not|hasn.t arrived|haven.t received|expected .{1,20} but|we are still)\b', re.I),
+     'confidence': 0.60},
+    {'issueId': 'delay',             'state': 'delayed',
+     'pattern': re.compile(r'\b(driver|truck|vehicle|courier|haulier)\b.{0,30}\b(not|late|missing|absent|didn.t|did not)\b', re.I),
+     'confidence': 0.65},
+    {'issueId': 'delay',             'state': 'delayed',
+     'pattern': re.compile(r'\b(collection|pickup|pick.up|delivery).{0,30}(not happened|didn.t happen|failed|missed|overdue)\b', re.I),
+     'confidence': 0.65},
+    # Missing document / customs
+    {'issueId': 'customs',           'state': 'missing',
+     'pattern': re.compile(r'\b(no|missing|without|not received|not provided).{0,25}(doc|cert|form|paper|letter|permit|licence|license)\b', re.I),
+     'confidence': 0.60},
+    {'issueId': 'customs',           'state': 'missing',
+     'pattern': re.compile(r'\b(document|paperwork|certificate|permit).{0,25}(missing|not|required|needed|wrong|incorrect|outstanding)\b', re.I),
+     'confidence': 0.60},
+    # Amendment / data correction
+    {'issueId': 'amendment',         'state': 'amended',
+     'pattern': re.compile(r'\b(wrong|incorrect|error|mistake|invalid).{0,25}(name|address|city|country|zip|postcode|weight|volume|quantity|number|code|date|port|routing)\b', re.I),
+     'confidence': 0.65},
+    {'issueId': 'amendment',         'state': 'amended',
+     'pattern': re.compile(r'\b(please|kindly|need to).{0,25}(update|correct|change|amend|modify|fix|revise)\b', re.I),
+     'confidence': 0.60},
+    # Load / booking reference
+    {'issueId': 'load_ref',          'state': 'missing',
+     'pattern': re.compile(r'\b(no|without|missing|not provided|not received).{0,20}(reference|ref|booking number|order number|po number|load number|job number)\b', re.I),
+     'confidence': 0.65},
+    {'issueId': 'ref_provided',      'state': 'provided',
+     'pattern': re.compile(r'\b(here is|find below|see below|as requested).{0,40}(reference|ref|booking number|order number|load number)\b', re.I),
+     'confidence': 0.65},
+    {'issueId': 'ref_provided',      'state': 'provided',
+     'pattern': re.compile(r'\b(?:load\s*ref(?:erence)?|booking\s*ref(?:erence)?|ref(?:erence)?)\s*(?:is|:|no\.?|#)\s*[A-Z0-9]{4,}', re.I),
+     'confidence': 0.70},
+    {'issueId': 'ref_provided',      'state': 'provided',
+     'pattern': re.compile(r'\b(?:load\s*ref(?:erence)?|booking\s*ref(?:erence)?|reference)\b.{0,40}\b(?:attached|sent|forwarded|provided|below|herewith)\b', re.I),
+     'confidence': 0.65},
+    # T1 / transit
+    {'issueId': 't1',                'state': 'missing',
+     'pattern': re.compile(r'\bt[12]\b.{0,30}(missing|not received|not provided|not issued|outstanding|required)\b', re.I),
+     'confidence': 0.65},
+    {'issueId': 't1',                'state': 'delayed',
+     'pattern': re.compile(r'\btransit.{0,20}(not closed|still open|not discharged|outstanding)\b', re.I),
+     'confidence': 0.65},
+    # Equipment release
+    {'issueId': 'equipment_release', 'state': 'missing',
+     'pattern': re.compile(r'\b(pin|release|acceptance).{0,25}(missing|not received|not working|expired|invalid|not issued)\b', re.I),
+     'confidence': 0.65},
+    {'issueId': 'equipment_release', 'state': 'provided',
+     'pattern': re.compile(r'\b(pin|release code|release order).{0,30}(find below|see below|here is|attached|sent)\b', re.I),
+     'confidence': 0.65},
+    # Rate / billing
+    {'issueId': 'rate',              'state': 'missing',
+     'pattern': re.compile(r'\b(selfbilling|self.billing|selfbill|self.bill)\b', re.I),
+     'confidence': 0.85},
+    {'issueId': 'rate',              'state': 'missing',
+     'pattern': re.compile(r'\bdch\s*(invoice|billing|report|cost)\b', re.I),
+     'confidence': 0.85},
+    {'issueId': 'rate',              'state': 'missing',
+     'pattern': re.compile(r'\bextra\s*costs?\s*invoice\b', re.I),
+     'confidence': 0.85},
+    {'issueId': 'rate',              'state': 'missing',
+     'pattern': re.compile(r'\b(demurrage|detention|storage)\s*invoice\b', re.I),
+     'confidence': 0.80},
+    {'issueId': 'rate',              'state': 'missing',
+     'pattern': re.compile(r'\b(credit|debit)\s*(note|memo)\b', re.I),
+     'confidence': 0.80},
+    {'issueId': 'rate',              'state': 'missing',
+     'pattern': re.compile(r'\b(invoice|billing|charge|cost|fee|price).{0,25}(query|wrong|issue|error|dispute|question|clarif)\b', re.I),
+     'confidence': 0.60},
+    {'issueId': 'rate',              'state': 'missing',
+     'pattern': re.compile(r'\b(charged|billed).{0,25}(too much|incorrectly|wrong amount|double)\b', re.I),
+     'confidence': 0.65},
+    # Tracking
+    {'issueId': 'tracking',          'state': 'missing',
+     'pattern': re.compile(r'\b(where|when).{0,35}(shipment|cargo|parcel|goods|container|delivery|truck|driver)\b', re.I),
+     'confidence': 0.60},
+    {'issueId': 'tracking',          'state': 'missing',
+     'pattern': re.compile(r'\b(no|without).{0,20}(tracking|trace|update|visibility|information|status|news)\b', re.I),
+     'confidence': 0.60},
+    # Communication
+    {'issueId': 'communication',     'state': 'escalated',
+     'pattern': re.compile(r'\b(no.one|nobody|no response|no reply|no answer|not respond|not reply|ignored|being ignored)\b', re.I),
+     'confidence': 0.65},
+    {'issueId': 'communication',     'state': 'escalated',
+     'pattern': re.compile(r'\b(complaint|dissatisfied|unhappy|frustrated|escalat|unacceptable)\b', re.I),
+     'confidence': 0.60},
+    # Damage
+    {'issueId': 'damage',            'state': 'missing',
+     'pattern': re.compile(r'\b(goods|cargo|parcel|items?|products?|packages?).{0,35}(broken|damaged|missing|lost|stolen|wet|short|shortage)\b', re.I),
+     'confidence': 0.65},
+    # Equipment defect
+    {'issueId': 'equipment',         'state': 'delayed',
+     'pattern': re.compile(r'\b(container|trailer|truck|vehicle|unit|reefer).{0,35}(broken|damaged|defective|unavailable|failure|fault|breakdown)\b', re.I),
+     'confidence': 0.60},
+    # Waiting time
+    {'issueId': 'waiting_time',      'state': 'delayed',
+     'pattern': re.compile(r'\b(waiting|waited|standing|idle).{0,25}(hours?|days?|long time|since|for)\b', re.I),
+     'confidence': 0.60},
+    # Closing time
+    {'issueId': 'closing_time',      'state': 'delayed',
+     'pattern': re.compile(r'\b(missed|after|past|beyond).{0,25}(cutoff|cut-off|deadline|closing|gate|vessel)\b', re.I),
+     'confidence': 0.65},
+    # Portbase
+    {'issueId': 'portbase',          'state': 'missing',
+     'pattern': re.compile(r'\b(pre.arriv|port notif|ata notif|pcs mess)\b', re.I),
+     'confidence': 0.60},
+    # Pickup / delivery planning
+    {'issueId': 'pickup_delivery',   'state': 'informational',
+     'pattern': re.compile(r'\b(plan|confirm|arrange).{0,25}(pickup|pick.up|collection|delivery)\b', re.I),
+     'confidence': 0.55},
+    # Scheduling
+    {'issueId': 'scheduling',        'state': 'missing',
+     'pattern': re.compile(r'\b(slot|time.slot|appointment).{0,25}(needed|required|missing|not confirmed|not allocated)\b', re.I),
+     'confidence': 0.55},
 ]
 
-DELAY_KEYWORDS = {"delay", "delayed", "not on time", "late", "overdue", "behind schedule",
-                  "eta missed", "running late", "late delivery", "late arrival"}
+def _fallback_classify(text: str) -> dict | None:
+    """Regex-based fallback. Returns best match or None."""
+    best: dict | None = None
+    for rule in _FALLBACK_RULES:
+        if rule['pattern'].search(text):
+            if not best or rule['confidence'] > best['confidence']:
+                best = {'issueId': rule['issueId'], 'state': rule['state'],
+                        'confidence': rule['confidence']}
+    return best
+
+_OPERATIONAL_CLUES = [
+    ('shipment',   'tracking',          'unknown'),
+    ('container',  'equipment',         'unknown'),
+    ('transport',  'delay',             'unknown'),
+    ('transit',    't1',                'unknown'),
+    ('customs',    'customs',           'unknown'),
+    ('document',   'customs',           'unknown'),
+    ('certificate','customs',           'unknown'),
+    ('invoice',    'rate',              'unknown'),
+    ('driver',     'delay',             'unknown'),
+    ('delivery',   'delay',             'unknown'),
+    ('collection', 'delay',             'unknown'),
+    ('amendment',  'amendment',         'amended'),
+    ('schedule',   'scheduling',        'unknown'),
+    ('slot',       'scheduling',        'unknown'),
+    ('release',    'equipment_release', 'unknown'),
+    ('damage',     'damage',            'unknown'),
+    ('complaint',  'communication',     'escalated'),
+]
+
+def _operational_clue_scan(text: str) -> dict | None:
+    t = text.lower()
+    for keyword, issue_id, state in _OPERATIONAL_CLUES:
+        if keyword in t:
+            return {'issueId': issue_id, 'state': state, 'confidence': 0.35}
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -876,140 +1619,51 @@ def _score_header(name: str) -> str | None:
     return None
 
 
-def _detect_issue(text_lower: str) -> str:
-    """Return taxonomy id for the best-matching issue, or 'other'."""
-    best_id = "other"
-    best_score = 0
-    for item in TAXONOMY:
-        if item["id"] == "other":
-            continue
-        score = 0
-        for kw in item["keywords"]:
-            if kw in text_lower:
-                score += len(kw)
-        if score > best_score:
-            best_score = score
-            best_id = item["id"]
-    return best_id
-
-
-def _detect_issue_weighted(description: str, subject: str, isr: str, category: str) -> str:
-    """Score each field with different weights; return best taxonomy match or 'other'."""
-    fields = [
-        (description.lower(), 3.0),
-        (subject.lower(), 2.0),
-        (isr.lower(), 1.5),
-        (category.lower(), 1.0),
-    ]
-    scores: dict[str, float] = {}
-    for item in TAXONOMY:
-        if item["id"] == "other":
-            continue
-        score = 0.0
-        for text, weight in fields:
-            for kw in item["keywords"]:
-                if kw in text:
-                    score += len(kw) * weight
-        if score > 0:
-            scores[item["id"]] = score
-    if not scores:
-        return "other"
-    return max(scores, key=lambda k: scores[k])
-
-
-def _recover_issue(combined: str) -> str:
-    """Broad recovery pass using RECOVERY_SIGNALS before assigning 'other'."""
-    for signals, issue_id in RECOVERY_SIGNALS:
-        for sig in signals:
-            if sig in combined:
-                return issue_id
-    return "other"
-
-
-def _detect_state(combined: str) -> str:
-    """Detect the issue state from combined text."""
-    if any(p in combined for p in ["missing", "not received", "not provided", "required",
-                                    "needed", "please provide", "please send"]):
-        return "missing"
-    if any(p in combined for p in ["provided", "attached", "please find", "hereby",
-                                    "as requested", "please see below", "find below"]):
-        return "provided"
-    if any(p in combined for p in ["amended", "corrected", "updated", "changed"]):
-        return "amended"
-    if any(p in combined for p in ["delay", "delayed", "overdue", "late", "not on time"]):
-        return "delayed"
-    if any(p in combined for p in ["escalat", "complaint", "unacceptable"]):
-        return "escalated"
-    if any(p in combined for p in ["for your information", "fyi", "please be informed",
-                                    "just to confirm"]):
-        return "informational"
-    return "unknown"
-
-
-def _classify_load_ref(combined: str) -> bool:
-    """Return True only if the case passes the strict missing-load-ref gate."""
-    low = combined.lower()
-    # Explicit missing phrase → accept
-    for phrase in LOAD_REF_MISSING_PHRASES:
-        if phrase in low:
-            return True
-    # Planning blocklist → reject
-    for block in PLANNING_BLOCKLIST:
-        if block in low:
-            return False
-    # Loose proximity: "load ref" near request signal
-    if "load ref" in low or "loadref" in low:
-        request_signals = ["please", "missing", "no ", "not received", "required", "needed", "without"]
-        for sig in request_signals:
-            if sig in low:
-                return True
-    return False
-
-
-def _provided_ref(combined: str) -> bool:
-    low = combined.lower()
-    for phrase in PROVIDED_REF_PHRASES:
-        if phrase in low:
-            return True
-    return False
-
-
 def _classify_row(subject: str, description: str, isr: str, category: str) -> dict:
-    """Classify a single row. Returns primaryIssue, issueState, confidence."""
+    """
+    Classify a single row using the full intent-aware pipeline.
+    Mirrors the frontend classifyCase.ts pipeline exactly.
 
-    # 1. Direct category field mapping — highest confidence, bypasses scoring
+    Pipeline:
+    1. Direct CATEGORY_MAP lookup (highest confidence)
+    2. Primary rule-based classifier with per-topic context windows
+    3. Fallback regex rules
+    4. Operational clue scan (last resort)
+    5. other
+    """
+    # Build combined text: description is highest-weight source
+    # Prepend description so context windows hit description content first
+    combined = " ".join(filter(None, [description, subject, isr, category]))
+
+    # 1. Direct category field mapping — bypasses all scoring
     if category:
         cat_key = category.lower().strip()
         if cat_key in CATEGORY_MAP:
             mapped = CATEGORY_MAP[cat_key]
-            combined = " ".join(filter(None, [description, subject, isr])).lower()
-            state = _detect_state(combined)
+            state  = _detect_state_windowed(combined)
             return {"primaryIssue": mapped, "issueState": state, "confidence": 0.88}
 
-    combined = " ".join(filter(None, [description, subject, isr, category])).lower()
+    # 2. Primary rule-based classifier
+    matches = _classify_by_rules(combined)
+    if matches:
+        best = matches[0]
+        return {"primaryIssue": best['issueId'], "issueState": best['state'],
+                "confidence": best['confidence']}
 
-    # 2. Transport order wins over load_ref
-    for kw in ["transport order", "transport instruction", "haulier order", "tro "]:
-        if kw in combined:
-            state = _detect_state(combined)
-            return {"primaryIssue": "transport_order", "issueState": state, "confidence": 0.82}
+    # 3. Fallback regex rules
+    fb = _fallback_classify(combined)
+    if fb:
+        return {"primaryIssue": fb['issueId'], "issueState": fb['state'],
+                "confidence": fb['confidence']}
 
-    # 3. Strict load-ref gate
-    if _classify_load_ref(combined):
-        state = "provided" if _provided_ref(combined) else "missing"
-        return {"primaryIssue": "load_ref", "issueState": state, "confidence": 0.80}
+    # 4. Operational clue scan
+    clue = _operational_clue_scan(combined)
+    if clue:
+        return {"primaryIssue": clue['issueId'], "issueState": clue['state'],
+                "confidence": clue['confidence']}
 
-    # 4. Weighted multi-field scoring (description 3×, subject 2×, isr 1.5×, category 1×)
-    issue_id = _detect_issue_weighted(description, subject, isr, category)
-
-    # 5. Recovery pass — broad signals before giving up on "other"
-    if issue_id == "other":
-        issue_id = _recover_issue(combined)
-
-    state = _detect_state(combined)
-    confidence = 0.65 if issue_id != "other" else 0.30
-
-    return {"primaryIssue": issue_id, "issueState": state, "confidence": confidence}
+    # 5. Unclassified
+    return {"primaryIssue": "other", "issueState": "unknown", "confidence": 0.30}
 
 
 # ─────────────────────────────────────────────────────────────────
