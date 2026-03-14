@@ -2080,6 +2080,64 @@ _SUBJECT_ONLY_PENALTY    = 0.18
 _SUBJECT_ONLY_FLOOR      = 0.48
 _SUBSTANTIVE_DESC_MIN    = 30
 
+# ── Post-classification guard constants (mirrors classifyCase.ts guards) ──────
+
+_OPERATIONAL_CONTEXT_KEYWORDS: list[str] = [
+    'haulier', 'hauler', 'driver', 'truck', 'lorry', 'transporter', 'carrier',
+    'forwarder', 'freight forwarder', 'customs agent', 'customs broker',
+    'container', 'cntr', 'pickup', 'pick up', 'pick-up', 'delivery',
+    'collect', 'collection', 'loading', 'unloading', 'discharge',
+    'terminal', 'depot', 'warehouse', 'gate out', 'gate in',
+    'blocked', 'held', 'on hold', 'clearance', 'release', 'cargo',
+    'shipment', 'freight', 'transport order', 'movement',
+]
+
+_EQUIPMENT_OVERRIDE_SIGNALS: list[str] = [
+    'portable not ok', 'container damaged', 'damaged container',
+    'equipment issue', 'reefer issue', 'seal broken', 'container not ok',
+    'container defect', 'container beschadigd', 'container defekt',
+    'unit not ok', 'equipment not ok', 'trailer not ok',
+]
+
+_MISSING_DOC_OVERRIDE_SIGNALS: list[str] = [
+    'missing customs docs portbase', 'customs documents in portbase missing',
+    'portbase customs missing', 'portbase customs docs missing',
+    'missing customs docs', 'customs documents missing',
+    't1 missing', 'missing t1', 'mrn missing', 'missing mrn',
+]
+
+_FINANCIAL_CHARGE_SIGNALS: list[str] = [
+    'invoice', 'factuur', 'rechnung', 'charge', 'cost', 'kosten',
+    'costs', 'billing', 'payment', 'betaling', 'rechnen',
+]
+
+_STRONG_TIMING_FAILURE_SIGNALS: list[str] = [
+    'truck not arriving', 'barge delay', 'train delay', 'missed vessel',
+    'missed cutoff', 'missed cco', 'driver delayed', 'arrival delay',
+    'container late', 'not on time', 'late delivery', 'late arrival',
+    'late pickup', 'vertraging', 'vertraagd', 'verspätung', 'verspätet',
+    'niet op tijd', 'nicht pünktlich', 'rollover',
+    'delayed', 'overdue', 'behind schedule', 'no show', 'not arrived',
+    'late collection', 'not collected', 'not delivered', 'running late',
+    'past eta', 'missed appointment', 'driver late', 'vehicle delayed',
+    'truck delayed', 'failed delivery', 'failed collection',
+    'missed time slot', 'delivery window missed',
+]
+
+_TRANSPORT_STATUS_PATTERNS: list[str] = [
+    'transport status', 'shipment status', 'status update', 'transport update',
+    'update transport', 'statusmeldung', 'transportmeldung', 'sendungsstatus',
+]
+
+_EXPLICIT_DELAY_SIGNALS: list[str] = [
+    'delayed', 'delay', 'vertraging', 'vertraagd', 'verspätung', 'verspätet',
+    'not loaded', 'niet geladen', 'nicht geladen',
+    'rollover', 'missed cutoff', 'cutoff gemist', 'cutoff verpasst',
+    'failed pickup', 'unable to deliver', 'niet afgeleverd', 'nicht zugestellt',
+    'overdue', 'not on time', 'behind schedule', 'late arrival',
+    'late delivery', 'missed eta', 'no show', 'not arrived',
+]
+
 
 def _find_trigger_signal(text: str, issue_id: str) -> str:
     """Return the strongest signal phrase from text relevant to issue_id."""
@@ -2324,22 +2382,97 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
                             state      = remaining[0]['state']
                             confidence = remaining[0]['confidence']
 
+            # 12. Customs operational context check — soft penalty when no
+            # transporter or operational movement context (mirrors classifyCase.ts §Section 3)
+            if issue_id in _DOC_TOPICS_STRICT:
+                body_ctx = ' '.join(filter(None, [description, subject, isr])).lower()
+                if not any(kw in body_ctx for kw in _OPERATIONAL_CONTEXT_KEYWORDS):
+                    confidence = max(confidence - 0.15, 0.30)
+
+            # 13. FIX E: ref_provided sanity check — override when stronger signal detected
+            if issue_id == 'ref_provided':
+                body_sane = ' '.join(filter(None, [description, subject, isr])).lower()
+                if _has_strong_financial_context(body_sane):
+                    issue_id   = 'rate'
+                    confidence = max(confidence, 0.80)
+                elif any(s in body_sane for s in _EQUIPMENT_OVERRIDE_SIGNALS):
+                    issue_id   = 'equipment'
+                    confidence = max(confidence, 0.80)
+                elif any(s in body_sane for s in _MISSING_DOC_OVERRIDE_SIGNALS):
+                    has_portbase = 'portbase' in body_sane and 'customs' in body_sane
+                    issue_id   = 'customs' if (has_portbase or 't1' not in body_sane) else 't1'
+                    state      = 'missing'
+                    confidence = max(confidence, 0.80)
+
+            # 14. GAP C: waiting_time + financial charge language → rate
+            if issue_id == 'waiting_time':
+                body_wt = ' '.join(filter(None, [description, subject, isr])).lower()
+                if any(s in body_wt for s in _FINANCIAL_CHARGE_SIGNALS):
+                    issue_id   = 'rate'
+                    confidence = max(confidence, 0.78)
+
+            # 15. FIX B: closing_time + customs + missing → customs
+            if issue_id == 'closing_time':
+                body_ct = ' '.join(filter(None, [description, subject, isr])).lower()
+                has_customs_kw = any(kw in body_ct for kw in ('customs', 'douane', 'zoll'))
+                has_missing_kw = any(kw in body_ct for kw in ('missing', 'ontbreekt', 'fehlt'))
+                if has_customs_kw and has_missing_kw:
+                    issue_id   = 'customs'
+                    state      = 'missing'
+                    confidence = max(confidence, 0.80)
+
+            # 16. GAP D: delay low-confidence dampening — prevent informational
+            # mentions of "delay" from classifying as Delay / Not On Time
+            if issue_id == 'delay' and confidence < 0.65:
+                body_dl = ' '.join(filter(None, [description, subject, isr])).lower()
+                if not any(s in body_dl for s in _STRONG_TIMING_FAILURE_SIGNALS):
+                    confidence = max(confidence - 0.15, 0.30)
+
+            # 17. FIX 1: transport status generic → tracking (no explicit delay signal)
+            if issue_id == 'delay':
+                body_ts = ' '.join(filter(None, [description, subject, isr])).lower()
+                has_status_pat  = any(p in body_ts for p in _TRANSPORT_STATUS_PATTERNS)
+                has_expl_delay  = any(s in body_ts for s in _EXPLICIT_DELAY_SIGNALS)
+                if has_status_pat and not has_expl_delay:
+                    issue_id   = 'tracking'
+                    confidence = max(confidence, 0.72)
+
             return _build(issue_id, state, confidence, rnk=ranked)
 
-    # 12. Fallback regex rules
+    # 18. Fallback regex rules (with intent-family constraint per STEP 5)
     normalized = ' '.join(filter(None, [description, subject, isr, category]))
+
+    # Determine winning intent context from ranked pass so fallback can be constrained
+    # Only constrain when there was a strong-signal ranked match (confidence >= threshold)
+    _winning_intent_ctx: str | None = None
+    if ranked and ranked[0]['confidence'] >= _STRONG_INTENT_THRESHOLD:
+        _winning_intent_ctx = _TOPIC_INTENT.get(ranked[0]['issueId'], 'unknown')
+
     fb = _fallback_classify(normalized)
     if fb:
+        # Financial guard — doc/ref fallback inside financial context → rate
         if fb['issueId'] in ('customs', 't1', 'portbase', 'bl', 'load_ref') and _has_strong_financial_context(normalized):
-            return _build('rate', 'unknown', 0.65, fb_used=True, rnk=ranked)
+            return _build('rate', 'unknown', 0.70, fb_used=True, rnk=ranked)
+        # STEP 5: Constrain fallback to detected intent family
+        if _winning_intent_ctx and _winning_intent_ctx != 'unknown':
+            fb_intent = _TOPIC_INTENT.get(fb['issueId'], 'unknown')
+            if fb_intent != _winning_intent_ctx:
+                fb = None  # Reject: fallback conflicts with stronger detected intent
+
+    if fb:
         return _build(fb['issueId'], fb['state'], fb['confidence'], fb_used=True, rnk=ranked)
 
-    # 13. Operational clue scan
+    # 19. Operational clue scan (also constrained to detected intent family)
     clue = _operational_clue_scan(normalized)
+    if clue:
+        if _winning_intent_ctx and _winning_intent_ctx != 'unknown':
+            clue_intent = _TOPIC_INTENT.get(clue['issueId'], 'unknown')
+            if clue_intent != _winning_intent_ctx:
+                clue = None
     if clue:
         return _build(clue['issueId'], clue['state'], clue['confidence'], fb_used=True, rnk=ranked)
 
-    # 14. Unclassified
+    # 20. Unclassified
     return _build('other', 'unknown', 0.10, fb_used=True, rnk=ranked)
 
 
@@ -2415,6 +2548,12 @@ def _compute_health_check(df: 'pd.DataFrame', issue_counts: dict, total: int) ->
 
     categories_seen = len([k for k in issue_counts if k != "other" and issue_counts[k] > 0])
 
+    # Core categories expected in any non-trivial dataset
+    _CORE_CATEGORIES = [
+        'delay', 'load_ref', 'customs', 'rate', 'amendment',
+        'tracking', 'equipment', 'ref_provided', 'communication',
+    ]
+
     alerts = []
     status = "pass"
 
@@ -2434,6 +2573,13 @@ def _compute_health_check(df: 'pd.DataFrame', issue_counts: dict, total: int) ->
         alerts.append(f"WARN: Only {categories_seen} non-Other categories in output — taxonomy underreach")
         if status == "pass":
             status = "warn"
+    # Flag missing core categories for datasets >= 100 rows
+    if total >= 100:
+        missing_core = [c for c in _CORE_CATEGORIES if issue_counts.get(c, 0) == 0]
+        if missing_core:
+            alerts.append(f"WARN: Core categories with zero rows (dataset={total}): {', '.join(missing_core)}")
+            if status == "pass":
+                status = "warn"
 
     return {
         "status": status,
@@ -2630,8 +2776,8 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
             pct = round((c - p) / p * 100, 1) if p else None
             wow_delta[issue_id] = {"current": c, "prior": p, "pct_change": pct}
 
-    # Issue breakdown (top 10)
-    top_issues = sorted(issue_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+    # Issue breakdown — all categories (no top-10 cap; dashboard filters as needed)
+    top_issues = sorted(issue_counts.items(), key=lambda x: x[1], reverse=True)
     issue_breakdown = []
     for iid, cnt in top_issues:
         tax = TAXONOMY_MAP.get(iid, TAXONOMY_MAP["other"])
