@@ -297,7 +297,6 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       complianceControls: [],
     },
     records,
-    healthCheck: b.health_check ?? null,
   };
 }
 
