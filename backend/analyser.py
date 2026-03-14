@@ -1648,18 +1648,269 @@ _FIELD_WEIGHTS: list[tuple[str, float]] = [
 # load_ref from subject only gets 0.30 weight (avoids false positives in billing emails)
 _LOAD_REF_SUBJECT_WEIGHT = 0.30
 
+# ─────────────────────────────────────────────────────────────────
+# INTENT PRIORITY SYSTEM (ported from intentDetection.ts)
+# Higher priority (lower number) overrides lower priority when
+# a strong match (≥ STRONG_INTENT_THRESHOLD) exists.
+# ─────────────────────────────────────────────────────────────────
+
+_INTENT_PRIORITY: dict[str, int] = {
+    'financial':     1,
+    'equipment':     2,
+    'planning':      3,
+    'documentation': 4,
+    'operational':   5,
+    'tracking':      6,
+    'communication': 7,
+    'reference':     8,
+}
+
+_TOPIC_INTENT: dict[str, str] = {
+    'rate':             'financial',
+    'damage':           'financial',
+    'waiting_time':     'financial',
+    'equipment':        'equipment',
+    'equipment_release':'equipment',
+    'amendment':        'planning',
+    'capacity':         'planning',
+    'scheduling':       'planning',
+    'pickup_delivery':  'planning',
+    'customs':          'documentation',
+    't1':               'documentation',
+    'portbase':         'documentation',
+    'bl':               'documentation',
+    'vgm':              'documentation',
+    'transport_order':  'documentation',
+    'dangerous_goods':  'documentation',
+    'delay':            'operational',
+    'closing_time':     'operational',
+    'tracking':         'tracking',
+    'communication':    'communication',
+    'load_ref':         'reference',
+    'ref_provided':     'reference',
+    'shipping_advice':  'reference',
+    'seal':             'reference',
+    'other':            'operational',
+}
+
+_STRONG_INTENT_THRESHOLD = 0.75
+
+_FINANCIAL_GUARD_KEYWORDS: list[str] = [
+    'invoice', 'billing', 'charge', 'rate', 'cost', 'fee', 'payment',
+    'debit', 'credit', 'surcharge', 'overcharge', 'refund', 'price',
+    'pricing', 'quotation', 'tariff', 'freight rate', 'base rate',
+    'storage costs', 'storage cost', 'waiting time cost', 'detention charge',
+    'demurrage charge', 'extra costs', 'extra cost', 'additional charge',
+    'purchase order', 'po number', 'po no',
+    'selfbilling', 'self billing', 'self-billing', 'dch invoice',
+    'extra kosten', 'meerkosten', 'opslagkosten', 'wachttijd kost',
+    'extrakosten', 'lagerkosten', 'wartezeit kost', 'bestellnummer',
+]
+
+
+def _filter_by_intent_priority(matches: list[dict]) -> list[dict]:
+    """
+    Suppress lower-priority-intent topics when a strong higher-priority match exists.
+    Mirrors filterByIntentPriority() in intentDetection.ts.
+    If any topic has confidence ≥ 0.75, suppress all lower-priority-intent topics.
+    """
+    if not matches:
+        return matches
+    # Find best priority (lowest number) among strong matches
+    best_priority = 999
+    for m in matches:
+        if m['confidence'] >= _STRONG_INTENT_THRESHOLD:
+            intent = _TOPIC_INTENT.get(m['issueId'], 'operational')
+            priority = _INTENT_PRIORITY.get(intent, 9)
+            if priority < best_priority:
+                best_priority = priority
+    if best_priority == 999:
+        return matches  # No strong match → no filtering
+    # Keep only matches whose intent priority ≤ best_priority
+    filtered = [
+        m for m in matches
+        if _INTENT_PRIORITY.get(_TOPIC_INTENT.get(m['issueId'], 'operational'), 9) <= best_priority
+    ]
+    return filtered if filtered else matches
+
+
+def _has_strong_financial_context(text: str) -> bool:
+    """True if text contains multiple financial keywords."""
+    t = text.lower()
+    hits = sum(1 for kw in _FINANCIAL_GUARD_KEYWORDS if kw in t)
+    return hits >= 2
+
+
+# ─────────────────────────────────────────────────────────────────
+# LOAD REF STRICT GATE (ported from loadRefGuards.ts)
+# ─────────────────────────────────────────────────────────────────
+
+# Explicit phrases that unambiguously mean a load ref is absent
+_LOAD_REF_EXPLICIT_MISSING: list[str] = [
+    # English
+    'load ref missing', 'load ref not provided', 'load ref not received',
+    'missing load ref', 'no load ref', 'no load reference', 'load reference missing',
+    'load reference not provided', 'load reference not received',
+    'please provide load ref', 'please send load ref', 'please provide load reference',
+    'please send load reference', 'can you send the load ref', 'can you provide load ref',
+    'loadref missing', 'loadref not provided', 'loadref not received',
+    'please provide loadref', 'please send loadref', 'loadref still missing',
+    'no load ref received', 'load ref not received', 'load ref required',
+    'loadref required', 'no loadref', 'missing release reference',
+    'please provide release ref', 'loading reference missing', 'load ref not',
+    'ref required for loading', 'ref required for pickup',
+    'driver needs load ref', 'driver requires load ref',
+    # Dutch
+    'laadreferentie ontbreekt', 'loadref ontbreekt', 'graag loadref sturen',
+    'graag laadreferentie sturen', 'loadref nog niet ontvangen',
+    'laadreferentie niet ontvangen', 'graag de loadref', 'loadref nog niet',
+    'laadreferentie nog niet', 'zonder laadreferentie', 'chauffeur heeft referentie nodig',
+    'referentie ontbreekt', 'geen referentie ontvangen', 'graag de laadreferentie',
+    # German
+    'ladereferenz fehlt', 'lade referenz fehlt', 'bitte ladereferenz senden',
+    'referenz fehlt', 'ladereferenz nicht erhalten', 'ladereferenz benoetigt',
+    'fehlende ladereferenz', 'ohne ladereferenz', 'fahrer braucht referenz',
+    'keine referenz erhalten', 'bitte referenz senden',
+]
+
+# Phrases that indicate this is NOT a load_ref case (billing/planning context)
+_LOAD_REF_PLANNING_BLOCKLIST: list[str] = [
+    'invoice', 'billing', 'selfbilling', 'self billing', 'self-billing',
+    'extra costs', 'extra cost', 'storage costs', 'storage cost',
+    'waiting time', 'demurrage', 'detention', 'credit note', 'debit note',
+    'purchase order', 'po number', 'po no', 'quotation', 'surcharge',
+    'routing', 'route planning', 'feasibility', 'capacity',
+    'proof of delivery', 'tracking',
+]
+
+# Regex patterns that detect explicitly-provided reference values (textProvidesRef)
+_PROVIDED_REF_PATTERNS: list[re.Pattern] = [
+    re.compile(r'\b(?:load\s*ref(?:erence)?|loadref|laadreferentie|ladereferenz)\s*(?:is|:)\s*[A-Z0-9]{3,}', re.I),
+    re.compile(r'\b(?:ref(?:erence)?|booking)\s*(?:no\.?|number|#)\s*:?\s*[A-Z0-9]*[0-9][A-Z0-9]{2,}', re.I),
+    re.compile(r'\b(?:our\s+ref|your\s+ref|ref)\s*:\s*[A-Z0-9]{4,}', re.I),
+    re.compile(r'\b(?:order\s+(?:no\.?|number|ref)|po\s+(?:no\.?|number)|job\s+(?:no\.?|number))\s*:?\s*[A-Z0-9]*[0-9][A-Z0-9]{2,}', re.I),
+    re.compile(r'\b(?:see\s+below|find\s+below|please\s+find\s+below|herewith|as\s+requested).{0,80}(?:ref(?:erence)?|booking|load\s*ref)\b', re.I),
+    re.compile(r'\b(?:ref(?:erence)?|booking|load\s*ref).{0,80}(?:attached|below|herewith|as\s+requested|forwarded|sent|provided)\b', re.I),
+    re.compile(r'ref\s*:\s*[A-Z0-9]{4,}', re.I),
+    re.compile(r'loadref\s*:\s*[A-Z0-9]{3,}', re.I),
+    re.compile(r'\b(?:load\s*ref(?:erence)?|loadref|booking\s*ref(?:erence)?|ref(?:erence)?)\s*'
+               r'(?:is|:|no\.?|#)?\s*[A-Z0-9]*[0-9][A-Z0-9]{3,}', re.I),
+]
+
+
+def _text_provides_ref(text: str) -> bool:
+    """Returns True if text explicitly provides a reference value."""
+    return any(p.search(text) for p in _PROVIDED_REF_PATTERNS)
+
+
+def _detect_body_intent(text: str) -> str:
+    """Detect if body has billing/planning intent (used in load_ref gate)."""
+    t = text.lower()
+    billing_words = ['invoice', 'billing', 'charge', 'extra cost', 'storage cost',
+                     'waiting time', 'demurrage', 'detention', 'credit note', 'debit note',
+                     'purchase order', 'po number', 'selfbill', 'self bill']
+    planning_words = ['routing', 'feasibility', 'capacity', 'schedule',
+                      'slot request', 'delivery planning', 'pickup planning',
+                      'booking amendment', 'booking correction']
+    if sum(1 for w in billing_words if w in t) >= 2:
+        return 'billing'
+    if sum(1 for w in planning_words if w in t) >= 2:
+        return 'planning'
+    return 'unknown'
+
+
+def _validate_load_ref_missing(subject: str, description: str, isr: str) -> bool:
+    """
+    7-step strict gate for load_ref classification.
+    Returns True only if this is clearly a 'missing load ref' case.
+    Mirrors validateLoadRefMissing() in loadRefGuards.ts.
+    """
+    combined = ' '.join(filter(None, [description, subject, isr])).lower()
+
+    # Step 1: Must have an explicit missing phrase
+    if not any(phrase in combined for phrase in _LOAD_REF_EXPLICIT_MISSING):
+        return False
+
+    # Step 2: If body explicitly provides a reference value → ref_provided, not load_ref
+    if _text_provides_ref(combined):
+        return False
+
+    # Step 3: Body intent check — billing/planning context → reject
+    body_intent = _detect_body_intent(combined)
+    if body_intent in ('billing', 'planning'):
+        return False
+
+    # Step 4: Subject-line planning/billing blocklist check
+    subj_lower = (subject or '').lower()
+    if any(phrase in subj_lower for phrase in _LOAD_REF_PLANNING_BLOCKLIST):
+        return False
+
+    # Step 5: Multiple planning/billing keywords in full text → reject
+    blocklist_hits = sum(1 for phrase in _LOAD_REF_PLANNING_BLOCKLIST if phrase in combined)
+    if blocklist_hits >= 3:
+        return False
+
+    return True
+
+
+# ─────────────────────────────────────────────────────────────────
+# DOC PROVISION GUARD (ported from classifyCase.ts)
+# customs/t1/bl/portbase + provision language → ref_provided
+# ─────────────────────────────────────────────────────────────────
+
+_DOC_TOPICS_STRICT: set[str] = {'customs', 't1', 'portbase', 'bl'}
+
+_PROVIDED_DOC_PATTERNS: list[re.Pattern] = [
+    re.compile(r'\b(?:please\s+find|find\s+attached|see\s+attached|herewith|attached\s+please\s+find).{0,80}(?:customs|t1|transit|portbase|bl|document|cert|declaration|mrn)', re.I),
+    re.compile(r'\b(?:customs|t1\s+doc|portbase|bl|bill\s+of\s+lading|transit\s+doc|mrn|certificate).{0,80}(?:attached|below|herewith|forwarded|sent|provided|find\s+below|see\s+below)', re.I),
+    re.compile(r'\b(?:as\s+requested|as\s+per\s+your\s+request|as\s+per\s+request).{0,100}(?:customs|t1|portbase|bl|document|declaration)', re.I),
+    re.compile(r'\b(?:sending|forwarding|attaching|sharing).{0,60}(?:customs|t1|portbase|bl|document|declaration|certificate|mrn)', re.I),
+]
+
+_PLANNING_CONTEXT_PHRASES: list[str] = [
+    'feasibility', 'capacity', 'can you handle', 'is it possible',
+    'do you have capacity', 'slot available', 'routing', 'route request',
+    'can you book', 'is there space', 'available capacity',
+]
+
+_DOC_MISSING_PHRASES: list[str] = [
+    'missing', 'not received', 'not provided', 'not yet received', 'please send',
+    'please provide', 'required', 'needed', 'outstanding', 'absent',
+    'ontbreekt', 'fehlt', 'niet ontvangen', 'nicht erhalten',
+]
+
+
+def _doc_provision_detected(text: str) -> bool:
+    """True if text explicitly provides a customs/t1/bl/portbase document."""
+    return any(p.search(text) for p in _PROVIDED_DOC_PATTERNS)
+
+
+def _has_planning_context(text: str) -> bool:
+    t = text.lower()
+    return any(p in t for p in _PLANNING_CONTEXT_PHRASES)
+
+
+def _has_doc_missing_language(text: str) -> bool:
+    t = text.lower()
+    return any(p in t for p in _DOC_MISSING_PHRASES)
+
 
 def _classify_row(subject: str, description: str, isr: str, category: str) -> dict:
     """
-    Classify a single row. Mirrors the full classifyCase.ts pipeline:
-    1. Direct category column mapping
-    2. Financial subject early-exit
-    3. Per-field weighted classification (description 1.0, subject 0.88, isr 0.78, category 0.70)
-    4. Description-first override (body overrides subject when topics conflict)
-    5. load_ref → ref_provided when body contains an explicit ref value
-    6. Fallback regex rules
-    7. Operational clue scan
-    8. Other
+    Classify a single row. Full pipeline mirrors classifyCase.ts + intentDetection.ts + loadRefGuards.ts:
+    1.  Direct category column mapping
+    2.  Financial subject early-exit
+    3.  Per-field weighted classification
+    4.  filterByIntentPriority — suppress lower-priority topics when strong higher-priority match
+    5.  Description-first override
+    6.  validateLoadRefMissing — strict 7-step gate
+    7.  load_ref → ref_provided when body explicitly provides a ref value
+    8.  ref_provided wins over load_ref
+    9.  Doc provision guard (customs/t1/bl/portbase → ref_provided when providing docs)
+    10. Planning compliance guard (reduce confidence for doc topics without missing language)
+    11. Fallback regex rules (+ financial context guard)
+    12. Operational clue scan
+    13. Other
     """
     fields: dict[str, str] = {
         'description': description or '',
@@ -1684,7 +1935,6 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
             return {'primaryIssue': 'rate', 'issueState': 'unknown', 'confidence': 0.92}
 
     # 3. Per-field weighted classification
-    # Classify each field independently; accumulate highest weighted confidence per issue.
     match_map: dict[str, dict] = {}
 
     for field_key, weight in _FIELD_WEIGHTS:
@@ -1709,17 +1959,22 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
 
     ranked = sorted(match_map.values(), key=lambda m: m['confidence'], reverse=True)
 
+    # 4. filterByIntentPriority — primary guard against customs over-classification.
+    # If rate/damage/waiting_time scores ≥ 0.75, suppress customs/t1/portbase/bl/load_ref.
+    ranked = _filter_by_intent_priority(ranked)
+
     if ranked:
         best = ranked[0]
         issue_id   = best['issueId']
         state      = best['state']
         confidence = best['confidence']
 
-        # 4. Description-first override
+        # 5. Description-first override
         # If description classifies as a DIFFERENT topic at ≥ 0.55 confidence,
         # description wins (body is source of truth over subject shorthand).
         if len(description.strip()) > 30:
             desc_matches = _classify_by_rules(description)
+            desc_matches = _filter_by_intent_priority(desc_matches)
             if desc_matches:
                 desc_primary = desc_matches[0]
                 topics_differ = (
@@ -1732,37 +1987,76 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
                     state      = desc_primary['state']
                     confidence = min(desc_primary['confidence'], confidence + 0.05)
 
-        # 5. load_ref → ref_provided when body provides an explicit reference value
+        # 6. validateLoadRefMissing strict gate
+        # If classified as load_ref but doesn't pass the 7-step gate, demote it.
         if issue_id == 'load_ref':
-            body = ' '.join(filter(None, [description, subject, isr]))
-            ref_in_body = bool(re.search(
-                r'\b(?:load\s*ref(?:erence)?|loadref|booking\s*ref(?:erence)?|ref(?:erence)?)\s*'
-                r'(?:is|:|no\.?|#)?\s*[A-Z0-9]*[0-9][A-Z0-9]{3,}',
-                body, re.I
-            ))
-            if ref_in_body:
+            if not _validate_load_ref_missing(subject, description, isr):
+                # Check if body actually provides a ref value
+                body = ' '.join(filter(None, [description, subject, isr]))
+                if _text_provides_ref(body):
+                    return {'primaryIssue': 'ref_provided', 'issueState': 'provided', 'confidence': 0.72}
+                # Demote load_ref — use next best ranked match
+                remaining = [m for m in ranked if m['issueId'] not in ('load_ref',)]
+                if remaining:
+                    issue_id   = remaining[0]['issueId']
+                    state      = remaining[0]['state']
+                    confidence = remaining[0]['confidence']
+                else:
+                    issue_id = None  # Fall through to fallback
+
+        if issue_id:
+            # 7. load_ref → ref_provided when body provides an explicit reference value
+            if issue_id == 'load_ref':
+                body = ' '.join(filter(None, [description, subject, isr]))
+                if _text_provides_ref(body):
+                    issue_id = 'ref_provided'
+                    state    = 'provided'
+
+            # 8. ref_provided and load_ref cannot coexist — ref_provided wins
+            if 'ref_provided' in match_map and issue_id == 'load_ref':
                 issue_id = 'ref_provided'
                 state    = 'provided'
 
-        # ref_provided and load_ref cannot coexist — ref_provided wins
-        if 'ref_provided' in match_map and issue_id == 'load_ref':
-            issue_id = 'ref_provided'
-            state    = 'provided'
+            # 9. Doc provision guard — customs/t1/bl/portbase + provision language → ref_provided
+            if issue_id in _DOC_TOPICS_STRICT:
+                body = ' '.join(filter(None, [description, subject, isr]))
+                if _doc_provision_detected(body):
+                    issue_id   = 'ref_provided'
+                    state      = 'provided'
+                    confidence = 0.72
 
-        return {'primaryIssue': issue_id, 'issueState': state, 'confidence': confidence}
+            # 10. Planning compliance guard — doc topics without explicit missing language
+            # e.g. feasibility emails that mention "customs" → reduce confidence
+            if issue_id in _DOC_TOPICS_STRICT:
+                body = ' '.join(filter(None, [description, subject, isr]))
+                if _has_planning_context(body) and not _has_doc_missing_language(body):
+                    confidence = max(confidence - 0.25, 0.30)
+                    # If confidence dropped below threshold, demote to next best
+                    if confidence <= 0.35:
+                        remaining = [m for m in ranked if m['issueId'] not in _DOC_TOPICS_STRICT]
+                        if remaining:
+                            issue_id   = remaining[0]['issueId']
+                            state      = remaining[0]['state']
+                            confidence = remaining[0]['confidence']
 
-    # 6. Fallback regex rules
+            return {'primaryIssue': issue_id, 'issueState': state, 'confidence': confidence}
+
+    # 11. Fallback regex rules
     normalized = ' '.join(filter(None, [description, subject, isr, category]))
     fb = _fallback_classify(normalized)
     if fb:
+        # Financial context guard: if fallback gives a doc/ref topic but strong financial
+        # context is present (e.g. billing email with "no customs docs"), keep it as rate.
+        if fb['issueId'] in ('customs', 't1', 'portbase', 'bl', 'load_ref') and _has_strong_financial_context(normalized):
+            return {'primaryIssue': 'rate', 'issueState': 'unknown', 'confidence': 0.65}
         return {'primaryIssue': fb['issueId'], 'issueState': fb['state'], 'confidence': fb['confidence']}
 
-    # 7. Operational clue scan
+    # 12. Operational clue scan
     clue = _operational_clue_scan(normalized)
     if clue:
         return {'primaryIssue': clue['issueId'], 'issueState': clue['state'], 'confidence': clue['confidence']}
 
-    # 8. Unclassified
+    # 13. Unclassified
     return {'primaryIssue': 'other', 'issueState': 'unknown', 'confidence': 0.10}
 
 
