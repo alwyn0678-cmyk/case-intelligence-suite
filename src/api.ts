@@ -7,7 +7,7 @@
 
 import type { AnalysisResult, CustomerBurdenItem, TransporterItem, AreaHotspot, EnrichedRecord } from './types/analysis';
 
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8000';
+const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'https://case-intelligence-suite.onrender.com';
 
 // ─── Raw shape returned by the Python backend ────────────────────
 interface BackendResult {
