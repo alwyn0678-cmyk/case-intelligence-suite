@@ -1619,51 +1619,151 @@ def _score_header(name: str) -> str | None:
     return None
 
 
+# ─── Financial subject early-exit patterns ────────────────────────
+# When subject line contains these, force rate classification immediately.
+_FINANCIAL_SUBJECT_PATTERNS: list[str] = [
+    'extra costs report', 'extra cost report',
+    'extra costs invoice', 'extra cost invoice',
+    'extrakostenrechnung',
+    'extra kosten rapport', 'extra kosten report',
+    'meerkosten rapport', 'meerkosten report',
+    'extra costs', 'extra cost', 'purchase order', 'po number',
+    'storage costs', 'storage cost',
+    # Dutch
+    'extra kosten', 'opslagkosten', 'wachttijd kosten', 'kosten rapport',
+    'inkooporder', 'bestelnummer',
+    # German
+    'extrakosten', 'lagerkosten', 'standgeld', 'kostenbericht', 'bestellnummer',
+    'po mismatch', 'po amount', 'po discrepancy', 'po bedrag', 'po betrag',
+]
+
+# Per-field weights (mirrors classifyCase.ts FIELD_WEIGHTS)
+_FIELD_WEIGHTS: list[tuple[str, float]] = [
+    ('description', 1.00),
+    ('subject',     0.88),
+    ('isr',         0.78),
+    ('category',    0.70),
+]
+
+# load_ref from subject only gets 0.30 weight (avoids false positives in billing emails)
+_LOAD_REF_SUBJECT_WEIGHT = 0.30
+
+
 def _classify_row(subject: str, description: str, isr: str, category: str) -> dict:
     """
-    Classify a single row using the full intent-aware pipeline.
-    Mirrors the frontend classifyCase.ts pipeline exactly.
-
-    Pipeline:
-    1. Direct CATEGORY_MAP lookup (highest confidence)
-    2. Primary rule-based classifier with per-topic context windows
-    3. Fallback regex rules
-    4. Operational clue scan (last resort)
-    5. other
+    Classify a single row. Mirrors the full classifyCase.ts pipeline:
+    1. Direct category column mapping
+    2. Financial subject early-exit
+    3. Per-field weighted classification (description 1.0, subject 0.88, isr 0.78, category 0.70)
+    4. Description-first override (body overrides subject when topics conflict)
+    5. load_ref → ref_provided when body contains an explicit ref value
+    6. Fallback regex rules
+    7. Operational clue scan
+    8. Other
     """
-    # Build combined text: description is highest-weight source
-    # Prepend description so context windows hit description content first
-    combined = " ".join(filter(None, [description, subject, isr, category]))
+    fields: dict[str, str] = {
+        'description': description or '',
+        'subject':     subject or '',
+        'isr':         isr or '',
+        'category':    category or '',
+    }
 
-    # 1. Direct category field mapping — bypasses all scoring
+    # 1. Direct category column mapping (highest confidence, bypasses scoring)
     if category:
         cat_key = category.lower().strip()
         if cat_key in CATEGORY_MAP:
             mapped = CATEGORY_MAP[cat_key]
-            state  = _detect_state_windowed(combined)
-            return {"primaryIssue": mapped, "issueState": state, "confidence": 0.88}
+            combined = ' '.join(filter(None, [description, subject, isr]))
+            state = _detect_state_windowed(combined)
+            return {'primaryIssue': mapped, 'issueState': state, 'confidence': 0.88}
 
-    # 2. Primary rule-based classifier
-    matches = _classify_by_rules(combined)
-    if matches:
-        best = matches[0]
-        return {"primaryIssue": best['issueId'], "issueState": best['state'],
-                "confidence": best['confidence']}
+    # 2. Financial subject early-exit — unambiguous financial subjects override everything
+    subj_lower = subject.lower()
+    for pat in _FINANCIAL_SUBJECT_PATTERNS:
+        if pat in subj_lower:
+            return {'primaryIssue': 'rate', 'issueState': 'unknown', 'confidence': 0.92}
 
-    # 3. Fallback regex rules
-    fb = _fallback_classify(combined)
+    # 3. Per-field weighted classification
+    # Classify each field independently; accumulate highest weighted confidence per issue.
+    match_map: dict[str, dict] = {}
+
+    for field_key, weight in _FIELD_WEIGHTS:
+        field_text = fields[field_key]
+        if not field_text.strip():
+            continue
+        field_matches = _classify_by_rules(field_text)
+        for m in field_matches:
+            # load_ref from subject is severely down-weighted (billing emails often mention
+            # "load ref" incidentally in the subject line without it being the core issue)
+            eff_weight = _LOAD_REF_SUBJECT_WEIGHT if (field_key == 'subject' and m['issueId'] == 'load_ref') else weight
+            weighted_conf = min(m['confidence'] * eff_weight, 0.98)
+            existing = match_map.get(m['issueId'])
+            if not existing or weighted_conf > existing['confidence']:
+                match_map[m['issueId']] = {**m, 'confidence': weighted_conf, '_field': field_key}
+
+    # Fall back to combined text if no per-field matches (e.g. very short rows)
+    if not match_map:
+        normalized = ' '.join(filter(None, [description, subject, isr, category]))
+        for m in _classify_by_rules(normalized):
+            match_map[m['issueId']] = m
+
+    ranked = sorted(match_map.values(), key=lambda m: m['confidence'], reverse=True)
+
+    if ranked:
+        best = ranked[0]
+        issue_id   = best['issueId']
+        state      = best['state']
+        confidence = best['confidence']
+
+        # 4. Description-first override
+        # If description classifies as a DIFFERENT topic at ≥ 0.55 confidence,
+        # description wins (body is source of truth over subject shorthand).
+        if len(description.strip()) > 30:
+            desc_matches = _classify_by_rules(description)
+            if desc_matches:
+                desc_primary = desc_matches[0]
+                topics_differ = (
+                    desc_primary['issueId'] != issue_id and
+                    not (desc_primary['issueId'] == 'ref_provided' and issue_id == 'load_ref') and
+                    not (desc_primary['issueId'] == 'load_ref'    and issue_id == 'ref_provided')
+                )
+                if topics_differ and desc_primary['confidence'] >= 0.55:
+                    issue_id   = desc_primary['issueId']
+                    state      = desc_primary['state']
+                    confidence = min(desc_primary['confidence'], confidence + 0.05)
+
+        # 5. load_ref → ref_provided when body provides an explicit reference value
+        if issue_id == 'load_ref':
+            body = ' '.join(filter(None, [description, subject, isr]))
+            ref_in_body = bool(re.search(
+                r'\b(?:load\s*ref(?:erence)?|loadref|booking\s*ref(?:erence)?|ref(?:erence)?)\s*'
+                r'(?:is|:|no\.?|#)?\s*[A-Z0-9]*[0-9][A-Z0-9]{3,}',
+                body, re.I
+            ))
+            if ref_in_body:
+                issue_id = 'ref_provided'
+                state    = 'provided'
+
+        # ref_provided and load_ref cannot coexist — ref_provided wins
+        if 'ref_provided' in match_map and issue_id == 'load_ref':
+            issue_id = 'ref_provided'
+            state    = 'provided'
+
+        return {'primaryIssue': issue_id, 'issueState': state, 'confidence': confidence}
+
+    # 6. Fallback regex rules
+    normalized = ' '.join(filter(None, [description, subject, isr, category]))
+    fb = _fallback_classify(normalized)
     if fb:
-        return {"primaryIssue": fb['issueId'], "issueState": fb['state'],
-                "confidence": fb['confidence']}
+        return {'primaryIssue': fb['issueId'], 'issueState': fb['state'], 'confidence': fb['confidence']}
 
-    # 4. Operational clue scan
-    clue = _operational_clue_scan(combined)
+    # 7. Operational clue scan
+    clue = _operational_clue_scan(normalized)
     if clue:
-        return {"primaryIssue": clue['issueId'], "issueState": clue['state'],
-                "confidence": clue['confidence']}
+        return {'primaryIssue': clue['issueId'], 'issueState': clue['state'], 'confidence': clue['confidence']}
 
-    # 5. Unclassified
-    return {"primaryIssue": "other", "issueState": "unknown", "confidence": 0.30}
+    # 8. Unclassified
+    return {'primaryIssue': 'other', 'issueState': 'unknown', 'confidence': 0.10}
 
 
 # ─────────────────────────────────────────────────────────────────
