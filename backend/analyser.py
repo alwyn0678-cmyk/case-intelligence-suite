@@ -813,10 +813,17 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
     def _serialize_row(r: pd.Series) -> dict:
         out: dict[str, Any] = {}
         for k, v in r.items():
-            if isinstance(v, float) and math.isnan(v):
+            # Catch NaT, NaN, and any other pandas NA types first
+            try:
+                if pd.isna(v):
+                    out[str(k)] = None
+                    continue
+            except (TypeError, ValueError):
+                pass
+            if isinstance(v, pd.Timestamp):
+                out[str(k)] = v.isoformat()
+            elif isinstance(v, float) and math.isnan(v):
                 out[str(k)] = None
-            elif isinstance(v, pd.Timestamp):
-                out[str(k)] = v.isoformat() if not pd.isna(v) else None
             else:
                 out[str(k)] = v
         return out
