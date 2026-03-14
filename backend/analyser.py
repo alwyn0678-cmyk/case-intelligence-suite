@@ -404,6 +404,139 @@ TAXONOMY: list[dict] = [
 TAXONOMY_MAP: dict[str, dict] = {item["id"]: item for item in TAXONOMY}
 
 # ─────────────────────────────────────────────────────────────────
+# ENTITY REGISTRY (ported from src/config/referenceData.ts)
+# ─────────────────────────────────────────────────────────────────
+
+# Each entry: (canonical_name, entity_type, roles, aliases)
+# Priority: deepsea_terminal(4) > depot(3) > transporter(2) > carrier(1)
+
+_ENTITY_DATA: list[tuple[str, str, list[str], list[str]]] = [
+    # DEEPSEA TERMINALS
+    ('ECT Delta Terminal',           'deepsea_terminal', ['deepsea_terminal'], ['ect delta','ect','ect euromax','europe combined terminals']),
+    ('APM Terminals Maasvlakte',     'deepsea_terminal', ['deepsea_terminal'], ['apm terminals','apmt','apm maasvlakte','apmt maasvlakte','apm rotterdam']),
+    ('RWG Terminal',                 'deepsea_terminal', ['deepsea_terminal'], ['rwg','rotterdam world gateway','world gateway']),
+    ('EUROMAX Terminal',             'deepsea_terminal', ['deepsea_terminal'], ['euromax terminal','euromax rotterdam','euromax']),
+    ('Hutchison Ports Rotterdam',    'deepsea_terminal', ['deepsea_terminal'], ['hutchison ports rotterdam','hutchison rotterdam','hutchison ecth','ecth']),
+    ('MSC PSA European Terminal',    'deepsea_terminal', ['deepsea_terminal'], ['msct','msc psa','psa antwerp','msc psa european terminal','deurganckdok']),
+    ('DP World Antwerp Gateway',     'deepsea_terminal', ['deepsea_terminal'], ['dp world antwerp','antwerp gateway','dpw antwerp']),
+    ('Eurogate Bremerhaven',         'deepsea_terminal', ['deepsea_terminal'], ['eurogate bremerhaven','bct','bremer container terminal']),
+    ('NTB Bremerhaven',              'deepsea_terminal', ['deepsea_terminal'], ['ntb','north sea terminal bremerhaven','nst bremerhaven']),
+
+    # INLAND DEPOTS (many dual-role: depot + transporter)
+    ('Germersheim DPW',          'depot', ['depot','transporter'], ['germersheim dpw','dpw germersheim','germersheim','dp world germersheim','degrh01','dp world intermodal b.v.','dp world intermodal bv','dp world intermodal','dpw intermodal','dp world']),
+    ('HP Duisburg',              'depot', ['depot','transporter'], ['hp duisburg','hutchison ports duisburg','hutchison duisburg','hutchison ports duisburg rhine']),
+    ('Contargo Rhine Ruhr',      'depot', ['depot','transporter'], ['contargo rhine ruhr','contargo ruhr','contargo dortmund','contargo duisburg']),
+    ('Contargo Trimodal',        'depot', ['depot','transporter'], ['contargo trimodal','contargo köln','contargo cologne','contargo neuss']),
+    ('Contargo',                 'depot', ['depot','transporter'], ['contargo']),
+    ('Mainz Frankenbach',        'depot', ['depot','transporter'], ['mainz frankenbach','frankenbach','mainz depot']),
+    ('Gustavsburg Contargo',     'depot', ['depot','transporter'], ['gustavsburg contargo','gustavsburg','contargo gustavsburg']),
+    ('HGK',                      'depot', ['depot','transporter'], ['hgk shipping','hgk','hgk transport','hgk barge']),
+    ('European Gateway Services','depot', ['depot','transporter'], ['european gateway services','european gateway','eur gateway services','eurgateway','eurogateways','european gateway services bv']),
+    ('CTS Container-Terminal',   'depot', ['depot','transporter'], ['cts container-terminal gmbh','cts container terminal gmbh','cts container terminal','cts container-terminal','cts terminal','cts gmbh','cts']),
+    ('H&S Andernach',            'depot', ['depot','transporter'], ['h&s andernach','h s andernach','hs andernach','deajhra','h&s schiffahrts andernach','h+s andernach']),
+    ('Bonn AZS',                 'depot', ['depot','transporter'], ['bonn azs','azs bonn','debnx01','bon depot']),
+    ('Trier AZS',                'depot', ['depot','transporter'], ['trier azs','azs trier','detreaz']),
+    ('EGS Nuremberg',            'depot', ['depot','transporter'], ['egs nuremberg','egs nürnberg','egs','denue02']),
+    ('ZSK am Zehnhoff',          'depot', ['depot'],               ['am zehnhoff','zehnhoff','zsk','andernach zehnhoff']),
+    ('Rheinhafen Andernach',     'depot', ['depot'],               ['rheinhafen andernach','andernach depot']),
+    ('DIT Depot',                'depot', ['depot'],               ['dit depot','dit duisburg','duisburg intermodal']),
+    ('RRT Depot',                'depot', ['depot'],               ['rrt depot','rrt duisburg']),
+    ('Nürnberg CDN',             'depot', ['depot'],               ['nuernberg cdn','nürnberg cdn','cdn nuremberg','cdn nürnberg']),
+    ('Moerdijk Container Terminal','depot',['depot'],              ['moerdijk','mct moerdijk','container terminal moerdijk']),
+    ('Venlo Container Terminal', 'depot', ['depot'],               ['venlo terminal','venlo container']),
+    ('Nijmegen Inland Terminal', 'depot', ['depot'],               ['nijmegen terminal','barge nijmegen']),
+
+    # APPROVED SPECIALIST INLAND HAULIERS
+    ('Starmans',            'transporter', ['transporter'],          ['starmans']),
+    ('Henk Dammes',         'transporter', ['transporter'],          ['henk dammes','dammes']),
+    ('Falcoline',           'transporter', ['transporter'],          ['falcoline','falcoline gmbh','falcoline transport','falcoline spedition','falcoline belgium','falcoline belgie','falco lines belgium nv','falco lines belgium','falcolines belgium nv','falco lines nv']),
+    ('GTS Coldchain',       'transporter', ['transporter'],          ['gts coldchain','gts cold','gts truck','gts logistics','gts duisburg','gts transport','gts']),
+    ('CTV Vrede',           'transporter', ['transporter','depot'],  ['ctv vrede','ctv transport','ctv','ctv spedition','ctv gmbh']),
+    ('EKB Transport',       'transporter', ['transporter','depot'],  ['ekb transport','ekb']),
+    ('Optimodal Nederland', 'transporter', ['transporter'],          ['optimodal nederland bv','optimodal nederland','optimodal']),
+    ('Kiem Transport',      'transporter', ['transporter'],          ['kiem transport','kiem']),
+    ('DCH Düsseldorf',      'transporter', ['transporter'],          ['dch duesseldorfer container-hafen','dch düsseldorfer container-hafen','dch duesseldorf','dch container hafen','dch container-hafen','dch duisburg','dch']),
+
+    # KNOWN CARRIERS (blocked from customer role, NOT in transporter performance)
+    ('DB Schenker',          'carrier', ['carrier'], ['db schenker','schenker','dbschenker']),
+    ('DHL Freight',          'carrier', ['carrier'], ['dhl freight','dhl logistics','dhl']),
+    ('DSV',                  'carrier', ['carrier'], ['dsv road','dsv air','dsv logistics','dsv']),
+    ('Rhenus Logistics',     'carrier', ['carrier'], ['rhenus logistics','rhenus road','rhenus transport','rhenus']),
+    ('Dachser',              'carrier', ['carrier'], ['dachser']),
+    ('Kuehne+Nagel',         'carrier', ['carrier'], ['kuehne nagel','kühne nagel','kuhne nagel','k+n','kuehne+nagel']),
+    ('XPO Logistics',        'carrier', ['carrier'], ['xpo logistics','xpo transport','xpo']),
+    ('Geodis',               'carrier', ['carrier'], ['geodis']),
+    ('Ceva Logistics',       'carrier', ['carrier'], ['ceva logistics','ceva']),
+    ('Samskip',              'carrier', ['carrier'], ['samskip']),
+    ('Nedcargo',             'carrier', ['carrier'], ['nedcargo']),
+    ('Hellmann Worldwide',   'carrier', ['carrier'], ['hellmann worldwide logistics','hellmann worldwide','hellmann logistics','hellmann']),
+    ('Bolloré Logistics',    'carrier', ['carrier'], ['bolloré logistics','bollore logistics','bollore','bolloré']),
+    ('BLG Logistics',        'carrier', ['carrier'], ['blg logistics','blg']),
+    ('Yusen Logistics',      'carrier', ['carrier'], ['yusen logistics','nyk logistics','yusen']),
+    ('Raben Group',          'carrier', ['carrier'], ['raben group','raben transport','raben']),
+    ('Gefco',                'carrier', ['carrier'], ['gefco','ceva gefco']),
+    ('Nacco',                'carrier', ['carrier'], ['nacco','nacco logistics','naco']),
+]
+
+_ENTITY_PRIORITY = {'deepsea_terminal': 4, 'depot': 3, 'transporter': 2, 'carrier': 1, 'customer': 0}
+
+# Build alias → (canonical, entity_type, roles) lookup
+_ALIAS_MAP: dict[str, tuple[str, str, list[str]]] = {}
+for _canon, _etype, _roles, _aliases in _ENTITY_DATA:
+    for _alias in _aliases:
+        _existing = _ALIAS_MAP.get(_alias)
+        if not _existing or _ENTITY_PRIORITY.get(_etype, 0) > _ENTITY_PRIORITY.get(_existing[1], 0):
+            _ALIAS_MAP[_alias] = (_canon, _etype, _roles)
+
+
+def _resolve_entity(name: str) -> tuple[str, str, list[str]] | None:
+    """Return (canonical_name, entity_type, roles) for a name, or None."""
+    if not name:
+        return None
+    low = name.lower().strip()
+    # Exact alias match
+    if low in _ALIAS_MAP:
+        return _ALIAS_MAP[low]
+    # Substring match (entity alias contained in the name)
+    best: tuple[str, str, list[str]] | None = None
+    best_len = 0
+    for alias, entry in _ALIAS_MAP.items():
+        if alias in low and len(alias) > best_len:
+            best = entry
+            best_len = len(alias)
+    return best
+
+
+def _is_operational_transporter(name: str) -> bool:
+    """True if entity has transporter role (approved haulier or dual-role depot)."""
+    result = _resolve_entity(name)
+    if result is None:
+        return False
+    _, _, roles = result
+    return 'transporter' in roles
+
+
+def _is_blocked_from_customer(name: str) -> bool:
+    """True if entity should NOT appear in Customer Burden."""
+    result = _resolve_entity(name)
+    if result is None:
+        return False
+    _, etype, _ = result
+    return etype in ('deepsea_terminal', 'depot', 'transporter', 'carrier')
+
+
+def _canonical_transporter_name(name: str) -> str | None:
+    """Return canonical name if entity is a transporter, else None."""
+    result = _resolve_entity(name)
+    if result is None:
+        return None
+    canonical, _, roles = result
+    if 'transporter' in roles:
+        return canonical
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────
 # COLUMN ALIASES
 # ─────────────────────────────────────────────────────────────────
 
@@ -744,19 +877,47 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
     estimated_hours = len(preventable_df) * 2.0
     hours_lost = float(explicit_hours) if explicit_hours > 0 else estimated_hours
 
-    # By customer
-    cust_df = df[df["customer"].str.strip() != ""]
+    # By customer — exclude operational entities
+    cust_df = df[df["resolvedCustomer"].notna() & (df["resolvedCustomer"] != "")]
     by_customer = (
-        cust_df.groupby("customer")
+        cust_df.groupby("resolvedCustomer")
         .size()
         .sort_values(ascending=False)
         .to_dict()
     )
 
-    # By transporter
-    trans_df = df[df["transporter"].str.strip() != ""]
+    # Resolve transporter for each row using entity registry
+    # Primary: dedicated transporter column → resolve canonical name
+    # Fallback: customer column contains a known transporter/depot entity
+    def _get_resolved_transporter(r: pd.Series) -> str | None:
+        tp = _clean_text(r.get("transporter", ""))
+        if tp:
+            canon = _canonical_transporter_name(tp)
+            return canon if canon else (tp if _is_operational_transporter(tp) else None)
+        # Fallback: check customer column
+        cust = _clean_text(r.get("customer", ""))
+        if cust:
+            canon = _canonical_transporter_name(cust)
+            return canon
+        return None
+
+    df["resolvedTransporter"] = df.apply(_get_resolved_transporter, axis=1)
+
+    # Also fix resolvedCustomer: block operational entities from customer chart
+    def _get_resolved_customer(r: pd.Series) -> str | None:
+        cust = _clean_text(r.get("customer", ""))
+        if not cust:
+            return None
+        if _is_blocked_from_customer(cust):
+            return None
+        return cust
+
+    df["resolvedCustomer"] = df.apply(_get_resolved_customer, axis=1)
+
+    # By transporter — only entities with transporter role
+    trans_df = df[df["resolvedTransporter"].notna() & (df["resolvedTransporter"] != "")]
     by_transporter: dict[str, Any] = {}
-    for tp, grp in trans_df.groupby("transporter"):
+    for tp, grp in trans_df.groupby("resolvedTransporter"):
         cnt = len(grp)
         delay_cnt = int(grp["primaryIssue"].isin({"delay", "waiting_time"}).sum())
         punctuality_score = round((cnt - delay_cnt) / cnt * 100, 1) if cnt else 100.0
@@ -772,9 +933,9 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
             area_counts[a] = area_counts.get(a, 0) + 1
 
     # Missing load ref by customer
-    mlr_df = df[df["missing_load_ref"] & (df["customer"].str.strip() != "")]
+    mlr_df = df[df["missing_load_ref"] & df["resolvedCustomer"].notna() & (df["resolvedCustomer"] != "")]
     missing_load_ref_by_customer = (
-        mlr_df.groupby("customer")
+        mlr_df.groupby("resolvedCustomer")
         .size()
         .sort_values(ascending=False)
         .to_dict()
