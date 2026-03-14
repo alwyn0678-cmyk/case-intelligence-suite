@@ -48,6 +48,15 @@ interface BackendResult {
   preventable_count: number;
   preventable_rate: number;
   cases: Record<string, unknown>[];
+  health_check?: {
+    status: string;
+    alerts: string[];
+    otherPct: number;
+    below60Pct: number;
+    reviewFlagPct: number;
+    reviewFlagViolations: number;
+    categoriesSeen: number;
+  };
 }
 
 // ─── Map backend response → AnalysisResult ───────────────────────
@@ -120,7 +129,7 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       combinedText: '',
       issues: [raw.primaryIssue as string].filter(Boolean),
       primaryIssue: (raw.primaryIssue as string) ?? 'other',
-      secondaryIssue: null,
+      secondaryIssue: (raw.secondaryIssue as string) ?? null,
       issueState: (raw.issueState as string) ?? 'unknown',
       weekKey: (raw.weekKey as string) ?? '',
       resolvedArea: (raw.resolvedArea as string) ?? null,
@@ -132,19 +141,21 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       resolvedDepot: null,
       resolvedDeepseaTerminal: null,
       confidence: (raw.confidence as number) ?? 0.5,
-      reviewFlag: false,
+      reviewFlag: (raw.reviewFlag as boolean) ?? false,
       unresolvedReason: null,
       allEntities: [],
       unknownEntities: [],
-      evidence: [],
-      sourceFieldsUsed: [],
-      detectedIntent: '',
-      detectedObject: '',
-      triggerPhrase: '',
-      triggerSourceField: '',
+      evidence: (() => { try { return JSON.parse((raw.evidence as string) ?? '[]') as string[]; } catch { return []; } })(),
+      sourceFieldsUsed: (() => { try { return JSON.parse((raw.sourceFieldsUsed as string) ?? '[]') as string[]; } catch { return []; } })(),
+      detectedIntent: (raw.detectedIntent as string) ?? '',
+      detectedObject: (raw.detectedObject as string) ?? '',
+      triggerPhrase: (raw.triggerPhrase as string) ?? '',
+      triggerSourceField: (raw.triggerSourceField as string) ?? '',
       _raw: raw,
     } as unknown as EnrichedRecord;
   });
+
+  const reviewFlagCount = records.filter(r => r.reviewFlag).length;
 
   // Build weeklyHistory from cases
   const weeklyHistory: Record<string, { total: number; issues: Record<string, number>; customers: Record<string, number>; transporters: Record<string, number>; areas: Record<string, number> }> = {};
@@ -195,7 +206,7 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       weekCount: b.summary.weekCount,
       quickWin: '',
       narrative: '',
-      reviewFlagCount: 0,
+      reviewFlagCount,
       unknownEntityCount: 0,
       unknownCustomerCount: 0,
     },
@@ -286,6 +297,7 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       complianceControls: [],
     },
     records,
+    healthCheck: b.health_check ?? null,
   };
 }
 

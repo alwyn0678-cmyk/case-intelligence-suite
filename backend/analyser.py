@@ -454,6 +454,38 @@ TAXONOMY: list[dict] = [
 
 TAXONOMY_MAP: dict[str, dict] = {item["id"]: item for item in TAXONOMY}
 
+REVIEW_FLAG_THRESHOLD = 0.60  # confidence below this triggers review
+
+# Maps each issue_id → human-readable description of the detected operational object.
+# Mirrors DETECTED_OBJECT_MAP in src/lib/intentDetection.ts.
+DETECTED_OBJECT_MAP: dict[str, str] = {
+    'load_ref':          'Load / Booking Reference',
+    'ref_provided':      'Load / Booking Reference',
+    'transport_order':   'Transport Order / TRO',
+    'customs':           'Customs / Compliance Document',
+    'portbase':          'Portbase / Port Notification',
+    'bl':                'Bill of Lading (B/L)',
+    't1':                'T1 / Transit Document',
+    'delay':             'Shipment / Delivery',
+    'closing_time':      'Terminal / Vessel Cutoff',
+    'amendment':         'Booking / Order Details',
+    'waiting_time':      'Waiting Time / Demurrage Charge',
+    'rate':              'Invoice / Rate / Charge',
+    'damage':            'Cargo / Goods',
+    'equipment':         'Container / Equipment',
+    'tracking':          'Shipment Status / Visibility',
+    'communication':     'Service / Escalation',
+    'equipment_release': 'Release Pin / Delivery Order',
+    'scheduling':        'Slot / Appointment',
+    'pickup_delivery':   'Pickup / Delivery Planning',
+    'capacity':          'Capacity / Availability',
+    'shipping_advice':   'Shipping Advice / Status Notice',
+    'vgm':               'VGM / Weight Certificate',
+    'seal':              'Seal Number / Container Seal',
+    'dangerous_goods':   'Dangerous Goods / IMO / ADR Declaration',
+    'other':             'Unclassified',
+}
+
 # ─────────────────────────────────────────────────────────────────
 # CATEGORY → ISSUE DIRECT MAPPING
 # When the Excel Category/Type column clearly names the issue, map it
@@ -1681,7 +1713,7 @@ _TOPIC_INTENT: dict[str, str] = {
     'equipment':        'equipment',
     'equipment_release':'equipment',
     # planning group (matches intentDetection.ts exactly)
-    'amendment':        'planning',
+    'amendment':        'operational',
     'capacity':         'planning',
     'scheduling':       'planning',
     'pickup_delivery':  'planning',
@@ -1711,38 +1743,34 @@ _TOPIC_INTENT: dict[str, str] = {
 _STRONG_INTENT_THRESHOLD = 0.75
 
 _FINANCIAL_GUARD_KEYWORDS: list[str] = [
-    # Core financial
-    'invoice', 'billing', 'charge', 'rate', 'cost', 'fee', 'payment',
-    'debit', 'credit', 'surcharge', 'overcharge', 'refund', 'price',
-    'pricing', 'quotation', 'tariff', 'freight rate', 'base rate',
-    # Storage / waiting
-    'storage costs', 'storage cost', 'waiting time cost', 'waiting time charges',
-    'waiting costs invoice', 'detention charge', 'detention invoice',
-    'demurrage charge', 'demurrage invoice', 'storage invoice',
-    # Extra costs — all variants from intentDetection.ts
-    'extra costs', 'extra cost', 'extra cost invoice', 'extra costs invoice',
-    'extra costs report', 'extra cost report', 'extrakostenrechnung',
-    'extra kosten rapport', 'extra kosten report', 'meerkosten rapport',
-    'meerkosten report', 'additional charge',
-    # Billing types
-    'billing report', 'billing dispute', 'billing issue', 'billing error', 'billing query',
-    'cost invoice', 'waiting cost invoice', 'cost report',
-    # Credit / debit notes
-    'credit note', 'credit memo', 'debit note', 'debit memo',
-    # Invoice specifics
-    'invoice query', 'invoice dispute', 'invoice incorrect', 'invoice error',
-    'charge dispute',
-    # Self-billing / DCH
+    # Self-billing / DCH (always financial, never customs/reference)
     'selfbilling', 'self billing', 'self-billing', 'selfbill', 'self bill',
     'dch invoice', 'dch billing', 'dch report',
-    # PO / purchase order
-    'purchase order', 'po number', 'po no', 'po amount mismatch', 'po mismatch',
-    'po discrepancy', 'po bedrag', 'po betrag', 'po abweichung', 'po differenz',
+    # Extra costs — all variants
+    'extra cost invoice', 'extra costs invoice',
+    'extra costs report', 'extra cost report', 'extrakostenrechnung',
+    'extra kosten rapport', 'extra kosten report',
+    'meerkosten rapport', 'meerkosten report',
+    # Billing specifics
+    'billing report', 'billing dispute', 'billing issue', 'billing error',
+    'cost invoice', 'waiting cost invoice', 'waiting costs invoice',
+    # Storage and waiting-time financial charges
+    'demurrage invoice', 'detention invoice', 'storage invoice',
+    'storage cost invoice', 'storage costs invoice',
+    # Credit / debit notes
+    'credit note', 'credit memo', 'debit note', 'debit memo',
+    # Invoice / charge disputes
+    'invoice query', 'invoice dispute', 'invoice incorrect', 'invoice error',
+    'charge dispute', 'billing query',
+    'overcharged', 'overcharge',
+    # PO mismatches
+    'po amount mismatch', 'po mismatch', 'po discrepancy', 'po bedrag',
+    'po betrag', 'po abweichung', 'po differenz',
     # Cost allocation
     'cost allocation', 'kosten rapport', 'kostenbericht',
     # Other languages
-    'extra kosten', 'meerkosten', 'opslagkosten', 'wachttijd kost',
-    'extrakosten', 'lagerkosten', 'wartezeit kost', 'bestellnummer', 'inkooporder',
+    'wachttijd kosten', 'opslagkosten', 'wartezeit kosten',
+    'lagerkosten', 'meerkosten',
 ]
 
 
@@ -2002,8 +2030,8 @@ _PROVIDED_DOC_PATTERNS: list[re.Pattern] = [
     re.compile(r'\bsending\s+customs\b', re.I),
     re.compile(r'\bcustoms\s+documents\s+attached\b', re.I),
     re.compile(r'\bplease\s+find\s+the\s+(?:t1|mrn)\b', re.I),
-    re.compile(r'\b(?:mrn|t1)\s+(?:below|number\s+below|is)\b', re.I),
-    re.compile(r'\bthe\s+mrn\s+is\b', re.I),
+    re.compile(r'\b(?:mrn|t1)\s+(?:below|number\s+below|is(?!\s*(?:missing|absent|not\s|required|needed|still\s|wrong|incorrect|unavailable)))\b', re.I),
+    re.compile(r'\bthe\s+mrn\s+is\b(?!\s*(?:missing|absent|not\s|required|needed|still\s|wrong|incorrect|unavailable))', re.I),
     re.compile(r'\bfind\s+attached\s+mrn\b', re.I),
     re.compile(r'\bplease\s+find\s+attached\s+mrn\b', re.I),
     # Dutch
@@ -2053,23 +2081,53 @@ _SUBJECT_ONLY_FLOOR      = 0.48
 _SUBSTANTIVE_DESC_MIN    = 30
 
 
+def _find_trigger_signal(text: str, issue_id: str) -> str:
+    """Return the strongest signal phrase from text relevant to issue_id."""
+    t = text.lower()
+    # For ref_provided, search doc topics that fork to it
+    search_topics: list[str] = []
+    if issue_id == 'ref_provided':
+        search_topics = ['load_ref', 'customs', 't1', 'portbase', 'bl']
+    else:
+        search_topics = [issue_id]
+
+    for rule in _TOPIC_RULES:
+        if rule['topic'] not in search_topics:
+            continue
+        for sig in rule['strong']:
+            if sig in t:
+                return sig
+        for sig in rule['weak']:
+            if sig in t:
+                return sig
+
+    # Rate: check financial subject patterns
+    if issue_id == 'rate':
+        for pat in _FINANCIAL_SUBJECT_PATTERNS:
+            if pat in t:
+                return pat
+
+    # Check fallback rules
+    for fb_rule in _FALLBACK_RULES:
+        if fb_rule['issueId'] == issue_id:
+            m = fb_rule['pattern'].search(text)
+            if m:
+                return m.group(0)[:80]
+
+    # Operational clue keywords
+    for keyword, mapped_id, _ in _OPERATIONAL_CLUES:
+        if mapped_id == issue_id and keyword in t:
+            return keyword
+
+    return ''
+
+
 def _classify_row(subject: str, description: str, isr: str, category: str) -> dict:
     """
-    Classify a single row. Full pipeline mirrors classifyCase.ts + intentDetection.ts + loadRefGuards.ts:
-    1.  Direct category column mapping
-    2.  Financial subject early-exit
-    3.  Per-field weighted classification
-    4.  filterByIntentPriority — suppress lower-priority topics when strong higher-priority match
-    5.  Subject-only penalty (no substantive description → lower confidence)
-    6.  Description-first override (with intent priority guard)
-    7.  validateLoadRefMissing — strict gate
-    8.  load_ref → ref_provided when body explicitly provides a ref value
-    9.  ref_provided wins over load_ref
-    10. Doc provision guard (customs/t1/bl/portbase → ref_provided when providing docs)
-    11. Planning compliance guard (reduce confidence for doc topics without missing language)
-    12. Fallback regex rules (+ financial context guard)
-    13. Operational clue scan
-    14. Other
+    Classify a single row. Returns full diagnostic dict including:
+    primaryIssue, secondaryIssue, issueState, confidence, reviewFlag,
+    detectedIntent, detectedObject, triggerPhrase, triggerSourceField,
+    evidence, sourceFieldsUsed, fallbackUsed, unresolvedReason.
     """
     fields: dict[str, str] = {
         'description': description or '',
@@ -2078,6 +2136,75 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
         'category':    category or '',
     }
 
+    source_fields_used = [k for k, v in fields.items() if v.strip()]
+    fallback_used = False
+    ranked: list[dict] = []
+
+    # ── inline helper to build final result dict ─────────────────────
+    def _build(primary_issue: str, state: str, conf: float,
+               fb_used: bool = False, rnk: list[dict] | None = None) -> dict:
+        nonlocal fallback_used
+        fallback_used = fb_used
+        # Confidence assertion
+        assert 0.0 <= conf <= 1.0, f"Confidence {conf} out of range 0–1 for issue {primary_issue}"
+
+        review_flag = conf < REVIEW_FLAG_THRESHOLD
+
+        # Secondary issue — first ranked result that differs from primary
+        secondary = None
+        for m in (rnk or []):
+            if m['issueId'] != primary_issue:
+                secondary = m['issueId']
+                break
+
+        detected_intent = _TOPIC_INTENT.get(primary_issue, 'unknown')
+        detected_object = DETECTED_OBJECT_MAP.get(primary_issue, '')
+
+        # Trigger phrase — search best field for primary issue signals
+        trigger_phrase = ''
+        trigger_source = ''
+        for field_key, _ in _FIELD_WEIGHTS:
+            txt = fields[field_key]
+            if not txt.strip():
+                continue
+            phrase = _find_trigger_signal(txt, primary_issue)
+            if phrase:
+                trigger_phrase = phrase
+                trigger_source = field_key
+                break
+
+        # Evidence trail
+        evidence: list[str] = []
+        if trigger_phrase and trigger_source:
+            evidence.append(f'[{trigger_source}] strong signal: "{trigger_phrase}"')
+        if fb_used:
+            evidence.append(f'fallback: {primary_issue}')
+        if primary_issue == 'other':
+            evidence.append('no classification signals found')
+
+        # Unresolved reason
+        unresolved: str | None = None
+        if primary_issue == 'other':
+            unresolved = 'No classification signals found in available fields'
+        elif conf < REVIEW_FLAG_THRESHOLD:
+            unresolved = f'Low confidence ({conf:.0%}) — manual review needed'
+
+        return {
+            'primaryIssue':       primary_issue,
+            'secondaryIssue':     secondary,
+            'issueState':         state,
+            'confidence':         round(conf, 4),
+            'reviewFlag':         review_flag,
+            'detectedIntent':     detected_intent,
+            'detectedObject':     detected_object,
+            'triggerPhrase':      trigger_phrase,
+            'triggerSourceField': trigger_source,
+            'evidence':           evidence,
+            'sourceFieldsUsed':   source_fields_used,
+            'fallbackUsed':       fb_used,
+            'unresolvedReason':   unresolved,
+        }
+
     # 1. Direct category column mapping (highest confidence, bypasses scoring)
     if category:
         cat_key = category.lower().strip()
@@ -2085,13 +2212,13 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
             mapped = CATEGORY_MAP[cat_key]
             combined = ' '.join(filter(None, [description, subject, isr]))
             state = _detect_state_windowed(combined)
-            return {'primaryIssue': mapped, 'issueState': state, 'confidence': 0.88}
+            return _build(mapped, state, 0.88)
 
     # 2. Financial subject early-exit — unambiguous financial subjects override everything
     subj_lower = subject.lower()
     for pat in _FINANCIAL_SUBJECT_PATTERNS:
         if pat in subj_lower:
-            return {'primaryIssue': 'rate', 'issueState': 'unknown', 'confidence': 0.92}
+            return _build('rate', 'unknown', 0.92)
 
     # 3. Per-field weighted classification
     match_map: dict[str, dict] = {}
@@ -2102,15 +2229,13 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
             continue
         field_matches = _classify_by_rules(field_text)
         for m in field_matches:
-            # load_ref from subject is severely down-weighted (billing emails often mention
-            # "load ref" incidentally in the subject line without it being the core issue)
             eff_weight = _LOAD_REF_SUBJECT_WEIGHT if (field_key == 'subject' and m['issueId'] == 'load_ref') else weight
             weighted_conf = min(m['confidence'] * eff_weight, 0.98)
             existing = match_map.get(m['issueId'])
             if not existing or weighted_conf > existing['confidence']:
                 match_map[m['issueId']] = {**m, 'confidence': weighted_conf, '_field': field_key}
 
-    # Fall back to combined text if no per-field matches (e.g. very short rows)
+    # Fall back to combined text if no per-field matches
     if not match_map:
         normalized = ' '.join(filter(None, [description, subject, isr, category]))
         for m in _classify_by_rules(normalized):
@@ -2118,8 +2243,7 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
 
     ranked = sorted(match_map.values(), key=lambda m: m['confidence'], reverse=True)
 
-    # 4. filterByIntentPriority — primary guard against customs over-classification.
-    # If rate/damage/waiting_time scores ≥ 0.75, suppress customs/t1/portbase/bl/load_ref.
+    # 4. filterByIntentPriority
     ranked = _filter_by_intent_priority(ranked)
 
     if ranked:
@@ -2128,17 +2252,13 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
         state      = best['state']
         confidence = best['confidence']
 
-        # 5. Subject-only penalty — if best match came from subject and description is empty/short,
-        # reduce confidence (description is the authoritative source of truth).
+        # 5. Subject-only penalty
         desc_is_substantive = len((description or '').strip()) >= _SUBSTANTIVE_DESC_MIN
         isr_has_content = len((isr or '').strip()) > 10
         if not desc_is_substantive and not isr_has_content and best.get('_field') == 'subject':
             confidence = max(confidence - _SUBJECT_ONLY_PENALTY, _SUBJECT_ONLY_FLOOR)
 
         # 6. Description-first override
-        # If description classifies as a DIFFERENT topic at ≥ 0.55 confidence,
-        # description wins (body is source of truth over subject shorthand).
-        # Guard: don't let lower-priority-intent description override higher-priority subject.
         if desc_is_substantive:
             desc_matches = _classify_by_rules(description)
             desc_matches = _filter_by_intent_priority(desc_matches)
@@ -2149,7 +2269,6 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
                     not (desc_primary['issueId'] == 'ref_provided' and issue_id == 'load_ref') and
                     not (desc_primary['issueId'] == 'load_ref'    and issue_id == 'ref_provided')
                 )
-                # Intent priority guard: description intent must be same or higher priority
                 desc_intent_p = _INTENT_PRIORITY.get(_TOPIC_INTENT.get(desc_primary['issueId'], 'operational'), 9)
                 curr_intent_p = _INTENT_PRIORITY.get(_TOPIC_INTENT.get(issue_id, 'operational'), 9)
                 intent_allows_override = desc_intent_p <= curr_intent_p
@@ -2158,16 +2277,13 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
                     state      = desc_primary['state']
                     confidence = min(desc_primary['confidence'], confidence + 0.05)
 
-        # 6. validateLoadRefMissing strict gate
-        # If classified as load_ref but doesn't pass the 7-step gate, demote it.
+        # 7. validateLoadRefMissing strict gate
         if issue_id == 'load_ref':
             if not _validate_load_ref_missing(subject, description, isr):
-                # Check if body actually provides a ref value
                 body = ' '.join(filter(None, [description, subject, isr]))
                 if _text_provides_ref(body):
-                    return {'primaryIssue': 'ref_provided', 'issueState': 'provided', 'confidence': 0.72}
-                # Demote load_ref — use next best ranked match
-                remaining = [m for m in ranked if m['issueId'] not in ('load_ref',)]
+                    return _build('ref_provided', 'provided', 0.72, rnk=ranked)
+                remaining = [m for m in ranked if m['issueId'] != 'load_ref']
                 if remaining:
                     issue_id   = remaining[0]['issueId']
                     state      = remaining[0]['state']
@@ -2176,19 +2292,19 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
                     issue_id = None  # Fall through to fallback
 
         if issue_id:
-            # 7. load_ref → ref_provided when body provides an explicit reference value
+            # 8. load_ref → ref_provided when body explicitly provides a ref value
             if issue_id == 'load_ref':
                 body = ' '.join(filter(None, [description, subject, isr]))
                 if _text_provides_ref(body):
                     issue_id = 'ref_provided'
                     state    = 'provided'
 
-            # 8. ref_provided and load_ref cannot coexist — ref_provided wins
+            # 9. ref_provided wins over load_ref
             if 'ref_provided' in match_map and issue_id == 'load_ref':
                 issue_id = 'ref_provided'
                 state    = 'provided'
 
-            # 9. Doc provision guard — customs/t1/bl/portbase + provision language → ref_provided
+            # 10. Doc provision guard — customs/t1/bl/portbase + provision language → ref_provided
             if issue_id in _DOC_TOPICS_STRICT:
                 body = ' '.join(filter(None, [description, subject, isr]))
                 if _doc_provision_detected(body):
@@ -2196,13 +2312,11 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
                     state      = 'provided'
                     confidence = 0.72
 
-            # 10. Planning compliance guard — doc topics without explicit missing language
-            # e.g. feasibility emails that mention "customs" → reduce confidence
+            # 11. Planning compliance guard
             if issue_id in _DOC_TOPICS_STRICT:
                 body = ' '.join(filter(None, [description, subject, isr]))
                 if _has_planning_context(body) and not _has_doc_missing_language(body):
                     confidence = max(confidence - 0.25, 0.30)
-                    # If confidence dropped below threshold, demote to next best
                     if confidence <= 0.35:
                         remaining = [m for m in ranked if m['issueId'] not in _DOC_TOPICS_STRICT]
                         if remaining:
@@ -2210,25 +2324,23 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
                             state      = remaining[0]['state']
                             confidence = remaining[0]['confidence']
 
-            return {'primaryIssue': issue_id, 'issueState': state, 'confidence': confidence}
+            return _build(issue_id, state, confidence, rnk=ranked)
 
-    # 11. Fallback regex rules
+    # 12. Fallback regex rules
     normalized = ' '.join(filter(None, [description, subject, isr, category]))
     fb = _fallback_classify(normalized)
     if fb:
-        # Financial context guard: if fallback gives a doc/ref topic but strong financial
-        # context is present (e.g. billing email with "no customs docs"), keep it as rate.
         if fb['issueId'] in ('customs', 't1', 'portbase', 'bl', 'load_ref') and _has_strong_financial_context(normalized):
-            return {'primaryIssue': 'rate', 'issueState': 'unknown', 'confidence': 0.65}
-        return {'primaryIssue': fb['issueId'], 'issueState': fb['state'], 'confidence': fb['confidence']}
+            return _build('rate', 'unknown', 0.65, fb_used=True, rnk=ranked)
+        return _build(fb['issueId'], fb['state'], fb['confidence'], fb_used=True, rnk=ranked)
 
-    # 12. Operational clue scan
+    # 13. Operational clue scan
     clue = _operational_clue_scan(normalized)
     if clue:
-        return {'primaryIssue': clue['issueId'], 'issueState': clue['state'], 'confidence': clue['confidence']}
+        return _build(clue['issueId'], clue['state'], clue['confidence'], fb_used=True, rnk=ranked)
 
-    # 13. Unclassified
-    return {'primaryIssue': 'other', 'issueState': 'unknown', 'confidence': 0.10}
+    # 14. Unclassified
+    return _build('other', 'unknown', 0.10, fb_used=True, rnk=ranked)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -2272,6 +2384,77 @@ def _normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────
+# HEALTH CHECK
+# ─────────────────────────────────────────────────────────────────
+
+def _compute_health_check(df: 'pd.DataFrame', issue_counts: dict, total: int) -> dict:
+    """Post-classification health metrics. Fail conditions logged as alerts."""
+    if total == 0:
+        return {"status": "no_data", "alerts": []}
+
+    other_count = issue_counts.get("other", 0)
+    other_pct = round(other_count / total * 100, 1)
+
+    below_60_count = int((df["confidence"] < 0.60).sum())
+    below_60_pct = round(below_60_count / total * 100, 1)
+
+    review_true_count = int(df["reviewFlag"].sum()) if "reviewFlag" in df.columns else 0
+    review_pct = round(review_true_count / total * 100, 1)
+
+    blank_intent = int((df["detectedIntent"].fillna("").str.strip() == "").sum()) if "detectedIntent" in df.columns else total
+    blank_intent_pct = round(blank_intent / total * 100, 1)
+
+    blank_object = int((df["detectedObject"].fillna("").str.strip() == "").sum()) if "detectedObject" in df.columns else total
+    blank_object_pct = round(blank_object / total * 100, 1)
+
+    # reviewFlag=False while confidence < 0.60 violations
+    if "reviewFlag" in df.columns:
+        violations = int(((df["confidence"] < 0.60) & (~df["reviewFlag"].astype(bool))).sum())
+    else:
+        violations = 0
+
+    categories_seen = len([k for k in issue_counts if k != "other" and issue_counts[k] > 0])
+
+    alerts = []
+    status = "pass"
+
+    if other_pct > 15:
+        alerts.append(f"FAIL: Other/Unclassified {other_pct}% > 15% threshold")
+        status = "fail"
+    if blank_intent_pct > 1:
+        alerts.append(f"FAIL: Blank detectedIntent {blank_intent_pct}% > 1% threshold")
+        status = "fail"
+    if blank_object_pct > 1:
+        alerts.append(f"FAIL: Blank detectedObject {blank_object_pct}% > 1% threshold")
+        status = "fail"
+    if violations > 0:
+        alerts.append(f"FAIL: {violations} rows have confidence < 0.60 but reviewFlag=False")
+        status = "fail"
+    if categories_seen < 6:
+        alerts.append(f"WARN: Only {categories_seen} non-Other categories in output — taxonomy underreach")
+        if status == "pass":
+            status = "warn"
+
+    return {
+        "status": status,
+        "totalRows": total,
+        "otherCount": other_count,
+        "otherPct": other_pct,
+        "below60Count": below_60_count,
+        "below60Pct": below_60_pct,
+        "reviewFlagCount": review_true_count,
+        "reviewFlagPct": review_pct,
+        "blankIntentCount": blank_intent,
+        "blankIntentPct": blank_intent_pct,
+        "blankObjectCount": blank_object,
+        "blankObjectPct": blank_object_pct,
+        "reviewFlagViolations": violations,
+        "categoriesSeen": categories_seen,
+        "alerts": alerts,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────
 # MAIN ENTRY POINT
 # ─────────────────────────────────────────────────────────────────
 
@@ -2312,9 +2495,19 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
         )),
         axis=1,
     )
-    df["primaryIssue"] = classified["primaryIssue"]
-    df["issueState"] = classified["issueState"]
-    df["confidence"] = classified["confidence"]
+    df["primaryIssue"]       = classified["primaryIssue"]
+    df["secondaryIssue"]     = classified["secondaryIssue"]
+    df["issueState"]         = classified["issueState"]
+    df["confidence"]         = classified["confidence"]
+    df["reviewFlag"]         = classified["reviewFlag"]
+    df["detectedIntent"]     = classified["detectedIntent"]
+    df["detectedObject"]     = classified["detectedObject"]
+    df["triggerPhrase"]      = classified["triggerPhrase"]
+    df["triggerSourceField"] = classified["triggerSourceField"]
+    df["evidence"]           = classified["evidence"]
+    df["sourceFieldsUsed"]   = classified["sourceFieldsUsed"]
+    df["fallbackUsed"]       = classified["fallbackUsed"]
+    df["unresolvedReason"]   = classified["unresolvedReason"]
 
     # Resolve area
     def _row_area(r) -> str | None:
@@ -2473,11 +2666,28 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
 
     # Return only key fields per case to keep response small
     import json as _json
-    KEY_FIELDS = ["case_number", "subject", "customer", "transporter", "date",
-                  "zip", "area", "booking_ref", "category", "primaryIssue",
-                  "issueState", "confidence", "resolvedArea", "weekKey", "missing_load_ref"]
+    KEY_FIELDS = [
+        "case_number", "subject", "description", "isr_details", "customer", "transporter",
+        "date", "status", "priority", "zip", "area", "booking_ref", "category",
+        "primaryIssue", "secondaryIssue", "issueState",
+        "confidence", "reviewFlag",
+        "detectedIntent", "detectedObject",
+        "triggerPhrase", "triggerSourceField",
+        "fallbackUsed", "unresolvedReason",
+        "resolvedArea", "resolvedCustomer", "resolvedTransporter",
+        "weekKey", "missing_load_ref",
+    ]
     keep_cols = [c for c in KEY_FIELDS if c in df.columns]
     cases_df = df[keep_cols].copy()
+
+    # Serialize list/array columns to JSON strings for transport
+    for list_col in ["evidence", "sourceFieldsUsed"]:
+        if list_col in df.columns:
+            import json as _json_inner
+            cases_df[list_col] = df[list_col].apply(
+                lambda v: _json_inner.dumps(v) if isinstance(v, list) else (v or "[]")
+            )
+
     cases = _json.loads(cases_df.to_json(orient='records', date_format='iso', default_handler=str))
 
     # Summary
@@ -2523,4 +2733,5 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
         "preventable_count": preventable_count,
         "preventable_rate": preventable_rate,
         "cases": cases,
+        "health_check": _compute_health_check(df, issue_counts, total),
     }
