@@ -828,9 +828,14 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
                 out[str(k)] = v
         return out
 
-    # Use pandas JSON serialiser — handles NaT, NaN, Timestamps natively
+    # Return only key fields per case to keep response small
     import json as _json
-    cases = _json.loads(df.to_json(orient='records', date_format='iso', default_handler=str))
+    KEY_FIELDS = ["case_number", "subject", "customer", "transporter", "date",
+                  "zip", "area", "booking_ref", "category", "primaryIssue",
+                  "issueState", "confidence", "resolvedArea", "weekKey", "missing_load_ref"]
+    keep_cols = [c for c in KEY_FIELDS if c in df.columns]
+    cases_df = df[keep_cols].copy()
+    cases = _json.loads(cases_df.to_json(orient='records', date_format='iso', default_handler=str))
 
     # Summary
     top_issue_id = top_issues[0][0] if top_issues else "other"
