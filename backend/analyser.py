@@ -138,6 +138,14 @@ TAXONOMY: list[dict] = [
             "missed slot", "slot missed", "late to rail", "rail cut missed",
             "barge cut missed", "vessel cut missed", "cut-off missed", "cutoff missed",
             "not timely", "untimely", "overdue shipment", "deferred", "postponed",
+            # Additional high-coverage phrases
+            "not arrived", "hasn't arrived", "have not arrived", "still not here",
+            "driver no show", "no show", "driver not shown", "truck not arrived",
+            "vehicle not arrived", "still waiting for", "still at", "stuck at",
+            "not yet arrived", "not yet picked", "not yet collected", "not yet delivered",
+            "expected yesterday", "expected today", "expected this morning",
+            "originally due", "was due", "was supposed to", "should have arrived",
+            "shipment late", "consignment late", "delivery overdue",
         ],
         "hours": 2.0,
         "preventable": False,
@@ -187,6 +195,18 @@ TAXONOMY: list[dict] = [
             "need to correct", "need to update", "must correct", "must update",
             "booking amendment", "booking correction", "order amendment", "order correction",
             "shipment amendment", "shipment correction", "cancel and rebook", "rebook",
+            # High-coverage additions
+            "wrong address", "incorrect address", "address correction", "new address",
+            "updated address", "address has changed", "address change",
+            "wrong name", "incorrect name", "name correction", "name change",
+            "wrong container", "incorrect container", "container change",
+            "wrong weight", "incorrect weight", "weight correction",
+            "wrong date", "incorrect date", "date change", "date correction",
+            "mistake in", "error in", "incorrect details", "wrong details",
+            "details need to be", "needs updating", "need to be corrected",
+            "please note the change", "please note the update",
+            "we have updated", "we have amended", "we have changed",
+            "as discussed we need to", "kindly amend", "kindly correct",
         ],
         "hours": 0.75,
         "preventable": True,
@@ -249,6 +269,17 @@ TAXONOMY: list[dict] = [
             "track and trace", "status update", "status query", "status check",
             "please advise status", "what is status", "advise location", "advise status",
             "advise eta", "advise arrival", "advise departure",
+            # High-coverage additions
+            "eta", "atd", "ata", "proof of delivery", "pod", "delivery proof",
+            "where is my", "where is the", "where are the", "where are my",
+            "what is the status", "what is the current", "what is the latest",
+            "any update on", "update on the", "please update us",
+            "can you advise", "can you confirm", "can you check",
+            "has it arrived", "has it been delivered", "has it departed",
+            "confirm arrival", "confirm delivery", "confirm receipt",
+            "estimated delivery", "estimated arrival", "expected delivery",
+            "live tracking", "live status", "real-time",
+            "last known", "last update", "last event", "last milestone",
         ],
         "hours": 0.5,
         "preventable": True,
@@ -266,6 +297,18 @@ TAXONOMY: list[dict] = [
             "serious issue", "serious problem", "serious concern",
             "please help", "please assist", "need assistance", "need help",
             "critical issue", "critical problem",
+            # High-coverage additions
+            "chasing", "following up", "follow up", "follow-up",
+            "no reply", "no response", "unanswered", "not responded",
+            "second reminder", "third reminder", "reminder",
+            "as per my previous email", "as per my email", "as per my last",
+            "did you receive my", "have you received my",
+            "awaiting your response", "awaiting your reply",
+            "please respond", "please reply asap", "please reply urgently",
+            "this is unacceptable", "this is not acceptable", "not good enough",
+            "poor service", "poor communication", "lack of communication",
+            "we are very disappointed", "deeply disappointed",
+            "management attention", "raise this formally", "formal complaint",
         ],
         "hours": 0.75,
         "preventable": True,
@@ -402,6 +445,173 @@ TAXONOMY: list[dict] = [
 ]
 
 TAXONOMY_MAP: dict[str, dict] = {item["id"]: item for item in TAXONOMY}
+
+# ─────────────────────────────────────────────────────────────────
+# CATEGORY → ISSUE DIRECT MAPPING
+# When the Excel Category/Type column clearly names the issue, map it
+# directly — bypasses keyword scoring for much higher accuracy.
+# ─────────────────────────────────────────────────────────────────
+CATEGORY_MAP: dict[str, str] = {
+    # Delay
+    "delay": "delay", "delayed": "delay", "late": "delay", "not on time": "delay",
+    "delay / not on time": "delay", "transport delay": "delay", "delivery delay": "delay",
+    # Load ref
+    "load ref": "load_ref", "load reference": "load_ref", "missing load ref": "load_ref",
+    "missing load reference": "load_ref", "reference missing": "load_ref",
+    # Customs
+    "customs": "customs", "customs / documentation": "customs", "documentation": "customs",
+    "customs clearance": "customs", "customs documentation": "customs", "customs query": "customs",
+    # Amendment
+    "amendment": "amendment", "correction": "amendment", "booking amendment": "amendment",
+    "modification": "amendment", "update": "amendment", "change": "amendment",
+    # Damage
+    "damage": "damage", "claim": "damage", "cargo damage": "damage", "loss": "damage",
+    "cargo claim": "damage", "shortage": "damage",
+    # Waiting time
+    "waiting time": "waiting_time", "demurrage": "waiting_time", "detention": "waiting_time",
+    "storage": "waiting_time",
+    # Tracking
+    "tracking": "tracking", "visibility": "tracking", "status": "tracking",
+    "status update": "tracking", "tracking / visibility": "tracking", "pod": "tracking",
+    "proof of delivery": "tracking", "eta": "tracking",
+    # B/L
+    "bill of lading": "bl", "b/l": "bl", "bl": "bl", "bl issue": "bl",
+    "original bl": "bl", "bl amendment": "bl", "telex release": "bl",
+    # T1
+    "t1": "t1", "transit document": "t1", "transit": "t1", "t1 document": "t1",
+    # Equipment
+    "equipment": "equipment", "container issue": "equipment", "equipment issue": "equipment",
+    "reefer": "equipment", "equipment defect": "equipment",
+    # Equipment release
+    "release": "equipment_release", "equipment release": "equipment_release",
+    "pin release": "equipment_release", "delivery order": "equipment_release",
+    "container release": "equipment_release",
+    # Transport order
+    "transport order": "transport_order", "haulier order": "transport_order", "tro": "transport_order",
+    "transport instruction": "transport_order",
+    # Portbase
+    "portbase": "portbase", "port notification": "portbase", "port pre-arrival": "portbase",
+    "port pre arrival": "portbase",
+    # Rate / invoice
+    "rate": "rate", "invoice": "rate", "billing": "rate", "charge": "rate",
+    "surcharge": "rate", "overcharge": "rate", "pricing": "rate", "freight rate": "rate",
+    # Capacity
+    "capacity": "capacity", "feasibility": "capacity", "availability": "capacity",
+    "capacity request": "capacity",
+    # Pickup / delivery
+    "pickup": "pickup_delivery", "delivery": "pickup_delivery", "collection": "pickup_delivery",
+    "pick up": "pickup_delivery", "delivery planning": "pickup_delivery",
+    "pick-up": "pickup_delivery",
+    # Scheduling
+    "scheduling": "scheduling", "appointment": "scheduling", "slot": "scheduling",
+    "slot booking": "scheduling",
+    # VGM
+    "vgm": "vgm", "weight": "vgm", "weight note": "vgm", "verified gross mass": "vgm",
+    # Dangerous goods
+    "dangerous goods": "dangerous_goods", "hazmat": "dangerous_goods",
+    "dg": "dangerous_goods", "imo": "dangerous_goods", "adr": "dangerous_goods",
+    # Communication
+    "complaint": "communication", "escalation": "communication",
+    "escalate": "communication", "communication": "communication",
+    # Shipping advice
+    "shipping advice": "shipping_advice", "booking confirmation": "shipping_advice",
+    "pre-alert": "shipping_advice", "pre alert": "shipping_advice", "asn": "shipping_advice",
+    "notification": "shipping_advice", "advice": "shipping_advice",
+    # Closing time / cutoff
+    "closing time": "closing_time", "cutoff": "closing_time", "cut-off": "closing_time",
+    "vessel cut": "closing_time", "rail cut": "closing_time", "barge cut": "closing_time",
+    # Seal
+    "seal": "seal", "seal issue": "seal",
+}
+
+# ─────────────────────────────────────────────────────────────────
+# RECOVERY SIGNALS
+# Broad short-phrase fallback used ONLY when keyword scoring returns
+# "other". Ordered by specificity (most specific first).
+# ─────────────────────────────────────────────────────────────────
+RECOVERY_SIGNALS: list[tuple[list[str], str]] = [
+    # Delay / no-show
+    (["not arrived", "no show", "still waiting", "driver not arrived", "driver hasn't",
+      "truck not arrived", "vehicle not arrived", "hasn't been collected", "hasn't arrived",
+      "not yet delivered", "not yet collected", "not yet received", "not yet picked up",
+      "still not here", "still at origin", "past due", "overdue"], "delay"),
+    # Tracking / status
+    (["where is", "where are", "what is the status", "what's the status", "status of",
+      "update on", "any news", "any update", "please update", "advise on",
+      "can you advise", "proof of delivery", "pod request", "confirm arrival",
+      "confirm delivery", "confirm receipt", "has it arrived", "has it been delivered",
+      "estimated arrival", "when will it arrive", "when will the delivery"], "tracking"),
+    # Amendment / correction
+    (["wrong address", "incorrect address", "address correction", "address change",
+      "wrong name", "incorrect name", "name correction", "please change the",
+      "needs to be updated", "needs to be corrected", "correction needed",
+      "please update the", "wrong details", "incorrect details",
+      "mistake in", "wrong date", "incorrect date", "error in booking"], "amendment"),
+    # Communication / escalation
+    (["chasing", "following up", "follow-up", "no reply", "no response", "unanswered",
+      "third reminder", "second reminder", "first reminder", "as per my previous",
+      "as per my email", "did you receive", "have you received my",
+      "awaiting your response", "please respond", "please reply", "urgent reminder",
+      "reminder email", "this is a reminder"], "communication"),
+    # Equipment release
+    (["release code", "release pin", "pin code", "container pin", "vbs pin",
+      "require pin", "need pin", "pin for", "pin number", "release number",
+      "collect container", "container collection", "pickup container",
+      "terminal release", "port release", "collect at terminal"], "equipment_release"),
+    # Scheduling / timing
+    (["what time will", "confirm time", "delivery window", "morning delivery",
+      "afternoon delivery", "morning slot", "afternoon slot",
+      "arrival window", "loading time", "unloading time", "departure time",
+      "what day will", "which day will"], "scheduling"),
+    # Pickup / delivery arrangement
+    (["please arrange", "please organise", "please organize", "need to arrange",
+      "requires delivery to", "need delivery to", "please book transport",
+      "arrange collection from", "arrange delivery to",
+      "requesting transport", "book transport", "organize transport"], "pickup_delivery"),
+    # Rate / billing
+    (["quoted rate", "agreed rate", "contract rate", "spot rate",
+      "please invoice", "invoice attached", "payment due", "outstanding invoice",
+      "disputed invoice", "invoice query"], "rate"),
+    # Customs clearance
+    (["held at customs", "at customs", "cleared customs", "customs examination",
+      "under examination", "awaiting customs release", "customs hold",
+      "released from customs", "customs entry number", "awaiting clearance"], "customs"),
+    # B/L related
+    (["release cargo", "cargo release", "release shipment", "surrender bl",
+      "telex release", "cargo documents required", "original documents required",
+      "draft bl", "bl draft"], "bl"),
+    # Damage / shortage
+    (["goods were damaged", "arrived damaged", "items missing", "goods missing",
+      "short delivery", "short shipment", "partial delivery",
+      "not all items received", "goods not received", "incorrect quantity"], "damage"),
+    # Capacity / feasibility
+    (["is it possible to", "can you do", "can you handle", "is there capacity",
+      "is it feasible", "do you have space", "slot available", "is there a slot",
+      "can this be loaded"], "capacity"),
+    # Closing time / cutoff
+    (["what is the cutoff", "what is the closing", "when is the cutoff",
+      "when is the closing", "gate closes at", "gate opening time", "gate close time"], "closing_time"),
+    # Seal
+    (["seal no.", "seal nr", "container seal", "seal intact", "seal broken",
+      "seal ok", "seal check", "seal discrepancy"], "seal"),
+    # Dangerous goods
+    (["un number", "dg class", "imo class", "hazardous material", "dangerous cargo",
+      "dg cargo", "imdg", "dg document", "dangerous goods form",
+      "un no", "adnr", "regulated goods"], "dangerous_goods"),
+    # VGM / weight
+    (["gross weight", "gross mass", "total weight", "weight declaration",
+      "vgm declaration", "weighing slip", "weight slip",
+      "shipper weight", "verified weight"], "vgm"),
+    # Shipping advice / pre-alert
+    (["booking confirmed", "booking acknowledgement", "shipment confirmed",
+      "pre-alert", "pre alert", "arrival notice", "departure notice",
+      "goods dispatched", "goods shipped", "shipped today",
+      "vessel departed", "loaded on vessel"], "shipping_advice"),
+    # Waiting / demurrage
+    (["waiting at gate", "waiting at terminal", "driver waiting", "truck waiting",
+      "free time expired", "free days expired", "per diem",
+      "storage accruing", "demurrage accruing"], "waiting_time"),
+]
 
 # ─────────────────────────────────────────────────────────────────
 # ENTITY REGISTRY (ported from src/config/referenceData.ts)
@@ -670,19 +880,70 @@ def _detect_issue(text_lower: str) -> str:
     """Return taxonomy id for the best-matching issue, or 'other'."""
     best_id = "other"
     best_score = 0
-
     for item in TAXONOMY:
         if item["id"] == "other":
             continue
         score = 0
         for kw in item["keywords"]:
             if kw in text_lower:
-                score += len(kw)  # longer keyword = higher weight
+                score += len(kw)
         if score > best_score:
             best_score = score
             best_id = item["id"]
-
     return best_id
+
+
+def _detect_issue_weighted(description: str, subject: str, isr: str, category: str) -> str:
+    """Score each field with different weights; return best taxonomy match or 'other'."""
+    fields = [
+        (description.lower(), 3.0),
+        (subject.lower(), 2.0),
+        (isr.lower(), 1.5),
+        (category.lower(), 1.0),
+    ]
+    scores: dict[str, float] = {}
+    for item in TAXONOMY:
+        if item["id"] == "other":
+            continue
+        score = 0.0
+        for text, weight in fields:
+            for kw in item["keywords"]:
+                if kw in text:
+                    score += len(kw) * weight
+        if score > 0:
+            scores[item["id"]] = score
+    if not scores:
+        return "other"
+    return max(scores, key=lambda k: scores[k])
+
+
+def _recover_issue(combined: str) -> str:
+    """Broad recovery pass using RECOVERY_SIGNALS before assigning 'other'."""
+    for signals, issue_id in RECOVERY_SIGNALS:
+        for sig in signals:
+            if sig in combined:
+                return issue_id
+    return "other"
+
+
+def _detect_state(combined: str) -> str:
+    """Detect the issue state from combined text."""
+    if any(p in combined for p in ["missing", "not received", "not provided", "required",
+                                    "needed", "please provide", "please send"]):
+        return "missing"
+    if any(p in combined for p in ["provided", "attached", "please find", "hereby",
+                                    "as requested", "please see below", "find below"]):
+        return "provided"
+    if any(p in combined for p in ["amended", "corrected", "updated", "changed"]):
+        return "amended"
+    if any(p in combined for p in ["delay", "delayed", "overdue", "late", "not on time"]):
+        return "delayed"
+    if any(p in combined for p in ["escalat", "complaint", "unacceptable"]):
+        return "escalated"
+    if any(p in combined for p in ["for your information", "fyi", "please be informed",
+                                    "just to confirm"]):
+        return "informational"
+    return "unknown"
 
 
 def _classify_load_ref(combined: str) -> bool:
@@ -715,38 +976,38 @@ def _provided_ref(combined: str) -> bool:
 
 def _classify_row(subject: str, description: str, isr: str, category: str) -> dict:
     """Classify a single row. Returns primaryIssue, issueState, confidence."""
+
+    # 1. Direct category field mapping — highest confidence, bypasses scoring
+    if category:
+        cat_key = category.lower().strip()
+        if cat_key in CATEGORY_MAP:
+            mapped = CATEGORY_MAP[cat_key]
+            combined = " ".join(filter(None, [description, subject, isr])).lower()
+            state = _detect_state(combined)
+            return {"primaryIssue": mapped, "issueState": state, "confidence": 0.88}
+
     combined = " ".join(filter(None, [description, subject, isr, category])).lower()
 
-    # Transport order wins over load_ref
-    transport_order_kws = ["transport order", "transport instruction", "haulier order", "tro "]
-    for kw in transport_order_kws:
+    # 2. Transport order wins over load_ref
+    for kw in ["transport order", "transport instruction", "haulier order", "tro "]:
         if kw in combined:
-            return {"primaryIssue": "transport_order", "issueState": "missing", "confidence": 0.82}
+            state = _detect_state(combined)
+            return {"primaryIssue": "transport_order", "issueState": state, "confidence": 0.82}
 
-    # Load ref gate
+    # 3. Strict load-ref gate
     if _classify_load_ref(combined):
         state = "provided" if _provided_ref(combined) else "missing"
         return {"primaryIssue": "load_ref", "issueState": state, "confidence": 0.80}
 
-    issue_id = _detect_issue(combined)
+    # 4. Weighted multi-field scoring (description 3×, subject 2×, isr 1.5×, category 1×)
+    issue_id = _detect_issue_weighted(description, subject, isr, category)
 
-    # Determine state
-    state = "unknown"
-    if any(p in combined for p in ["missing", "not received", "not provided", "required", "needed", "please provide", "please send"]):
-        state = "missing"
-    elif any(p in combined for p in ["provided", "attached", "please find", "hereby", "as requested", "please see below", "find below"]):
-        state = "provided"
-    elif any(p in combined for p in ["amended", "corrected", "updated", "changed"]):
-        state = "amended"
-    elif any(p in combined for p in ["delay", "delayed", "overdue", "late", "not on time"]):
-        state = "delayed"
-    elif any(p in combined for p in ["escalat", "complaint", "unacceptable"]):
-        state = "escalated"
-    elif any(p in combined for p in ["for your information", "fyi", "please be informed", "just to confirm"]):
-        state = "informational"
+    # 5. Recovery pass — broad signals before giving up on "other"
+    if issue_id == "other":
+        issue_id = _recover_issue(combined)
 
-    # Confidence: strong signals are long-phrase matches
-    confidence = 0.55 if issue_id != "other" else 0.30
+    state = _detect_state(combined)
+    confidence = 0.65 if issue_id != "other" else 0.30
 
     return {"primaryIssue": issue_id, "issueState": state, "confidence": confidence}
 
