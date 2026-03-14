@@ -859,6 +859,36 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
     # Missing load ref flag
     df["missing_load_ref"] = df["primaryIssue"] == "load_ref"
 
+    # ── RESOLVE ENTITIES ──────────────────────────────────────────
+
+    # Resolve transporter for each row using entity registry
+    # Primary: dedicated transporter column → resolve canonical name
+    # Fallback: customer column contains a known transporter/depot entity
+    def _get_resolved_transporter(r: pd.Series) -> str | None:
+        tp = _clean_text(r.get("transporter", ""))
+        if tp:
+            canon = _canonical_transporter_name(tp)
+            return canon if canon else (tp if _is_operational_transporter(tp) else None)
+        # Fallback: check customer column
+        cust = _clean_text(r.get("customer", ""))
+        if cust:
+            canon = _canonical_transporter_name(cust)
+            return canon
+        return None
+
+    df["resolvedTransporter"] = df.apply(_get_resolved_transporter, axis=1)
+
+    # resolvedCustomer: block operational entities from customer chart
+    def _get_resolved_customer(r: pd.Series) -> str | None:
+        cust = _clean_text(r.get("customer", ""))
+        if not cust:
+            return None
+        if _is_blocked_from_customer(cust):
+            return None
+        return cust
+
+    df["resolvedCustomer"] = df.apply(_get_resolved_customer, axis=1)
+
     # ── AGGREGATIONS ──────────────────────────────────────────────
 
     total = len(df)
@@ -885,34 +915,6 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
         .sort_values(ascending=False)
         .to_dict()
     )
-
-    # Resolve transporter for each row using entity registry
-    # Primary: dedicated transporter column → resolve canonical name
-    # Fallback: customer column contains a known transporter/depot entity
-    def _get_resolved_transporter(r: pd.Series) -> str | None:
-        tp = _clean_text(r.get("transporter", ""))
-        if tp:
-            canon = _canonical_transporter_name(tp)
-            return canon if canon else (tp if _is_operational_transporter(tp) else None)
-        # Fallback: check customer column
-        cust = _clean_text(r.get("customer", ""))
-        if cust:
-            canon = _canonical_transporter_name(cust)
-            return canon
-        return None
-
-    df["resolvedTransporter"] = df.apply(_get_resolved_transporter, axis=1)
-
-    # Also fix resolvedCustomer: block operational entities from customer chart
-    def _get_resolved_customer(r: pd.Series) -> str | None:
-        cust = _clean_text(r.get("customer", ""))
-        if not cust:
-            return None
-        if _is_blocked_from_customer(cust):
-            return None
-        return cust
-
-    df["resolvedCustomer"] = df.apply(_get_resolved_customer, axis=1)
 
     # By transporter — only entities with transporter role
     trans_df = df[df["resolvedTransporter"].notna() & (df["resolvedTransporter"] != "")]
