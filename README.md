@@ -197,8 +197,38 @@ Up to 10 cases are shown, sorted by confidence descending. Cases shown always ma
 - **React 19** + **TypeScript** + **Vite**
 - **Tailwind CSS** for styling
 - **Recharts** for charts
-- **XLSX** (SheetJS) for Excel parsing
-- All classification logic runs client-side — no server required
+- **Python FastAPI** backend — all classification and analysis runs server-side
+- **pandas + openpyxl** for Excel parsing (backend)
+
+## Running locally
+
+### 1. Start the backend
+
+```bash
+cd backend
+python -m venv venv && source venv/bin/activate   # optional but recommended
+pip install -r requirements.txt
+uvicorn main:app --reload
+# Backend runs at http://localhost:8000
+```
+
+### 2. Start the frontend
+
+```bash
+# From repo root
+cp .env.example .env          # only needed once
+npm install
+npm run dev
+# Frontend runs at http://localhost:5173
+```
+
+The frontend reads `VITE_API_URL` from `.env`. Default is `http://localhost:8000`.
+
+### 3. Deploy to Render (free tier)
+
+Push the repo to GitHub, then create a new **Web Service** on [render.com](https://render.com) pointing at the `backend/` directory. The `backend/render.yaml` file contains the full service definition.
+
+Set the `VITE_API_URL` environment variable in your Vercel/Netlify frontend deployment to point at your Render backend URL.
 
 ## Development
 

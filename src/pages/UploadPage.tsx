@@ -1,68 +1,48 @@
 import { useState, useCallback } from 'react';
 import { FileUploadZone } from '../components/upload/FileUploadZone';
-import { ColumnMap } from '../components/upload/ColumnMap';
 import { Button } from '../components/ui/Button';
-import { parseUploadedFile, parseZipMapping } from '../lib/parseFile';
-import type { ParsedFile, UploadState } from '../types';
+import { uploadFile } from '../api';
+import type { AnalysisResult } from '../types/analysis';
 import { Zap } from 'lucide-react';
 
 interface UploadPageProps {
-  onAnalyze: (file: ParsedFile, zipMap: Record<string, string>) => void;
+  onAnalyze: (result: AnalysisResult) => void;
 }
 
 export function UploadPage({ onAnalyze }: UploadPageProps) {
-  const [mainFile, setMainFile] = useState<UploadState>({
-    status: 'idle',
-    file: null,
-    zipMap: {},
-    error: null,
-  });
-
-  const [zipState, setZipState] = useState<{
-    status: 'idle' | 'parsing' | 'ready' | 'error';
+  const [fileState, setFileState] = useState<{
+    status: 'idle' | 'uploading' | 'ready' | 'error';
     filename?: string;
-    map: Record<string, string>;
+    rowCount?: number;
     error?: string;
-  }>({ status: 'idle', map: {} });
+    file: File | null;
+  }>({ status: 'idle', file: null });
 
-  const handleMainFile = useCallback(async (file: File) => {
-    setMainFile(s => ({ ...s, status: 'parsing', error: null }));
+  const handleFile = useCallback((file: File) => {
+    setFileState({ status: 'ready', filename: file.name, file });
+  }, []);
+
+  const handleClear = useCallback(() => {
+    setFileState({ status: 'idle', file: null });
+  }, []);
+
+  const handleRun = useCallback(async () => {
+    if (!fileState.file) return;
+    setFileState(s => ({ ...s, status: 'uploading', error: undefined }));
     try {
-      const parsed = await parseUploadedFile(file);
-      setMainFile(s => ({ ...s, status: 'ready', file: parsed }));
+      const result = await uploadFile(fileState.file);
+      onAnalyze(result);
     } catch (err) {
-      setMainFile(s => ({
+      setFileState(s => ({
         ...s,
         status: 'error',
-        error: err instanceof Error ? err.message : 'Unknown error',
+        error: err instanceof Error ? err.message : 'Upload failed',
       }));
     }
-  }, []);
+  }, [fileState.file, onAnalyze]);
 
-  const handleZipFile = useCallback(async (file: File) => {
-    setZipState({ status: 'parsing', map: {}, filename: file.name });
-    try {
-      const map = await parseZipMapping(file);
-      setZipState({ status: 'ready', map, filename: file.name });
-    } catch {
-      setZipState({ status: 'error', map: {}, error: 'Could not parse zip mapping file.' });
-    }
-  }, []);
-
-  const handleClearMain = useCallback(() => {
-    setMainFile({ status: 'idle', file: null, zipMap: {}, error: null });
-  }, []);
-
-  const handleClearZip = useCallback(() => {
-    setZipState({ status: 'idle', map: {} });
-  }, []);
-
-  const canAnalyze = mainFile.status === 'ready' && mainFile.file !== null;
-
-  const handleRun = useCallback(() => {
-    if (!mainFile.file) return;
-    onAnalyze(mainFile.file, zipState.map);
-  }, [mainFile.file, zipState.map, onAnalyze]);
+  const canRun = fileState.status === 'ready' && fileState.file !== null;
+  const isLoading = fileState.status === 'uploading';
 
   return (
     <div className="min-h-full flex items-start justify-center pt-16 pb-16 px-8">
@@ -81,62 +61,43 @@ export function UploadPage({ onAnalyze }: UploadPageProps) {
           </p>
         </div>
 
-        {/* Main file upload */}
-        <div className="space-y-4 mb-6">
+        {/* File upload */}
+        <div className="space-y-4 mb-8">
           <FileUploadZone
             label="Case Data File"
             description="Accepts .xlsx, .xls, .csv — first sheet is used"
             accept=".xlsx,.xls,.csv"
             required
-            status={mainFile.status}
-            filename={mainFile.file?.filename}
-            rowCount={mainFile.file?.rowCount}
-            error={mainFile.error ?? undefined}
-            onFile={handleMainFile}
-            onClear={handleClearMain}
+            status={isLoading ? 'parsing' : fileState.status === 'uploading' ? 'parsing' : fileState.status}
+            filename={fileState.filename}
+            rowCount={fileState.rowCount}
+            error={fileState.error}
+            onFile={handleFile}
+            onClear={handleClear}
           />
-
-          {/* Column detection */}
-          {mainFile.status === 'ready' && mainFile.file && (
-            <ColumnMap file={mainFile.file} />
-          )}
-        </div>
-
-        {/* Zip mapping upload */}
-        <div className="mb-8">
-          <FileUploadZone
-            label="ZIP Code → Area Mapping"
-            description="Two-column file: ZIP/Postcode + Area/Region"
-            accept=".xlsx,.xls,.csv"
-            status={zipState.status}
-            filename={zipState.filename}
-            rowCount={Object.keys(zipState.map).length}
-            error={zipState.error}
-            onFile={handleZipFile}
-            onClear={handleClearZip}
-          />
-          {zipState.status === 'ready' && (
-            <p className="text-xs text-[#a6aec4] mt-2 pl-1">
-              {Object.keys(zipState.map).length} zip codes mapped to areas
-            </p>
-          )}
         </div>
 
         {/* Run analysis */}
         <Button
           variant="primary"
           size="md"
-          disabled={!canAnalyze}
+          disabled={!canRun || isLoading}
           onClick={handleRun}
           className="w-full justify-center py-3 text-sm"
         >
           <Zap size={14} />
-          Run Intelligence Analysis
+          {isLoading ? 'Analysing…' : 'Run Intelligence Analysis'}
         </Button>
 
-        {!canAnalyze && mainFile.status === 'idle' && (
+        {!canRun && !isLoading && fileState.status === 'idle' && (
           <p className="text-xs text-[#a6aec4] text-center mt-3">
             Upload a case data file to continue
+          </p>
+        )}
+
+        {isLoading && (
+          <p className="text-xs text-[#a6aec4] text-center mt-3">
+            Sending file to backend — this may take a few seconds…
           </p>
         )}
       </div>

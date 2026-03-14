@@ -11,10 +11,9 @@ import { PredictivePage } from './pages/PredictivePage';
 import { ActionPage } from './pages/ActionPage';
 import { DrilldownPage } from './pages/DrilldownPage';
 import { ExplorerPage } from './pages/ExplorerPage';
-import { runAnalysis } from './lib/analyzeData';
 import { exportToExcel } from './lib/exportExcel';
 import { exportToPdf } from './lib/exportPdf';
-import type { ParsedFile, ViewId } from './types';
+import type { ViewId } from './types';
 import type { AnalysisResult } from './types/analysis';
 
 export default function App() {
@@ -22,9 +21,7 @@ export default function App() {
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [exporting, setExporting] = useState(false);
 
-  const handleAnalyze = useCallback((file: ParsedFile, zipMap: Record<string, string>) => {
-    const result = runAnalysis(file.records, zipMap);
-    result.meta.filename = file.filename;
+  const handleAnalyze = useCallback((result: AnalysisResult) => {
     setAnalysis(result);
     setView('summary');
   }, []);
