@@ -828,7 +828,9 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
                 out[str(k)] = v
         return out
 
-    cases = [_serialize_row(row) for _, row in df.iterrows()]
+    # Use pandas JSON serialiser — handles NaT, NaN, Timestamps natively
+    import json as _json
+    cases = _json.loads(df.to_json(orient='records', date_format='iso', default_handler=str))
 
     # Summary
     top_issue_id = top_issues[0][0] if top_issues else "other"

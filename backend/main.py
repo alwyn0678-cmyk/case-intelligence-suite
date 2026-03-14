@@ -1,8 +1,30 @@
 import os
+import math
+import json
+from datetime import date, datetime
+import pandas as pd
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 from analyser import analyse_file
+
+
+def safe_json(obj: object) -> str:
+    """JSON serialiser that converts any pandas/numpy NA types to null."""
+    def default(o: object) -> object:
+        if o is pd.NaT:
+            return None
+        if isinstance(o, float) and math.isnan(o):
+            return None
+        if isinstance(o, (datetime, date)):
+            return o.isoformat()
+        try:
+            if pd.isna(o):  # type: ignore[arg-type]
+                return None
+        except (TypeError, ValueError):
+            pass
+        return str(o)
+    return json.dumps(obj, default=default)
 
 app = FastAPI(title="Case Intelligence Backend")
 
@@ -30,6 +52,6 @@ async def upload(file: UploadFile = File(...)):
     try:
         contents = await file.read()
         result = analyse_file(contents, file.filename)
-        return JSONResponse(content=result)
+        return Response(content=safe_json(result), media_type="application/json")
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc))
