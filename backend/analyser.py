@@ -1458,7 +1458,8 @@ _FALLBACK_RULES: list[dict] = [
      'pattern': re.compile(r'\b(here is|find below|see below|as requested).{0,40}(reference|ref|booking number|order number|load number)\b', re.I),
      'confidence': 0.65},
     {'issueId': 'ref_provided',      'state': 'provided',
-     'pattern': re.compile(r'\b(?:load\s*ref(?:erence)?|booking\s*ref(?:erence)?|ref(?:erence)?)\s*(?:is|:|no\.?|#)\s*[A-Z0-9]{4,}', re.I),
+     # Must contain at least one digit to be a real reference value (not "is required" etc.)
+     'pattern': re.compile(r'\b(?:load\s*ref(?:erence)?|booking\s*ref(?:erence)?|ref(?:erence)?)\s*(?:is|:|no\.?|#)\s*[A-Z0-9]*[0-9][A-Z0-9]{2,}', re.I),
      'confidence': 0.70},
     {'issueId': 'ref_provided',      'state': 'provided',
      'pattern': re.compile(r'\b(?:load\s*ref(?:erence)?|booking\s*ref(?:erence)?|reference)\b.{0,40}\b(?:attached|sent|forwarded|provided|below|herewith)\b', re.I),
@@ -1629,6 +1630,14 @@ _FINANCIAL_SUBJECT_PATTERNS: list[str] = [
     'meerkosten rapport', 'meerkosten report',
     'extra costs', 'extra cost', 'purchase order', 'po number',
     'storage costs', 'storage cost',
+    # DCH / self-billing specific patterns (always financial)
+    'dch invoice', 'dch billing', 'dch report', 'dch cost',
+    'selfbilling', 'self billing', 'self-billing', 'selfbill', 'self bill',
+    # Invoice / billing dispute in subject
+    'billing dispute', 'invoice dispute', 'invoice query', 'billing query',
+    'rate dispute', 'rate query', 'charge dispute', 'overcharge',
+    'waiting time invoice', 'waiting costs invoice', 'storage invoice',
+    'demurrage invoice', 'detention invoice',
     # Dutch
     'extra kosten', 'opslagkosten', 'wachttijd kosten', 'kosten rapport',
     'inkooporder', 'bestelnummer',
@@ -1671,40 +1680,69 @@ _TOPIC_INTENT: dict[str, str] = {
     'waiting_time':     'financial',
     'equipment':        'equipment',
     'equipment_release':'equipment',
+    # planning group (matches intentDetection.ts exactly)
     'amendment':        'planning',
     'capacity':         'planning',
     'scheduling':       'planning',
     'pickup_delivery':  'planning',
+    'transport_order':  'planning',    # frontend: planning (not documentation)
+    'closing_time':     'planning',    # frontend: planning
+    # documentation group
     'customs':          'documentation',
     't1':               'documentation',
     'portbase':         'documentation',
     'bl':               'documentation',
     'vgm':              'documentation',
-    'transport_order':  'documentation',
     'dangerous_goods':  'documentation',
+    # operational group
     'delay':            'operational',
-    'closing_time':     'operational',
+    'seal':             'operational',  # frontend: operational (not reference)
+    # tracking group
     'tracking':         'tracking',
+    'shipping_advice':  'tracking',    # frontend: tracking (not reference)
+    # communication group
     'communication':    'communication',
+    # reference group (lowest priority — informational)
     'load_ref':         'reference',
     'ref_provided':     'reference',
-    'shipping_advice':  'reference',
-    'seal':             'reference',
     'other':            'operational',
 }
 
 _STRONG_INTENT_THRESHOLD = 0.75
 
 _FINANCIAL_GUARD_KEYWORDS: list[str] = [
+    # Core financial
     'invoice', 'billing', 'charge', 'rate', 'cost', 'fee', 'payment',
     'debit', 'credit', 'surcharge', 'overcharge', 'refund', 'price',
     'pricing', 'quotation', 'tariff', 'freight rate', 'base rate',
-    'storage costs', 'storage cost', 'waiting time cost', 'detention charge',
-    'demurrage charge', 'extra costs', 'extra cost', 'additional charge',
-    'purchase order', 'po number', 'po no',
-    'selfbilling', 'self billing', 'self-billing', 'dch invoice',
+    # Storage / waiting
+    'storage costs', 'storage cost', 'waiting time cost', 'waiting time charges',
+    'waiting costs invoice', 'detention charge', 'detention invoice',
+    'demurrage charge', 'demurrage invoice', 'storage invoice',
+    # Extra costs — all variants from intentDetection.ts
+    'extra costs', 'extra cost', 'extra cost invoice', 'extra costs invoice',
+    'extra costs report', 'extra cost report', 'extrakostenrechnung',
+    'extra kosten rapport', 'extra kosten report', 'meerkosten rapport',
+    'meerkosten report', 'additional charge',
+    # Billing types
+    'billing report', 'billing dispute', 'billing issue', 'billing error', 'billing query',
+    'cost invoice', 'waiting cost invoice', 'cost report',
+    # Credit / debit notes
+    'credit note', 'credit memo', 'debit note', 'debit memo',
+    # Invoice specifics
+    'invoice query', 'invoice dispute', 'invoice incorrect', 'invoice error',
+    'charge dispute',
+    # Self-billing / DCH
+    'selfbilling', 'self billing', 'self-billing', 'selfbill', 'self bill',
+    'dch invoice', 'dch billing', 'dch report',
+    # PO / purchase order
+    'purchase order', 'po number', 'po no', 'po amount mismatch', 'po mismatch',
+    'po discrepancy', 'po bedrag', 'po betrag', 'po abweichung', 'po differenz',
+    # Cost allocation
+    'cost allocation', 'kosten rapport', 'kostenbericht',
+    # Other languages
     'extra kosten', 'meerkosten', 'opslagkosten', 'wachttijd kost',
-    'extrakosten', 'lagerkosten', 'wartezeit kost', 'bestellnummer',
+    'extrakosten', 'lagerkosten', 'wartezeit kost', 'bestellnummer', 'inkooporder',
 ]
 
 
@@ -1735,10 +1773,12 @@ def _filter_by_intent_priority(matches: list[dict]) -> list[dict]:
 
 
 def _has_strong_financial_context(text: str) -> bool:
-    """True if text contains multiple financial keywords."""
+    """
+    True if text contains any financial keyword (mirrors hasStrongFinancialContext()
+    in intentDetection.ts — uses ANY match, not multiple matches).
+    """
     t = text.lower()
-    hits = sum(1 for kw in _FINANCIAL_GUARD_KEYWORDS if kw in t)
-    return hits >= 2
+    return any(kw in t for kw in _FINANCIAL_GUARD_KEYWORDS)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -1746,19 +1786,34 @@ def _has_strong_financial_context(text: str) -> bool:
 # ─────────────────────────────────────────────────────────────────
 
 # Explicit phrases that unambiguously mean a load ref is absent
+# Full list ported from LOAD_REF_EXPLICIT_MISSING in loadRefGuards.ts
 _LOAD_REF_EXPLICIT_MISSING: list[str] = [
-    # English
-    'load ref missing', 'load ref not provided', 'load ref not received',
-    'missing load ref', 'no load ref', 'no load reference', 'load reference missing',
-    'load reference not provided', 'load reference not received',
-    'please provide load ref', 'please send load ref', 'please provide load reference',
-    'please send load reference', 'can you send the load ref', 'can you provide load ref',
+    # English — load ref variants
+    'missing load ref', 'missing load reference', 'load ref missing', 'load reference missing',
+    'no load ref', 'no load reference', 'load ref not provided', 'load reference not provided',
+    'load ref not received', 'load reference not received', 'load ref required',
+    'load reference required', 'load ref needed', 'load reference needed',
+    'load ref absent', 'load ref not visible', 'load ref not in system',
+    'please provide load ref', 'please provide load reference',
+    'please add load ref', 'please add load reference',
+    'please add the load ref', 'please add the load reference',
+    'please send load ref', 'please send load reference',
+    'please send the loadref', 'please send the loadrefs', 'please send loadref',
+    'can you send the load ref', 'can you provide load ref',
     'loadref missing', 'loadref not provided', 'loadref not received',
     'please provide loadref', 'please send loadref', 'loadref still missing',
-    'no load ref received', 'load ref not received', 'load ref required',
-    'loadref required', 'no loadref', 'missing release reference',
-    'please provide release ref', 'loading reference missing', 'load ref not',
-    'ref required for loading', 'ref required for pickup',
+    'no load ref received', 'loadref required', 'no loadref', 'load ref not',
+    # English — booking ref variants
+    'booking ref missing', 'booking reference missing',
+    'booking ref not provided', 'booking reference not provided',
+    'booking ref required', 'booking reference required',
+    'missing booking ref', 'missing booking reference',
+    'please provide booking ref', 'please provide booking reference',
+    'please add booking ref', 'please add booking reference',
+    # English — release / loading ref
+    'missing release reference', 'release ref missing',
+    'please provide release ref', 'loading reference missing', 'loading ref missing',
+    'reference required for loading', 'ref required for loading', 'ref required for pickup',
     'driver needs load ref', 'driver requires load ref',
     # Dutch
     'laadreferentie ontbreekt', 'loadref ontbreekt', 'graag loadref sturen',
@@ -1766,33 +1821,82 @@ _LOAD_REF_EXPLICIT_MISSING: list[str] = [
     'laadreferentie niet ontvangen', 'graag de loadref', 'loadref nog niet',
     'laadreferentie nog niet', 'zonder laadreferentie', 'chauffeur heeft referentie nodig',
     'referentie ontbreekt', 'geen referentie ontvangen', 'graag de laadreferentie',
+    'laadreferentie missen', 'ontbrekende laadreferentie', 'referentie voor laden nodig',
+    'laadreferentie ontbr',
     # German
     'ladereferenz fehlt', 'lade referenz fehlt', 'bitte ladereferenz senden',
-    'referenz fehlt', 'ladereferenz nicht erhalten', 'ladereferenz benoetigt',
+    'referenz fehlt', 'ladung referenz fehlt', 'ladereferenz nicht erhalten',
+    'ladereferenz wird benoetigt', 'ladereferenz benoetigt', 'ladereferenz nicht vorhanden',
     'fehlende ladereferenz', 'ohne ladereferenz', 'fahrer braucht referenz',
     'keine referenz erhalten', 'bitte referenz senden',
+    'ladereferenz noch nicht erhalten', 'referenz fehlt für ladung',
 ]
 
-# Phrases that indicate this is NOT a load_ref case (billing/planning context)
+# Phrases that indicate this is NOT a load_ref case (billing/planning/routing context)
+# Full list ported from LOAD_REF_PLANNING_BLOCKLIST in loadRefGuards.ts
 _LOAD_REF_PLANNING_BLOCKLIST: list[str] = [
+    # Billing / financial
     'invoice', 'billing', 'selfbilling', 'self billing', 'self-billing',
     'extra costs', 'extra cost', 'storage costs', 'storage cost',
     'waiting time', 'demurrage', 'detention', 'credit note', 'debit note',
     'purchase order', 'po number', 'po no', 'quotation', 'surcharge',
-    'routing', 'route planning', 'feasibility', 'capacity',
+    'rate discussion', 'rate query', 'rate inquiry', 'cost report',
+    # Routing / planning
+    'routing', 'route planning', 'intermodal feasibility', 'loading feasibility',
+    'booking feasibility', 'feasibility', 'capacity request', 'capacity',
+    'rail cut', 'barge schedule', 'rail slot', 'barge slot',
+    'preferred load date', 'preferred loaddate', 'advise load date', 'advise loaddate',
+    'advise intermodal', 'advise rail', 'loading window', 'operational planning',
+    'slot allocation', 'slot booking', 'slot request', 'loading slot',
+    'allocation request', 'intermodal request',
+    # Status / tracking
     'proof of delivery', 'tracking',
+    # Work order context (not the same as missing load ref)
+    'work order', 'workorder',
+    # Questions about whether load ref is needed (not actually missing)
+    'do we need load ref', 'do we need a load ref', 'do we need the load ref',
+    'is load ref required', 'is a load ref required', 'is the load ref required',
+    'is load reference required', 'do you require load ref', 'do you need load ref',
+    'will you need load ref',
 ]
 
 # Regex patterns that detect explicitly-provided reference values (textProvidesRef)
+# Full list ported from PROVIDED_REF_PATTERNS in loadRefGuards.ts
 _PROVIDED_REF_PATTERNS: list[re.Pattern] = [
-    re.compile(r'\b(?:load\s*ref(?:erence)?|loadref|laadreferentie|ladereferenz)\s*(?:is|:)\s*[A-Z0-9]{3,}', re.I),
-    re.compile(r'\b(?:ref(?:erence)?|booking)\s*(?:no\.?|number|#)\s*:?\s*[A-Z0-9]*[0-9][A-Z0-9]{2,}', re.I),
-    re.compile(r'\b(?:our\s+ref|your\s+ref|ref)\s*:\s*[A-Z0-9]{4,}', re.I),
-    re.compile(r'\b(?:order\s+(?:no\.?|number|ref)|po\s+(?:no\.?|number)|job\s+(?:no\.?|number))\s*:?\s*[A-Z0-9]*[0-9][A-Z0-9]{2,}', re.I),
-    re.compile(r'\b(?:see\s+below|find\s+below|please\s+find\s+below|herewith|as\s+requested).{0,80}(?:ref(?:erence)?|booking|load\s*ref)\b', re.I),
-    re.compile(r'\b(?:ref(?:erence)?|booking|load\s*ref).{0,80}(?:attached|below|herewith|as\s+requested|forwarded|sent|provided)\b', re.I),
+    # Explicit value follows keyword: "load ref is ABC123" / "ref: ABC123"
+    re.compile(r'\b(?:load\s*ref(?:erence)?|loadref|laadreferentie|ladereferenz|booking\s*ref(?:erence)?|ref(?:erence)?)\s*(?:is|are|was|:)\s*(?=[A-Z0-9]*[0-9][A-Z0-9]*)[A-Z0-9]{4,}', re.I),
+    # Reference number pattern: "reference no. ABC123"
+    re.compile(r'\b(?:reference|load\s*ref|booking\s*ref)\s*(?:no\.?\s*|#\s*|:\s*)[A-Z0-9]{4,}', re.I),
+    # "ref no. ABC123"
+    re.compile(r'\bref(?:erence)?\s+no\.?\s*[A-Z0-9]{4,}', re.I),
+    # See/find below followed by ref mention
+    re.compile(r'\b(?:see|find)\s+below.{0,80}(?:ref(?:erence)?|load|booking)\b', re.I),
+    re.compile(r'\b(?:ref(?:erence)?|load|booking).{0,60}(?:see|find)\s+below\b', re.I),
+    # "below is the load ref"
+    re.compile(r'\bbelow\s+is\s+the\s+(?:load\s*)?(?:ref(?:erence)?|booking\s*ref)\b', re.I),
+    # "find the ref below"
+    re.compile(r'\b(?:find|see)\s+the\s+(?:load\s*)?ref(?:erence)?\s+below\b', re.I),
+    # Attached/herewith followed by ref mention
+    re.compile(r'\b(?:attached|herewith|find\s+enclosed|please\s+find\s+attached).{0,80}(?:ref(?:erence)?|load|booking)\b', re.I),
+    # Ref...attached/sent (with negative lookbehind for "not")
+    re.compile(r'\b(?:ref(?:erence)?|load\s*ref|booking\s*ref).{0,60}(?<!not\s)(?:attached|enclosed|herewith|sent|forwarded|provided)\b', re.I),
+    # "correct/corrected/updated ref"
+    re.compile(r'\bcorrect(?:ed)?\s+(?:load\s*)?(?:ref(?:erence)?|booking\s*ref)\b', re.I),
+    re.compile(r'\bupdat(?:ed?|ing)\s+(?:the\s+)?(?:load\s*)?(?:ref(?:erence)?|booking\s*ref)\b', re.I),
+    # "ref confirmed"
+    re.compile(r'\b(?:load\s*ref|booking\s*ref|ref(?:erence)?)\s+confirmed\b', re.I),
+    # "the correct ref"
+    re.compile(r'\bthe\s+correct\s+(?:load\s*)?(?:ref(?:erence)?|booking\s*ref)\b', re.I),
+    # "ref has been updated/provided/sent"
+    re.compile(r'\b(?:ref(?:erence)?|load\s*ref|booking\s*ref)\s+(?:has\s+been|was|have\s+been)\s+(?:updated|provided|sent|forwarded|attached|confirmed|shared)\b', re.I),
+    # "the load ref is..." with negative lookahead for missing/absent
+    re.compile(r'\bthe\s+(?:load\s*)?ref(?:erence)?\s+is\b(?!\s*(?:missing|absent|not|required|needed|still|unknown|unavailable|incorrect|wrong|invalid))', re.I),
+    # "load ref below"
+    re.compile(r'\b(?:load\s*ref|booking\s*ref|ref(?:erence)?)\s+below\b', re.I),
+    # Simple colon patterns
     re.compile(r'ref\s*:\s*[A-Z0-9]{4,}', re.I),
     re.compile(r'loadref\s*:\s*[A-Z0-9]{3,}', re.I),
+    # Generic alphanumeric ref value after keyword
     re.compile(r'\b(?:load\s*ref(?:erence)?|loadref|booking\s*ref(?:erence)?|ref(?:erence)?)\s*'
                r'(?:is|:|no\.?|#)?\s*[A-Z0-9]*[0-9][A-Z0-9]{3,}', re.I),
 ]
@@ -1803,19 +1907,39 @@ def _text_provides_ref(text: str) -> bool:
     return any(p.search(text) for p in _PROVIDED_REF_PATTERNS)
 
 
+_BILLING_INTENT_SIGNALS: list[str] = [
+    'demurrage', 'detention', 'extra cost', 'extra costs', 'additional charge',
+    'surcharge', 'cost report', 'rate discussion', 'rate query', 'rate inquiry',
+    'invoice', 'waiting costs', 'charges report', 'rate', 'billing', 'charge',
+    'storage cost', 'storage costs', 'credit note', 'debit note', 'purchase order',
+    'po number', 'selfbill', 'self bill', 'selfbilling', 'overcharge',
+]
+
+_PLANNING_INTENT_SIGNALS: list[str] = [
+    'feasibility', 'capacity request', 'rail cut', 'barge schedule',
+    'preferred load date', 'preferred loaddate', 'advise load date', 'advise loaddate',
+    'advise intermodal', 'advise rail', 'loading window', 'operational planning',
+    'slot allocation', 'slot booking', 'slot request', 'rail slot', 'barge slot',
+    'loading slot', 'allocation request', 'intermodal request', 'capacity',
+]
+
+_ROUTING_INTENT_SIGNALS: list[str] = [
+    'routing', 'route planning', 'route change', 'routing check',
+]
+
+
 def _detect_body_intent(text: str) -> str:
-    """Detect if body has billing/planning intent (used in load_ref gate)."""
+    """
+    Detect if body has billing/planning/routing intent (used in load_ref gate).
+    Mirrors detectBodyIntent() in loadRefGuards.ts — checks individual signals.
+    """
     t = text.lower()
-    billing_words = ['invoice', 'billing', 'charge', 'extra cost', 'storage cost',
-                     'waiting time', 'demurrage', 'detention', 'credit note', 'debit note',
-                     'purchase order', 'po number', 'selfbill', 'self bill']
-    planning_words = ['routing', 'feasibility', 'capacity', 'schedule',
-                      'slot request', 'delivery planning', 'pickup planning',
-                      'booking amendment', 'booking correction']
-    if sum(1 for w in billing_words if w in t) >= 2:
+    if any(s in t for s in _BILLING_INTENT_SIGNALS):
         return 'billing'
-    if sum(1 for w in planning_words if w in t) >= 2:
+    if any(s in t for s in _PLANNING_INTENT_SIGNALS):
         return 'planning'
+    if any(s in t for s in _ROUTING_INTENT_SIGNALS):
+        return 'routing'
     return 'unknown'
 
 
@@ -1861,16 +1985,44 @@ def _validate_load_ref_missing(subject: str, description: str, isr: str) -> bool
 _DOC_TOPICS_STRICT: set[str] = {'customs', 't1', 'portbase', 'bl'}
 
 _PROVIDED_DOC_PATTERNS: list[re.Pattern] = [
-    re.compile(r'\b(?:please\s+find|find\s+attached|see\s+attached|herewith|attached\s+please\s+find).{0,80}(?:customs|t1|transit|portbase|bl|document|cert|declaration|mrn)', re.I),
-    re.compile(r'\b(?:customs|t1\s+doc|portbase|bl|bill\s+of\s+lading|transit\s+doc|mrn|certificate).{0,80}(?:attached|below|herewith|forwarded|sent|provided|find\s+below|see\s+below)', re.I),
-    re.compile(r'\b(?:as\s+requested|as\s+per\s+your\s+request|as\s+per\s+request).{0,100}(?:customs|t1|portbase|bl|document|declaration)', re.I),
-    re.compile(r'\b(?:sending|forwarding|attaching|sharing).{0,60}(?:customs|t1|portbase|bl|document|declaration|certificate|mrn)', re.I),
+    # "please find / find attached / see attached ... t1/customs/mrn"
+    re.compile(r'\b(?:please\s+find|find\s+attached|see\s+attached|herewith|attached\s+please\s+find|i\s+have\s+attached|we\s+have\s+attached).{0,80}(?:customs|t1|transit|portbase|bl|document|cert|declaration|mrn)', re.I),
+    # "t1/mrn/customs ... attached/below/herewith/sent"
+    re.compile(r'\b(?:customs|t1|transit\s+doc|portbase|bl|bill\s+of\s+lading|mrn|certificate|declaration).{0,80}(?:attached|below|herewith|forwarded|sent|provided|find\s+below|see\s+below|bijgevoegd|im\s+anhang|beigef)', re.I),
+    # "as requested" + doc mention
+    re.compile(r'\b(?:as\s+requested|as\s+per\s+your\s+request|as\s+per\s+request).{0,100}(?:customs|t1|portbase|bl|document|declaration|mrn)', re.I),
+    # "sending/forwarding/attaching" + doc
+    re.compile(r'\b(?:sending|forwarding|attaching|sharing|hereby\s+attach).{0,60}(?:customs|t1|portbase|bl|document|declaration|certificate|mrn)', re.I),
+    # Specific string matches from classifyCase.ts PROVIDED_DOC_PATTERNS
+    re.compile(r'\battached\s+t1\b', re.I),
+    re.compile(r'\bplease\s+find\s+attached\s+t1\b', re.I),
+    re.compile(r'\bmrn\s+attached\b', re.I),
+    re.compile(r'\bsee\s+attached\s+customs\b', re.I),
+    re.compile(r'\bforwarding\s+t1\b', re.I),
+    re.compile(r'\bsending\s+customs\b', re.I),
+    re.compile(r'\bcustoms\s+documents\s+attached\b', re.I),
+    re.compile(r'\bplease\s+find\s+the\s+(?:t1|mrn)\b', re.I),
+    re.compile(r'\b(?:mrn|t1)\s+(?:below|number\s+below|is)\b', re.I),
+    re.compile(r'\bthe\s+mrn\s+is\b', re.I),
+    re.compile(r'\bfind\s+attached\s+mrn\b', re.I),
+    re.compile(r'\bplease\s+find\s+attached\s+mrn\b', re.I),
+    # Dutch
+    re.compile(r'\bt1\s+bijgevoegd\b', re.I),
+    re.compile(r'\b(?:zie\s+bijgevoegd|mrn\s+bijgevoegd|douane\s+documenten\s+bijgevoegd)\b', re.I),
+    # German
+    re.compile(r'\bt1\s+im\s+anhang\b', re.I),
+    re.compile(r'\b(?:mrn\s+beigef|zolldokumente\s+im\s+anhang)\b', re.I),
 ]
 
 _PLANNING_CONTEXT_PHRASES: list[str] = [
-    'feasibility', 'capacity', 'can you handle', 'is it possible',
-    'do you have capacity', 'slot available', 'routing', 'route request',
-    'can you book', 'is there space', 'available capacity',
+    'feasibility', 'intermodal feasibility', 'loading feasibility', 'booking feasibility',
+    'capacity', 'capacity request', 'can you handle', 'is it possible',
+    'do you have capacity', 'is there capacity', 'slot available', 'slot availability',
+    'routing', 'route request', 'route planning', 'routing check',
+    'can you book', 'is there space', 'available capacity', 'no slots available',
+    'rail cut', 'barge schedule', 'rail slot', 'barge slot',
+    'preferred load date', 'loading window', 'operational planning',
+    'intermodal request', 'advise load date', 'advise intermodal',
 ]
 
 _DOC_MISSING_PHRASES: list[str] = [
@@ -1895,6 +2047,12 @@ def _has_doc_missing_language(text: str) -> bool:
     return any(p in t for p in _DOC_MISSING_PHRASES)
 
 
+# Subject-only confidence penalty (mirrors classifyCase.ts constants)
+_SUBJECT_ONLY_PENALTY    = 0.18
+_SUBJECT_ONLY_FLOOR      = 0.48
+_SUBSTANTIVE_DESC_MIN    = 30
+
+
 def _classify_row(subject: str, description: str, isr: str, category: str) -> dict:
     """
     Classify a single row. Full pipeline mirrors classifyCase.ts + intentDetection.ts + loadRefGuards.ts:
@@ -1902,15 +2060,16 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
     2.  Financial subject early-exit
     3.  Per-field weighted classification
     4.  filterByIntentPriority — suppress lower-priority topics when strong higher-priority match
-    5.  Description-first override
-    6.  validateLoadRefMissing — strict 7-step gate
-    7.  load_ref → ref_provided when body explicitly provides a ref value
-    8.  ref_provided wins over load_ref
-    9.  Doc provision guard (customs/t1/bl/portbase → ref_provided when providing docs)
-    10. Planning compliance guard (reduce confidence for doc topics without missing language)
-    11. Fallback regex rules (+ financial context guard)
-    12. Operational clue scan
-    13. Other
+    5.  Subject-only penalty (no substantive description → lower confidence)
+    6.  Description-first override (with intent priority guard)
+    7.  validateLoadRefMissing — strict gate
+    8.  load_ref → ref_provided when body explicitly provides a ref value
+    9.  ref_provided wins over load_ref
+    10. Doc provision guard (customs/t1/bl/portbase → ref_provided when providing docs)
+    11. Planning compliance guard (reduce confidence for doc topics without missing language)
+    12. Fallback regex rules (+ financial context guard)
+    13. Operational clue scan
+    14. Other
     """
     fields: dict[str, str] = {
         'description': description or '',
@@ -1969,10 +2128,18 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
         state      = best['state']
         confidence = best['confidence']
 
-        # 5. Description-first override
+        # 5. Subject-only penalty — if best match came from subject and description is empty/short,
+        # reduce confidence (description is the authoritative source of truth).
+        desc_is_substantive = len((description or '').strip()) >= _SUBSTANTIVE_DESC_MIN
+        isr_has_content = len((isr or '').strip()) > 10
+        if not desc_is_substantive and not isr_has_content and best.get('_field') == 'subject':
+            confidence = max(confidence - _SUBJECT_ONLY_PENALTY, _SUBJECT_ONLY_FLOOR)
+
+        # 6. Description-first override
         # If description classifies as a DIFFERENT topic at ≥ 0.55 confidence,
         # description wins (body is source of truth over subject shorthand).
-        if len(description.strip()) > 30:
+        # Guard: don't let lower-priority-intent description override higher-priority subject.
+        if desc_is_substantive:
             desc_matches = _classify_by_rules(description)
             desc_matches = _filter_by_intent_priority(desc_matches)
             if desc_matches:
@@ -1982,7 +2149,11 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
                     not (desc_primary['issueId'] == 'ref_provided' and issue_id == 'load_ref') and
                     not (desc_primary['issueId'] == 'load_ref'    and issue_id == 'ref_provided')
                 )
-                if topics_differ and desc_primary['confidence'] >= 0.55:
+                # Intent priority guard: description intent must be same or higher priority
+                desc_intent_p = _INTENT_PRIORITY.get(_TOPIC_INTENT.get(desc_primary['issueId'], 'operational'), 9)
+                curr_intent_p = _INTENT_PRIORITY.get(_TOPIC_INTENT.get(issue_id, 'operational'), 9)
+                intent_allows_override = desc_intent_p <= curr_intent_p
+                if topics_differ and desc_primary['confidence'] >= 0.55 and intent_allows_override:
                     issue_id   = desc_primary['issueId']
                     state      = desc_primary['state']
                     confidence = min(desc_primary['confidence'], confidence + 0.05)
