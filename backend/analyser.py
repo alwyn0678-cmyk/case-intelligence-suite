@@ -1182,6 +1182,8 @@ _TOPIC_RULES: list[dict] = [
             'work order required', 'please send work order', 'no work order',
             # Request/arrange forms
             'arrange transport', 'arrange a truck', 'arrange truck', 'arrange lorry',
+            'arrangement of transport', 'arrangement truck', 'transport arrangement',
+            'truck arrangement', 'lorry arrangement',
             'transport request', 'transport booking', 'book transport', 'book a truck',
             'book truck', 'please arrange transport', 'please book transport',
             'please organize transport', 'please organise transport',
