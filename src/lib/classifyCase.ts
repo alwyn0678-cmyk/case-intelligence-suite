@@ -154,6 +154,12 @@ export interface CaseClassification {
   routingHint: string | null;
   routingAlignment: RoutingAlignment;
 
+  // ── Extracted reference fields ─────────────────────────────────────
+  bookingRef: string | null;
+  loadRefExtracted: string | null;
+  containerExtracted: string | null;
+  mrnRefExtracted: string | null;
+
   // ── Debug ─────────────────────────────────────────────────────
   reviewFlag: boolean;
   unresolvedReason: string | null;
@@ -174,18 +180,23 @@ export interface CaseClassification {
 // ─── Reference extraction helpers ───────────────────────────────
 
 const REF_PATTERNS: Record<string, RegExp> = {
-  container:  /\b([A-Z]{4}\d{7})\b/,
-  mrn:        /\b(MRN|mrn)[:\s]?([A-Z0-9]{14,18})\b/i,
-  t1_mrn:     /\bT[12]\s*(?:MRN|mrn)?[:\s]?([A-Z0-9]{14,18})\b/i,
-  booking:    /\bBKG[:\s]?([A-Z0-9]{5,15})\b/i,
-  load_ref:   /\b(?:load ref|loadref|booking ref)[:\s]?([A-Z0-9]{4,20})\b/i,
+  container:  /\b([A-Z]{4}[0-9]{7})\b/,
+  mrn:        /\b(?:MRN)\s*[:#\s]?\s*([A-Z0-9]{14,18})\b/i,
+  t1_mrn:     /\bT[12]\s*(?:MRN|mrn)?\s*[:#\s]?\s*([A-Z0-9]{14,18})\b/i,
+  booking:    /\b(?:BKG|booking\s+(?:no|number|ref(?:erence)?))\s*[:#\s]?\s*([A-Z0-9]{4,20})\b/i,
+  load_ref:   /\b(?:load\s*ref(?:erence)?|shipment\s*ref(?:erence)?|order\s*ref(?:erence)?)\s*[:#\s]?\s*([A-Z0-9]{4,20})\b/i,
 };
 
 function extractReferences(text: string): Record<string, string> {
   const refs: Record<string, string> = {};
   for (const [key, pattern] of Object.entries(REF_PATTERNS)) {
     const m = text.match(pattern);
-    if (m) refs[key] = m[1] ?? m[0];
+    if (m) {
+      // Always use the LAST capture group — this skips keyword prefix groups (e.g. "MRN")
+      // and returns only the actual reference value.
+      const groups = m.slice(1).filter(g => g != null);
+      refs[key] = groups[groups.length - 1] ?? m[0];
+    }
   }
   return refs;
 }
@@ -240,7 +251,7 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     return {
       issues: ['rate'], primaryIssue: 'rate', secondaryIssue: null,
       issueState: 'unknown', confidence: 0.92,
-      resolvedTransporter: entityResultFin.transporter?.canonicalName ?? null,
+      resolvedTransporter: entityResultFin.transporter?.canonicalName ?? (record.transporter?.trim() || null),
       resolvedDepot: entityResultFin.depot?.canonicalName ?? null,
       resolvedDeepseaTerminal: entityResultFin.deepseaTerminal?.canonicalName ?? null,
       resolvedCustomer: resolvedCustomerFin,
@@ -253,6 +264,10 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
       detectedIntent: 'financial', detectedObject: 'Invoice / Rate / Charge',
       triggerPhrase: FINANCIAL_SUBJECT_PATTERNS.find(p => subjectLower.includes(p)) ?? 'financial subject',
       triggerSourceField: 'subject',
+      bookingRef:          record.booking_ref ?? null,
+      loadRefExtracted:    null,
+      containerExtracted:  null,
+      mrnRefExtracted:     null,
     };
   }
 
@@ -290,7 +305,11 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     extraRaw || undefined,
   );
 
-  const resolvedTransporter    = entityResult.transporter?.canonicalName ?? null;
+  // Fall back to the raw transporter column value if entity extraction doesn't recognise the name.
+  // The transporter column is entered by the case author — trust it as a reliable source.
+  const resolvedTransporter: string | null =
+    entityResult.transporter?.canonicalName ??
+    (record.transporter?.trim() || null);
   const resolvedDepot          = entityResult.depot?.canonicalName ?? null;
   const resolvedDeepseaTerminal= entityResult.deepseaTerminal?.canonicalName ?? null;
   // Only use the raw record.customer value as customer if it is NOT a hard-blocked
@@ -1061,5 +1080,9 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     detectedObject,
     triggerPhrase:       triggerInfo.triggerPhrase,
     triggerSourceField:  triggerInfo.sourceField,
+    bookingRef:          record.booking_ref ?? refs.booking ?? null,
+    loadRefExtracted:    refs.load_ref ?? null,
+    containerExtracted:  refs.container ?? null,
+    mrnRefExtracted:     refs.mrn ?? refs.t1_mrn ?? null,
   };
 }

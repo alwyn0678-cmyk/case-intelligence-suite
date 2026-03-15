@@ -220,13 +220,20 @@ function buildExampleCases(matchingRecords: EnrichedRecord[]): ExampleCase[] {
     .slice()
     .sort((a, b) => b.confidence - a.confidence)
     .map(r => {
-      const loadRef         = r.evidence.find(e => e.startsWith('ref[load_ref]='))?.slice('ref[load_ref]='.length) ?? null;
-      const containerNumber = r.evidence.find(e => e.startsWith('ref[container]='))?.slice('ref[container]='.length) ?? null;
-      const bookingEvidence = r.evidence.find(e => e.startsWith('ref[booking]='))?.slice('ref[booking]='.length) ?? null;
-      // MRN: customs MRN first, T1 transit MRN as fallback — both render in the same export column
-      const mrnRef          = r.evidence.find(e => e.startsWith('ref[mrn]='))?.slice('ref[mrn]='.length)
-                           ?? r.evidence.find(e => e.startsWith('ref[t1_mrn]='))?.slice('ref[t1_mrn]='.length)
-                           ?? null;
+      // Use dedicated extraction fields first, fall back to evidence parsing for legacy records
+      const loadRef = r.loadRefExtracted
+        ?? r.evidence.find(e => e.startsWith('ref[load_ref]='))?.slice('ref[load_ref]='.length)
+        ?? null;
+      const containerNumber = r.containerExtracted
+        ?? r.evidence.find(e => e.startsWith('ref[container]='))?.slice('ref[container]='.length)
+        ?? null;
+      const mrnRef = r.mrnRefExtracted
+        ?? r.evidence.find(e => e.startsWith('ref[mrn]='))?.slice('ref[mrn]='.length)
+        ?? r.evidence.find(e => e.startsWith('ref[t1_mrn]='))?.slice('ref[t1_mrn]='.length)
+        ?? null;
+      const bookingEvidence = r.bookingRefExtracted
+        ?? r.evidence.find(e => e.startsWith('ref[booking]='))?.slice('ref[booking]='.length)
+        ?? null;
 
       const dateStr = r.date instanceof Date && !isNaN(r.date.getTime())
         ? r.date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -296,6 +303,10 @@ export function runAnalysis(
       detectedObject:       cls.detectedObject,
       triggerPhrase:        cls.triggerPhrase,
       triggerSourceField:   cls.triggerSourceField,
+      bookingRefExtracted:  cls.bookingRef,
+      loadRefExtracted:     cls.loadRefExtracted,
+      containerExtracted:   cls.containerExtracted,
+      mrnRefExtracted:      cls.mrnRefExtracted,
       // Strict resolved-only model: only use the canonical name produced by
       // the classification engine. If resolution failed (null), the row is
       // unresolved — never fall back to raw r.customer, as that may hold

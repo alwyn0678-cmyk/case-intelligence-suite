@@ -17,6 +17,12 @@ export interface EnrichedRecord extends NormalisedRecord {
   routingAlignment: RoutingAlignment;
   extractedZip: string | null;
 
+  // ── Extracted reference values ─────────────────────────────────────
+  bookingRefExtracted: string | null;
+  loadRefExtracted: string | null;
+  containerExtracted: string | null;
+  mrnRefExtracted: string | null;
+
   // ── Resolved entity names ──────────────────────────────────────
   resolvedCustomer: string | null;
   resolvedTransporter: string | null;

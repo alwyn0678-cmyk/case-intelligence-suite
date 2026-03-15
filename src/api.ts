@@ -142,6 +142,10 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       detectedObject: '',
       triggerPhrase: '',
       triggerSourceField: '',
+      bookingRefExtracted: (raw.booking_ref as string) ?? null,
+      loadRefExtracted: null,
+      containerExtracted: null,
+      mrnRefExtracted: null,
       _raw: raw,
     } as unknown as EnrichedRecord;
   });
