@@ -865,3 +865,350 @@ const reportWb = XLSX.utils.book_new();
 const reportPath = path.join(path.dirname(inputPath), 'operational_intelligence_report.xlsx');
 XLSX.writeFile(reportWb, reportPath);
 console.log(`Exported: ${reportPath}\n`);
+
+// ═══════════════════════════════════════════════════════
+// DECISION INTELLIGENCE PHASE (17–20)
+// ═══════════════════════════════════════════════════════
+
+// ─── Phase 17: Delay reduction signals ───────────────────────────
+
+const DELAY_ACTION_MAP: Record<string, string> = {
+  terminal_congestion: 'Pre-advise cargo earlier; coordinate with terminal on gate-in windows',
+  customs_hold:        'Ensure all customs documents submitted 48h before vessel arrival',
+  missed_cutoff:       'Enforce booking cut-off 72h before vessel departure; alert customers automatically',
+  late_booking:        'Introduce mandatory booking deadlines and customer escalation workflow',
+  vessel_delay:        'Monitor vessel schedules via AIS; proactively notify consignees on ETA changes',
+  barge_delay:         'Buffer barge sailing windows by 24h for sensitive cargo; use rail alternative',
+  rail_delay:          'Pre-book rail slots 5 days out; maintain road backup for urgent shipments',
+  haulier_delay:       'Expand approved haulier panel; implement time-slot booking at depot gates',
+  weather_delay:       'Add weather-risk flag for coastal/port moves during seasonal windows',
+  industrial_action:   'Monitor port labour negotiations; pre-position stock when strike risk elevated',
+};
+
+const delayRows = classified.filter(r => r.primaryIssue === 'delay');
+const totalDelays = delayRows.length;
+
+// Root cause counts
+const delayCauseCounts: Record<string, number> = {};
+for (const r of delayRows) {
+  const k = r.rootCause ?? 'unknown';
+  delayCauseCounts[k] = (delayCauseCounts[k] ?? 0) + 1;
+}
+
+// 4-week trend per root cause
+const recentDelayWeeks = allWeeks.slice(-4);
+const priorDelayWeeks  = allWeeks.slice(-8, -4);
+
+function weekRootCauseCounts(weeks: string[], issueId: string, rows: typeof classified): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const r of rows) {
+    if (!r.date) continue;
+    const wk = isoWeekKey(r.date);
+    if (!weeks.includes(wk)) continue;
+    const k = r.rootCause ?? 'unknown';
+    counts[k] = (counts[k] ?? 0) + 1;
+  }
+  return counts;
+}
+
+const recentDelayCauses = weekRootCauseCounts(recentDelayWeeks, 'delay', delayRows);
+const priorDelayCauses  = weekRootCauseCounts(priorDelayWeeks,  'delay', delayRows);
+
+interface DelaySignal {
+  rootCause: string;
+  caseCount: number;
+  percentage: number;
+  recentCount: number;
+  priorCount: number;
+  trend: 'rising' | 'falling' | 'stable';
+  trendPct: number | null;
+  recommendedAction: string;
+}
+
+const delaySignals: DelaySignal[] = Object.entries(delayCauseCounts)
+  .sort((a, b) => b[1] - a[1])
+  .map(([cause, count]) => {
+    const recent = recentDelayCauses[cause] ?? 0;
+    const prior  = priorDelayCauses[cause]  ?? 0;
+    const trendPct = prior > 0 ? +((recent - prior) / prior * 100).toFixed(1) : null;
+    const trend: 'rising' | 'falling' | 'stable' =
+      trendPct === null ? 'stable' : trendPct > 10 ? 'rising' : trendPct < -10 ? 'falling' : 'stable';
+    return {
+      rootCause:         cause,
+      caseCount:         count,
+      percentage:        +(count / totalDelays * 100).toFixed(1),
+      recentCount:       recent,
+      priorCount:        prior,
+      trend,
+      trendPct,
+      recommendedAction: DELAY_ACTION_MAP[cause] ?? 'Investigate root cause and apply targeted mitigation',
+    };
+  });
+
+console.log('── DELAY REDUCTION SIGNALS (Phase 17) ──────────────────');
+console.log(`  Total delay cases: ${totalDelays}`);
+for (const s of delaySignals) {
+  const arrow = s.trend === 'rising' ? '↑' : s.trend === 'falling' ? '↓' : '→';
+  const trendStr = s.trendPct !== null ? ` (${s.trendPct > 0 ? '+' : ''}${s.trendPct}% WoW4)` : '';
+  console.log(`  ${arrow} ${s.rootCause.padEnd(25)} ${String(s.caseCount).padStart(4)}  ${s.percentage}%${trendStr}`);
+}
+console.log();
+
+// ─── Phase 18: Preventable improvement actions ────────────────────
+
+const PREVENTABLE_IMPROVEMENT_MAP: Record<string, string> = {
+  load_ref:      'Mandate load reference on all booking confirmations; auto-reject bookings without ref',
+  amendment:     'Introduce booking data validation at entry point; reduce post-submission changes',
+  bl:            'Standardise B/L instruction templates; implement pre-release B/L review checklist',
+  vgm:           'Integrate VGM capture into booking system; block gate-in without verified weight',
+  customs:       'Deploy pre-clearance process; provide customers with documentation checklist',
+  t1:            'Automate T1 application on booking creation; monitor transit closure proactively',
+  delay:         'Address root causes (see delay signals); implement ETA alert notifications',
+  equipment:     'Pre-inspect equipment before dispatch; maintain defect reporting pipeline',
+  scheduling:    'Improve slot allocation visibility; alert customers on allocation changes',
+  amendment:     'Enforce booking freeze 48h before cargo movement; charge amendment fees',
+  portbase:      'Automate pre-arrival notification on vessel booking; validate PCS data at source',
+};
+
+// Hours lost proxy: 1.5h per preventable case (industry estimate)
+const HOURS_PER_PREVENTABLE = 1.5;
+
+const prevByCategory18: Record<string, { count: number; totalInCat: number }> = {};
+for (const r of classified) {
+  const cat = r.primaryIssue;
+  if (!prevByCategory18[cat]) {
+    prevByCategory18[cat] = { count: 0, totalInCat: 0 };
+  }
+  prevByCategory18[cat].totalInCat++;
+  if (r.preventableIssue) prevByCategory18[cat].count++;
+}
+
+// 8-week preventable trend by category (last 4 vs prior 4)
+function weekPreventableCounts(weeks: string[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const r of classified) {
+    if (!r.preventableIssue || !r.date) continue;
+    const wk = isoWeekKey(r.date);
+    if (!weeks.includes(wk)) continue;
+    counts[r.primaryIssue] = (counts[r.primaryIssue] ?? 0) + 1;
+  }
+  return counts;
+}
+
+const recentPrevWeeks = allWeeks.slice(-4);
+const priorPrevWeeks  = allWeeks.slice(-8, -4);
+const recentPrev = weekPreventableCounts(recentPrevWeeks);
+const priorPrev  = weekPreventableCounts(priorPrevWeeks);
+
+interface PreventableAction {
+  category: string;
+  preventableCases: number;
+  totalCases: number;
+  preventableRate: number;
+  estimatedHoursLost: number;
+  trend: 'rising' | 'falling' | 'stable';
+  suggestedOperationalImprovement: string;
+}
+
+const preventableActions: PreventableAction[] = Object.entries(prevByCategory18)
+  .filter(([, v]) => v.count > 0)
+  .sort((a, b) => b[1].count - a[1].count)
+  .map(([cat, v]) => {
+    const recent = recentPrev[cat] ?? 0;
+    const prior  = priorPrev[cat]  ?? 0;
+    const trendPct = prior > 0 ? (recent - prior) / prior * 100 : null;
+    const trend: 'rising' | 'falling' | 'stable' =
+      trendPct === null ? 'stable' : trendPct > 10 ? 'rising' : trendPct < -10 ? 'falling' : 'stable';
+    return {
+      category:                        cat,
+      preventableCases:                v.count,
+      totalCases:                      v.totalInCat,
+      preventableRate:                 +(v.count / v.totalInCat * 100).toFixed(1),
+      estimatedHoursLost:              +(v.count * HOURS_PER_PREVENTABLE).toFixed(1),
+      trend,
+      suggestedOperationalImprovement: PREVENTABLE_IMPROVEMENT_MAP[cat] ?? 'Review case samples and identify process gaps',
+    };
+  });
+
+const totalPreventableHours = +(preventableActions.reduce((s, a) => s + a.estimatedHoursLost, 0)).toFixed(1);
+
+console.log('── PREVENTABLE IMPROVEMENT ACTIONS (Phase 18) ──────────');
+console.log(`  Total preventable hours lost (est.): ${totalPreventableHours}h`);
+for (const a of preventableActions.slice(0, 10)) {
+  const arrow = a.trend === 'rising' ? '↑' : a.trend === 'falling' ? '↓' : '→';
+  const label = TAXONOMY_MAP[a.category]?.label ?? a.category;
+  console.log(`  ${arrow} ${label.padEnd(38)} ${String(a.preventableCases).padStart(4)} cases  ${a.preventableRate}%  ~${a.estimatedHoursLost}h`);
+}
+console.log();
+
+// ─── Phase 19: Transporter risk signals ──────────────────────────
+
+const RISK_ACTIONS: Record<string, string> = {
+  delay_rate:     'Schedule performance review; set KPI threshold; consider alternative haulier',
+  amendment_rate: 'Audit booking data quality at handover; add validation gate',
+  equipment_rate: 'Inspect fleet condition; pre-qualify equipment before assignment',
+};
+
+// Per-transporter weekly metrics (last 4 vs prior 4 weeks)
+function transporterWeeklyMetrics(weeks: string[]): Record<string, { total: number; delay: number; amendment: number; equipment: number }> {
+  const m: Record<string, { total: number; delay: number; amendment: number; equipment: number }> = {};
+  for (const r of classified) {
+    if (!r.resolvedTransporter || !r.date) continue;
+    const wk = isoWeekKey(r.date);
+    if (!weeks.includes(wk)) continue;
+    const name = r.resolvedTransporter;
+    if (!m[name]) m[name] = { total: 0, delay: 0, amendment: 0, equipment: 0 };
+    m[name].total++;
+    if (r.primaryIssue === 'delay')     m[name].delay++;
+    if (r.primaryIssue === 'amendment') m[name].amendment++;
+    if (r.primaryIssue === 'equipment') m[name].equipment++;
+  }
+  return m;
+}
+
+const recentTpWeeks = allWeeks.slice(-4);
+const priorTpWeeks  = allWeeks.slice(-8, -4);
+const recentTp = transporterWeeklyMetrics(recentTpWeeks);
+const priorTp  = transporterWeeklyMetrics(priorTpWeeks);
+
+interface TransporterRiskSignal {
+  transporter: string;
+  riskType: string;
+  metricRecent: number;
+  metricPrior: number;
+  metricChange: number;
+  trend: 'rising' | 'stable';
+  recommendedAction: string;
+}
+
+const transporterRisks: TransporterRiskSignal[] = [];
+
+const allTpNames = new Set([...Object.keys(recentTp), ...Object.keys(priorTp)]);
+
+for (const name of allTpNames) {
+  const rec  = recentTp[name]  ?? { total: 0, delay: 0, amendment: 0, equipment: 0 };
+  const pri  = priorTp[name]   ?? { total: 0, delay: 0, amendment: 0, equipment: 0 };
+  if (rec.total < 5) continue; // ignore low-volume transporters
+
+  const metrics: Array<{ key: string; rLabel: string; recRate: number; priRate: number }> = [
+    { key: 'delay_rate',     rLabel: 'Delay rate',     recRate: rec.total > 0 ? rec.delay     / rec.total : 0, priRate: pri.total > 0 ? pri.delay     / pri.total : 0 },
+    { key: 'amendment_rate', rLabel: 'Amendment rate', recRate: rec.total > 0 ? rec.amendment / rec.total : 0, priRate: pri.total > 0 ? pri.amendment / pri.total : 0 },
+    { key: 'equipment_rate', rLabel: 'Equipment rate', recRate: rec.total > 0 ? rec.equipment / rec.total : 0, priRate: pri.total > 0 ? pri.equipment / rec.total : 0 },
+  ];
+
+  for (const { key, rLabel, recRate, priRate } of metrics) {
+    if (priRate === 0) continue;
+    const change = (recRate - priRate) / priRate * 100;
+    if (change >= 30) {
+      transporterRisks.push({
+        transporter:      name,
+        riskType:         rLabel,
+        metricRecent:     +(recRate * 100).toFixed(1),
+        metricPrior:      +(priRate * 100).toFixed(1),
+        metricChange:     +change.toFixed(1),
+        trend:            'rising',
+        recommendedAction: RISK_ACTIONS[key] ?? 'Monitor closely',
+      });
+    }
+  }
+}
+
+transporterRisks.sort((a, b) => b.metricChange - a.metricChange);
+
+console.log('── TRANSPORTER RISK SIGNALS (Phase 19) ─────────────────');
+if (transporterRisks.length === 0) {
+  console.log('  No transporters flagged (threshold: ≥30% metric increase, ≥5 cases in recent window)');
+} else {
+  for (const r of transporterRisks.slice(0, 15)) {
+    console.log(`  ↑ ${r.transporter.padEnd(28)} ${r.riskType.padEnd(18)} ${r.metricPrior}% → ${r.metricRecent}%  +${r.metricChange}%`);
+  }
+}
+console.log();
+
+// ─── Phase 20: Management report export ──────────────────────────
+
+console.log('Exporting operations_intelligence_brief.xlsx...');
+
+const briefWb = XLSX.utils.book_new();
+
+// ── Sheet 1: delay_reduction_signals ──────────────────────────────
+{
+  const wsData = [
+    ['Root Cause', 'Case Count', '% of Delays', 'Recent 4w', 'Prior 4w', 'Trend', 'Trend %', 'Recommended Action'],
+    ...delaySignals.map(s => [
+      s.rootCause,
+      s.caseCount,
+      `${s.percentage}%`,
+      s.recentCount,
+      s.priorCount,
+      s.trend,
+      s.trendPct !== null ? `${s.trendPct > 0 ? '+' : ''}${s.trendPct}%` : 'n/a',
+      s.recommendedAction,
+    ]),
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [{ wch: 25 },{ wch: 12 },{ wch: 13 },{ wch: 12 },{ wch: 12 },{ wch: 10 },{ wch: 10 },{ wch: 75 }];
+  XLSX.utils.book_append_sheet(briefWb, ws, 'delay_reduction_signals');
+}
+
+// ── Sheet 2: preventable_improvement_actions ──────────────────────
+{
+  const wsData = [
+    ['Category', 'Preventable Cases', 'Total Cases', 'Preventable Rate %', 'Est. Hours Lost', 'Trend', 'Suggested Improvement'],
+    ...preventableActions.map(a => [
+      TAXONOMY_MAP[a.category]?.label ?? a.category,
+      a.preventableCases,
+      a.totalCases,
+      `${a.preventableRate}%`,
+      a.estimatedHoursLost,
+      a.trend,
+      a.suggestedOperationalImprovement,
+    ]),
+    ['', '', '', '', '', '', ''],
+    ['TOTAL', preventableActions.reduce((s, a) => s + a.preventableCases, 0), total, '', totalPreventableHours, '', ''],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [{ wch: 38 },{ wch: 18 },{ wch: 13 },{ wch: 18 },{ wch: 16 },{ wch: 10 },{ wch: 80 }];
+  XLSX.utils.book_append_sheet(briefWb, ws, 'preventable_improvement_actions');
+}
+
+// ── Sheet 3: transporter_risk_signals ────────────────────────────
+{
+  const wsData = [
+    ['Transporter', 'Risk Type', 'Prior Rate %', 'Recent Rate %', 'Change %', 'Trend', 'Recommended Action'],
+    ...(transporterRisks.length > 0
+      ? transporterRisks.map(r => [
+          r.transporter, r.riskType,
+          `${r.metricPrior}%`, `${r.metricRecent}%`, `+${r.metricChange}%`,
+          r.trend, r.recommendedAction,
+        ])
+      : [['No transporters flagged at ≥30% increase threshold', '', '', '', '', '', '']]),
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [{ wch: 30 },{ wch: 18 },{ wch: 14 },{ wch: 15 },{ wch: 12 },{ wch: 10 },{ wch: 70 }];
+  XLSX.utils.book_append_sheet(briefWb, ws, 'transporter_risk_signals');
+}
+
+// ── Sheet 4: category_trends (reuse trend results) ───────────────
+{
+  const displayWeeks17 = allWeeks.slice(-12);
+  const header = ['Category', ...displayWeeks17, 'Direction', 'Latest', '4w Avg', '% Change', 'Alert'];
+  const dataRows = trendResults
+    .sort((a, b) => (b.pctChange ?? 0) - (a.pctChange ?? 0))
+    .map(t => [
+      TAXONOMY_MAP[t.category]?.label ?? t.category,
+      ...displayWeeks17.map(wk => weekCounts[wk]?.[t.category] ?? 0),
+      t.direction,
+      t.latestCount,
+      +t.rolling4wAvg.toFixed(1),
+      t.pctChange !== null ? `${t.pctChange > 0 ? '+' : ''}${t.pctChange.toFixed(0)}%` : 'n/a',
+      t.spike ? '⚠ SPIKE' : '',
+    ]);
+  const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows]);
+  ws['!cols'] = [{ wch: 38 }, ...displayWeeks17.map(() => ({ wch: 8 })), { wch: 10 },{ wch: 8 },{ wch: 8 },{ wch: 10 },{ wch: 9 }];
+  XLSX.utils.book_append_sheet(briefWb, ws, 'category_trends');
+}
+
+const briefPath = path.join(path.dirname(inputPath), 'operations_intelligence_brief.xlsx');
+XLSX.writeFile(briefWb, briefPath);
+console.log(`Exported: ${briefPath}\n`);
