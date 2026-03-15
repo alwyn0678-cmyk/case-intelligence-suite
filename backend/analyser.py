@@ -3081,10 +3081,12 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
 
     # Resolve area
     def _row_area(r) -> str | None:
-        if r.get("area", "").strip():
-            return r["area"].strip()
-        if r.get("zip", "").strip():
-            return _resolve_zip_to_area(r["zip"])
+        area_val = _clean_text(r.get("area", ""))
+        if area_val:
+            return area_val
+        zip_val = _clean_text(r.get("zip", ""))
+        if zip_val:
+            return _resolve_zip_to_area(zip_val)
         combined = " ".join([_clean_text(r.get("subject", "")),
                              _clean_text(r.get("description", ""))])
         zips_found = re.findall(r'\b\d{5}\b', combined)
@@ -3157,7 +3159,7 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
 
     # Merge extracted ZIP into zip column (fill blanks)
     df['zip'] = df.apply(
-        lambda r: (str(r.get('zip', '') or '').strip() or r.get('ext_zip')), axis=1
+        lambda r: (_clean_text(r.get('zip', '')) or _clean_text(r.get('ext_zip', '') or '')), axis=1
     )
     # Re-resolve area with any newly extracted ZIP
     df['resolvedArea'] = df.apply(_row_area, axis=1)
