@@ -5,7 +5,7 @@
  * only uploads the file and renders the returned AnalysisResult.
  */
 
-import type { AnalysisResult, CustomerBurdenItem, TransporterItem, AreaHotspot, EnrichedRecord, ExampleCase } from './types/analysis';
+import type { AnalysisResult, CustomerBurdenItem, TransporterItem, AreaHotspot, EnrichedRecord, ExampleCase, ControlTowerData, CtBottleneck, CtTransporterRisk, CtPreventableOpportunity, CtRootCauseItem, CtCategoryRow } from './types/analysis';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'https://case-intelligence-suite.onrender.com';
 
@@ -180,6 +180,8 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       loadRefExtracted: null,
       containerExtracted: null,
       mrnRefExtracted: null,
+      rootCause: (raw.rootCause as string) ?? null,
+      preventableIssue: (raw.preventableIssue as boolean) ?? false,
       _raw: raw,
     } as unknown as EnrichedRecord;
   });
@@ -259,6 +261,234 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
 
   const topCustomer = customerBurden[0]?.name ?? '';
   const topTransporter = transporterPerformance[0]?.name ?? '';
+
+  // ── Control Tower analytics (Phases 21–27) ────────────────────
+  const HOURS_PER_PREVENTABLE = 1.5;
+  const prevWeek = sortedWeeks[sortedWeeks.length - 2] ?? '';
+  const currWeek = sortedWeeks[sortedWeeks.length - 1] ?? '';
+
+  // Phase 21 — Overview metrics
+  const preventableRecords = records.filter(r => r.preventableIssue);
+  const avgConf = records.length > 0
+    ? records.reduce((s, r) => s + r.confidence, 0) / records.length : 0;
+  const lowConfRate = records.length > 0
+    ? (records.filter(r => r.confidence < 0.70).length / records.length) * 100 : 0;
+
+  const ISSUE_LABEL_MAP: Record<string, string> = {};
+  const ISSUE_COLOR_MAP: Record<string, string> = {};
+  for (const item of issueBreakdown) {
+    ISSUE_LABEL_MAP[item.id] = item.label;
+    ISSUE_COLOR_MAP[item.id] = item.color;
+  }
+
+  function weekTrend(id: string): 'up' | 'down' | 'stable' {
+    const c = weeklyHistory[currWeek]?.issues[id] ?? 0;
+    const p = weeklyHistory[prevWeek]?.issues[id] ?? 0;
+    if (c > p * 1.1) return 'up';
+    if (c < p * 0.9) return 'down';
+    return 'stable';
+  }
+
+  const categoryDistribution = issueBreakdown.map(item => ({
+    id: item.id,
+    name: item.label,
+    value: item.count,
+    color: item.color,
+    percent: item.percent,
+    trend: weekTrend(item.id),
+  }));
+
+  // Phase 22 — Category rows with preventable rates and 4-week trend
+  const recentFourWeeks = sortedWeeks.slice(-4);
+  const priorFourWeeks  = sortedWeeks.slice(-8, -4);
+  const recentSet = new Set(recentFourWeeks);
+  const priorSet  = new Set(priorFourWeeks);
+  const recentRecs = records.filter(r => recentSet.has(r.weekKey));
+  const priorRecs  = records.filter(r => priorSet.has(r.weekKey));
+
+  const categoryRows: CtCategoryRow[] = issueBreakdown.map(item => {
+    const catRecs = records.filter(r => r.primaryIssue === item.id);
+    const prevCount = catRecs.filter(r => r.preventableIssue).length;
+    const prevRate  = catRecs.length > 0 ? +(prevCount / catRecs.length * 100).toFixed(1) : 0;
+    const rec4 = recentRecs.filter(r => r.primaryIssue === item.id).length;
+    const pri4 = priorRecs.filter(r => r.primaryIssue === item.id).length;
+    const trendPct = pri4 > 0 ? Math.round((rec4 - pri4) / pri4 * 100) : 0;
+    let trend: 'up' | 'down' | 'stable' = 'stable';
+    if (rec4 > pri4 * 1.1) trend = 'up';
+    else if (rec4 < pri4 * 0.9) trend = 'down';
+    return {
+      id: item.id,
+      label: item.label,
+      color: item.color,
+      count: item.count,
+      percent: item.percent,
+      hoursLost: item.hoursLost,
+      preventableRate: prevRate,
+      trend,
+      trendPct,
+    };
+  });
+
+  // Phase 23 — Bottleneck detection: WoW ≥40% and ≥30 cases
+  const bottlenecks: CtBottleneck[] = [];
+  for (let wi = 1; wi < sortedWeeks.length; wi++) {
+    const wk  = sortedWeeks[wi];
+    const pw  = sortedWeeks[wi - 1];
+    const cur = weeklyHistory[wk];
+    const pri = weeklyHistory[pw];
+    if (!cur || !pri) continue;
+    for (const [issueId, currCount] of Object.entries(cur.issues)) {
+      const priorCount = pri.issues[issueId] ?? 0;
+      if (currCount < 30 || priorCount === 0) continue;
+      const spike = ((currCount - priorCount) / priorCount) * 100;
+      if (spike >= 40) {
+        bottlenecks.push({
+          category: issueId,
+          categoryLabel: ISSUE_LABEL_MAP[issueId] ?? issueId,
+          week: wk,
+          caseCount: currCount,
+          spikePercent: Math.round(spike),
+          priorCount,
+        });
+      }
+    }
+  }
+  bottlenecks.sort((a, z) => z.week.localeCompare(a.week) || z.spikePercent - a.spikePercent);
+
+  // Phase 24 — Transporter risk signals
+  interface TpPeriod { total: number; delay: number; equipment: number; amendment: number; preventable: number }
+  function accTp(recs: EnrichedRecord[]): Record<string, TpPeriod> {
+    const acc: Record<string, TpPeriod> = {};
+    for (const r of recs) {
+      const n = r.resolvedTransporter; if (!n) continue;
+      if (!acc[n]) acc[n] = { total: 0, delay: 0, equipment: 0, amendment: 0, preventable: 0 };
+      acc[n].total++;
+      if (r.primaryIssue === 'delay')     acc[n].delay++;
+      if (r.primaryIssue === 'equipment') acc[n].equipment++;
+      if (r.primaryIssue === 'amendment') acc[n].amendment++;
+      if (r.preventableIssue)             acc[n].preventable++;
+    }
+    return acc;
+  }
+  const recentTp = accTp(recentRecs);
+  const priorTp  = accTp(priorRecs);
+  const rate = (n: number, d: number) => d > 0 ? +(n / d * 100).toFixed(1) : 0;
+  const chg  = (c: number, p: number) => p > 0 ? Math.round((c - p) / p * 100) : 0;
+
+  const transporterRisks: CtTransporterRisk[] = Object.entries(recentTp)
+    .filter(([, v]) => v.total >= 5)
+    .map(([name, rec]) => {
+      const pri = priorTp[name] ?? { total: 0, delay: 0, equipment: 0, amendment: 0, preventable: 0 };
+      const rDR = rate(rec.delay,     rec.total);
+      const pDR = rate(pri.delay,     pri.total);
+      const rER = rate(rec.equipment, rec.total);
+      const pER = rate(pri.equipment, pri.total);
+      const rAR = rate(rec.amendment, rec.total);
+      const pAR = rate(pri.amendment, pri.total);
+      const flags: CtTransporterRisk['riskFlags'] = [];
+      if (pDR > 0 && chg(rDR, pDR) >= 30) flags.push({ metric: 'Delay rate',     current: rDR, prior: pDR, changePct: chg(rDR, pDR) });
+      if (pER > 0 && chg(rER, pER) >= 30) flags.push({ metric: 'Equipment rate', current: rER, prior: pER, changePct: chg(rER, pER) });
+      if (pAR > 0 && chg(rAR, pAR) >= 30) flags.push({ metric: 'Amendment rate', current: rAR, prior: pAR, changePct: chg(rAR, pAR) });
+      const riskLevel: 'HIGH' | 'MEDIUM' | 'NONE' =
+        flags.some(f => f.changePct >= 100) ? 'HIGH' : flags.length > 0 ? 'MEDIUM' : 'NONE';
+      return { name, totalCases: rec.total, recentDelayRate: rDR, priorDelayRate: pDR,
+        recentEquipmentRate: rER, priorEquipmentRate: pER, recentAmendmentRate: rAR,
+        priorAmendmentRate: pAR, preventableRate: rate(rec.preventable, rec.total),
+        riskFlags: flags, riskLevel };
+    })
+    .filter(t => t.riskLevel !== 'NONE')
+    .sort((a, z) => ({ HIGH: 0, MEDIUM: 1, NONE: 2 }[a.riskLevel] - { HIGH: 0, MEDIUM: 1, NONE: 2 }[z.riskLevel] || z.totalCases - a.totalCases));
+
+  // Phase 25 — Preventable opportunities by category
+  const prevByCat: Record<string, { count: number; label: string; color: string }> = {};
+  const totalByCat: Record<string, number> = {};
+  for (const r of records) {
+    totalByCat[r.primaryIssue] = (totalByCat[r.primaryIssue] ?? 0) + 1;
+    if (r.preventableIssue) {
+      if (!prevByCat[r.primaryIssue]) prevByCat[r.primaryIssue] = {
+        count: 0,
+        label: ISSUE_LABEL_MAP[r.primaryIssue] ?? r.primaryIssue,
+        color: ISSUE_COLOR_MAP[r.primaryIssue] ?? '#8b7cff',
+      };
+      prevByCat[r.primaryIssue].count++;
+    }
+  }
+  const preventableOpportunities: CtPreventableOpportunity[] = Object.entries(prevByCat)
+    .map(([id, v]) => {
+      const total = totalByCat[id] ?? 0;
+      const rec4 = recentRecs.filter(r => r.primaryIssue === id && r.preventableIssue).length;
+      const pri4 = priorRecs.filter(r => r.primaryIssue === id && r.preventableIssue).length;
+      let trend: 'up' | 'down' | 'stable' = 'stable';
+      if (rec4 > pri4 * 1.1) trend = 'up';
+      else if (rec4 < pri4 * 0.9) trend = 'down';
+      return {
+        categoryId: id, categoryLabel: v.label,
+        preventableCount: v.count, totalCount: total,
+        preventableRate: total > 0 ? +(v.count / total * 100).toFixed(1) : 0,
+        hoursLost: +(v.count * HOURS_PER_PREVENTABLE).toFixed(1),
+        trend,
+      };
+    })
+    .sort((a, z) => z.hoursLost - a.hoursLost);
+
+  // Phase 26 — Root cause distribution
+  const CAUSE_LABELS: Record<string, string> = {
+    weather_delay: 'Weather Delay', terminal_congestion: 'Terminal Congestion',
+    customs_hold: 'Customs Hold', missed_cutoff: 'Missed Cutoff',
+    equipment_unavailable: 'Equipment Unavailable', documentation_error: 'Documentation Error',
+    late_booking: 'Late Booking', carrier_delay: 'Carrier Delay',
+    haulier_delay: 'Haulier Delay', vessel_delay: 'Vessel Delay',
+    extra_cost: 'Extra Cost', unknown: 'Unknown / Other',
+  };
+  const rcCount: Record<string, number> = {};
+  const rcRecent: Record<string, number> = {};
+  const rcPrior:  Record<string, number> = {};
+  for (const r of records)     { const c = r.rootCause ?? 'unknown'; rcCount[c]  = (rcCount[c]  ?? 0) + 1; }
+  for (const r of recentRecs)  { const c = r.rootCause ?? 'unknown'; rcRecent[c] = (rcRecent[c] ?? 0) + 1; }
+  for (const r of priorRecs)   { const c = r.rootCause ?? 'unknown'; rcPrior[c]  = (rcPrior[c]  ?? 0) + 1; }
+  const rcTotal = Object.values(rcCount).reduce((s, n) => s + n, 0);
+  const rootCauses: CtRootCauseItem[] = Object.entries(rcCount)
+    .sort(([, a], [, z]) => z - a)
+    .map(([cause, count]) => {
+      const rec = rcRecent[cause] ?? 0;
+      const pri = rcPrior[cause] ?? 0;
+      const trendPct = pri > 0 ? Math.round((rec - pri) / pri * 100) : 0;
+      return {
+        cause, causeLabel: CAUSE_LABELS[cause] ?? cause, count,
+        percent: rcTotal > 0 ? +(count / rcTotal * 100).toFixed(1) : 0,
+        trend: rec > pri * 1.1 ? 'up' : rec < pri * 0.9 ? 'down' : 'stable',
+        trendPct, recentCount: rec, priorCount: pri,
+      };
+    });
+
+  // Phase 27 — Dashboard validation
+  const valNotes: string[] = [];
+  if (records.length !== b.summary.totalCases) {
+    valNotes.push(`WARN: records (${records.length}) ≠ summary.totalCases (${b.summary.totalCases})`);
+  }
+  for (const item of issueBreakdown) {
+    const actual = records.filter(r => r.primaryIssue === item.id).length;
+    if (Math.abs(actual - item.count) > 1) {
+      valNotes.push(`WARN: ${item.label} count mismatch — breakdown: ${item.count}, records: ${actual}`);
+    }
+  }
+  if (valNotes.length === 0) valNotes.push('All totals verified against backend truth source.');
+
+  const controlTower: ControlTowerData = {
+    totalCases: records.length,
+    preventableCases: preventableRecords.length,
+    preventableHoursLost: Math.round(preventableRecords.length * HOURS_PER_PREVENTABLE),
+    avgConfidence: +((avgConf * 100).toFixed(1)),
+    lowConfidenceRate: +lowConfRate.toFixed(1),
+    categoryDistribution,
+    categoryRows,
+    bottlenecks: bottlenecks.slice(0, 20),
+    transporterRisks: transporterRisks.slice(0, 30),
+    preventableOpportunities,
+    rootCauses,
+    validationPassed: valNotes.every(n => !n.startsWith('WARN')),
+    validationNotes: valNotes,
+  };
 
   return {
     meta: {
@@ -404,6 +634,7 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       complianceControls: [],
     },
     records,
+    controlTower,
   };
 }
 

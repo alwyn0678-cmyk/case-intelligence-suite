@@ -11,6 +11,7 @@ import { PredictivePage } from './pages/PredictivePage';
 import { ActionPage } from './pages/ActionPage';
 import { DrilldownPage } from './pages/DrilldownPage';
 import { ExplorerPage } from './pages/ExplorerPage';
+import { ControlTowerPage } from './pages/ControlTowerPage';
 import { exportToExcel } from './lib/exportExcel';
 import { exportToPdf } from './lib/exportPdf';
 import type { ViewId } from './types';
@@ -40,7 +41,8 @@ export default function App() {
   const renderPage = () => {
     switch (view) {
       case 'upload':       return <UploadPage onAnalyze={handleAnalyze} />;
-      case 'summary':      return analysis ? <SummaryPage analysis={analysis} />      : null;
+      case 'summary':        return analysis ? <SummaryPage analysis={analysis} />        : null;
+      case 'control-tower': return analysis ? <ControlTowerPage analysis={analysis} /> : null;
       case 'issues':       return analysis ? <IssuePage analysis={analysis} />        : null;
       case 'customers':    return analysis ? <CustomerPage analysis={analysis} />     : null;
       case 'transporters': return analysis ? <TransporterPage analysis={analysis} />  : null;

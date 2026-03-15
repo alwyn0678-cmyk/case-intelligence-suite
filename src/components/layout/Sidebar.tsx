@@ -2,7 +2,7 @@ import React from 'react';
 import {
   Upload, LayoutDashboard, AlertTriangle, Users, Truck,
   FileCheck, MapPin, TrendingUp, CheckSquare, Search,
-  FileSpreadsheet, FileText, GitBranch,
+  FileSpreadsheet, FileText, GitBranch, Gauge,
 } from 'lucide-react';
 import type { ViewId } from '../../types';
 
@@ -15,7 +15,8 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'upload',       label: 'Upload Data',            icon: <Upload size={15} />,         requiresData: false },
-  { id: 'summary',      label: 'Executive Summary',      icon: <LayoutDashboard size={15} />, requiresData: true  },
+  { id: 'summary',        label: 'Executive Summary',       icon: <LayoutDashboard size={15} />, requiresData: true  },
+  { id: 'control-tower', label: 'Control Tower',           icon: <Gauge size={15} />,           requiresData: true  },
   { id: 'issues',       label: 'Issue Intelligence',     icon: <AlertTriangle size={15} />,   requiresData: true  },
   { id: 'customers',    label: 'Customer Burden',        icon: <Users size={15} />,           requiresData: true  },
   { id: 'transporters', label: 'Transporter Performance',icon: <Truck size={15} />,           requiresData: true  },

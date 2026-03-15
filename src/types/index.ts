@@ -46,6 +46,7 @@ export interface UploadState {
 export type ViewId =
   | 'upload'
   | 'summary'
+  | 'control-tower'
   | 'issues'
   | 'customers'
   | 'transporters'

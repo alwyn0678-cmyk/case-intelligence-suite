@@ -51,6 +51,10 @@ export interface EnrichedRecord extends NormalisedRecord {
   triggerPhrase: string;
   /** Which field the trigger phrase came from (description, subject, …) */
   triggerSourceField: string;
+
+  // ── Operational signals ────────────────────────────────────────
+  rootCause: string | null;
+  preventableIssue: boolean;
 }
 
 // ── Example case drilldown ────────────────────────────────────────
@@ -344,6 +348,93 @@ export interface ClassificationHealth {
   zipCoverage: number;
 }
 
+// ── Control Tower types ───────────────────────────────────────────
+
+export interface CtBottleneck {
+  category: string;
+  categoryLabel: string;
+  week: string;
+  caseCount: number;
+  spikePercent: number;
+  priorCount: number;
+}
+
+export interface CtTransporterRisk {
+  name: string;
+  totalCases: number;
+  recentDelayRate: number;
+  priorDelayRate: number;
+  recentEquipmentRate: number;
+  priorEquipmentRate: number;
+  recentAmendmentRate: number;
+  priorAmendmentRate: number;
+  preventableRate: number;
+  riskFlags: Array<{ metric: string; current: number; prior: number; changePct: number }>;
+  riskLevel: 'HIGH' | 'MEDIUM' | 'NONE';
+}
+
+export interface CtPreventableOpportunity {
+  categoryId: string;
+  categoryLabel: string;
+  preventableCount: number;
+  totalCount: number;
+  preventableRate: number;
+  hoursLost: number;
+  trend: 'up' | 'down' | 'stable';
+}
+
+export interface CtRootCauseItem {
+  cause: string;
+  causeLabel: string;
+  count: number;
+  percent: number;
+  trend: 'up' | 'down' | 'stable';
+  trendPct: number;
+  recentCount: number;
+  priorCount: number;
+}
+
+export interface CtCategoryRow {
+  id: string;
+  label: string;
+  color: string;
+  count: number;
+  percent: number;
+  hoursLost: number;
+  preventableRate: number;
+  trend: 'up' | 'down' | 'stable';
+  trendPct: number;
+}
+
+export interface ControlTowerData {
+  // Phase 21 — Overview
+  totalCases: number;
+  preventableCases: number;
+  preventableHoursLost: number;
+  avgConfidence: number;
+  lowConfidenceRate: number;
+  categoryDistribution: Array<{ id: string; name: string; value: number; color: string; percent: number; trend: 'up' | 'down' | 'stable' }>;
+
+  // Phase 22 — Category intelligence
+  categoryRows: CtCategoryRow[];
+
+  // Phase 23 — Bottlenecks
+  bottlenecks: CtBottleneck[];
+
+  // Phase 24 — Transporter risk
+  transporterRisks: CtTransporterRisk[];
+
+  // Phase 25 — Preventable opportunities
+  preventableOpportunities: CtPreventableOpportunity[];
+
+  // Phase 26 — Root causes
+  rootCauses: CtRootCauseItem[];
+
+  // Phase 27 — Validation
+  validationPassed: boolean;
+  validationNotes: string[];
+}
+
 export interface AnalysisResult {
   meta: {
     filename: string;
@@ -378,4 +469,5 @@ export interface AnalysisResult {
   forecast: Forecast;
   actions: Actions;
   records: EnrichedRecord[];
+  controlTower: ControlTowerData;
 }
