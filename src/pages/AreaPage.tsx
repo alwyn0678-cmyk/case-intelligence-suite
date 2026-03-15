@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { HBarChart } from '../components/ui/ChartWrapper';
+import { ExampleCasesPanel } from '../components/ui/ExampleCasesPanel';
 import { isAllowedAreaLabel } from '../config/referenceData';
 import { exportCasesToXlsx } from '../lib/exportEvidence';
-import type { AnalysisResult } from '../types/analysis';
+import type { AnalysisResult, ExampleCase } from '../types/analysis';
 
 interface Props { analysis: AnalysisResult }
 
@@ -12,6 +13,7 @@ const TREND_CLR: Record<string, string>  = { up: '#dc6d7d', down: '#52c7c7', sta
 
 export function AreaPage({ analysis }: Props) {
   const { meta } = analysis;
+  const [activeDrilldown, setActiveDrilldown] = useState<{ title: string; cases: ExampleCase[] } | null>(null);
 
   // Final pre-render safety filter: only allowed operational area labels
   // (Mainz/Germersheim, Duisburg/Rhine-Ruhr, Rotterdam, Antwerp) reach the chart.
@@ -52,7 +54,7 @@ export function AreaPage({ analysis }: Props) {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-[#1d2030] border-b border-[#2a2f3f]">
-              {['#','Area','Cases','Hours Lost','Top Issue','Trend',''].map(h => (
+              {['#','Area','Cases','Hours Lost','Top Issue','Trend','',''].map(h => (
                 <th key={h} className="px-4 py-3 text-xs font-medium text-[#a6aec4] uppercase tracking-wide text-left first:text-center">{h}</th>
               ))}
             </tr>
@@ -71,9 +73,18 @@ export function AreaPage({ analysis }: Props) {
                 <td className="px-4 py-2.5">
                   {a.exampleCases && a.exampleCases.length > 0 && (
                     <button
+                      onClick={() => setActiveDrilldown({ title: `Area — ${a.name}`, cases: a.exampleCases })}
+                      className="text-xs text-[#7aa2ff] hover:text-[#8fb3ff] font-medium whitespace-nowrap"
+                    >
+                      View {a.count.toLocaleString()}
+                    </button>
+                  )}
+                </td>
+                <td className="px-4 py-2.5">
+                  {a.exampleCases && a.exampleCases.length > 0 && (
+                    <button
                       onClick={() => exportCasesToXlsx(`Area — ${a.name}`, a.exampleCases)}
                       className="text-xs text-[#a6aec4] hover:text-[#eceff7] font-medium whitespace-nowrap"
-                      title={`Export all ${a.exampleCases.length} cases for ${a.name}`}
                     >
                       ↓ Export
                     </button>
@@ -84,6 +95,15 @@ export function AreaPage({ analysis }: Props) {
           </tbody>
         </table>
       </div>
+
+      {activeDrilldown && (
+        <ExampleCasesPanel
+          title={activeDrilldown.title}
+          subtitle={`${activeDrilldown.cases.length} case${activeDrilldown.cases.length !== 1 ? 's' : ''} — sorted by confidence`}
+          cases={activeDrilldown.cases}
+          onClose={() => setActiveDrilldown(null)}
+        />
+      )}
     </div>
   );
 }

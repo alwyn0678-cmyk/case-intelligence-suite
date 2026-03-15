@@ -715,18 +715,27 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
     depotPerformance: [],
     deepseaTerminalData: [],
     unknownEntities: [],
-    customsCompliance: {
-      totalCases: b.summary.totalCases,
-      customsDocs: b.issue_counts['customs'] ?? 0,
-      portbaseIssues: b.issue_counts['portbase'] ?? 0,
-      blIssues: b.issue_counts['bl'] ?? 0,
-      t1Issues: b.issue_counts['t1'] ?? 0,
-      exampleCases: [],
-      customsDocsExamples: [],
-      portbaseExamples: [],
-      blExamples: [],
-      t1Examples: [],
-    },
+    customsCompliance: (() => {
+      const COMPLIANCE_ISSUES = ['customs', 'portbase', 'bl', 't1'] as const;
+      const compRecs     = records.filter(r => (COMPLIANCE_ISSUES as readonly string[]).includes(r.primaryIssue));
+      const customsRecs  = records.filter(r => r.primaryIssue === 'customs');
+      const portbaseRecs = records.filter(r => r.primaryIssue === 'portbase');
+      const blRecs       = records.filter(r => r.primaryIssue === 'bl');
+      const t1Recs       = records.filter(r => r.primaryIssue === 't1');
+      const ccLabel = (id: string) => issueBreakdown.find(i => i.id === id)?.label ?? id;
+      return {
+        totalCases:          compRecs.length,
+        customsDocs:         customsRecs.length,
+        portbaseIssues:      portbaseRecs.length,
+        blIssues:            blRecs.length,
+        t1Issues:            t1Recs.length,
+        exampleCases:        compRecs.sort((a, z) => z.confidence - a.confidence).slice(0, MAX_EXAMPLES).map(r => toExampleCase(r, ccLabel(r.primaryIssue))),
+        customsDocsExamples: customsRecs.sort((a, z) => z.confidence - a.confidence).slice(0, MAX_EXAMPLES).map(r => toExampleCase(r, ccLabel('customs'))),
+        portbaseExamples:    portbaseRecs.sort((a, z) => z.confidence - a.confidence).slice(0, MAX_EXAMPLES).map(r => toExampleCase(r, ccLabel('portbase'))),
+        blExamples:          blRecs.sort((a, z) => z.confidence - a.confidence).slice(0, MAX_EXAMPLES).map(r => toExampleCase(r, ccLabel('bl'))),
+        t1Examples:          t1Recs.sort((a, z) => z.confidence - a.confidence).slice(0, MAX_EXAMPLES).map(r => toExampleCase(r, ccLabel('t1'))),
+      };
+    })(),
     loadRefIntelligence: {
       totalMissing: b.issue_counts['load_ref'] ?? 0,
       totalProvided: 0,
@@ -744,12 +753,34 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
     areaHotspots,
     isrVsExternal: {
       totalIsr: 0,
-      totalExternal: b.summary.totalCases,
+      totalExternal: records.length,
       isrPct: 0,
       externalPct: 100,
       weeklyBreakdown: [],
     },
-    issueDrilldowns: [],
+    issueDrilldowns: issueBreakdown.map(iss => {
+      const issRecs = records.filter(r => r.primaryIssue === iss.id);
+      const total = issRecs.length;
+      // Top 5 customers / transporters / areas by case count
+      const countBy = (key: (r: EnrichedRecord) => string | null) => {
+        const m: Record<string, number> = {};
+        for (const r of issRecs) { const k = key(r); if (k) m[k] = (m[k] ?? 0) + 1; }
+        return Object.entries(m).sort(([, a], [, b]) => b - a).slice(0, 5)
+          .map(([name, count]) => ({ name, count, pct: total > 0 ? +(count / total * 100).toFixed(1) : 0 }));
+      };
+      return {
+        issueId:          iss.id,
+        issueLabel:       iss.label,
+        color:            iss.color,
+        totalCount:       total,
+        topCustomers:     countBy(r => r.resolvedCustomer),
+        topTransporters:  countBy(r => r.resolvedTransporter),
+        topAreas:         countBy(r => r.resolvedArea),
+        externalCount:    total,
+        isrCount:         0,
+        exampleCases:     iss.exampleCases,
+      };
+    }),
     weekOnWeek: {
       available: Object.keys(b.wow_delta).length > 0,
       currentWeek: sortedWeeks[sortedWeeks.length - 1] ?? '',

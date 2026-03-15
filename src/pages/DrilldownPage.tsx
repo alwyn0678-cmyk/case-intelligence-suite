@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { SectionHeader } from '../components/ui/SectionHeader';
-import type { AnalysisResult, IssueDrilldown, IssueDriverItem } from '../types/analysis';
+import { ExampleCasesPanel } from '../components/ui/ExampleCasesPanel';
+import { exportCasesToXlsx } from '../lib/exportEvidence';
+import type { AnalysisResult, IssueDrilldown, IssueDriverItem, ExampleCase } from '../types/analysis';
 
 interface Props { analysis: AnalysisResult }
 
@@ -26,7 +28,7 @@ function DriverList({ items, accent }: { items: IssueDriverItem[]; accent: strin
   );
 }
 
-function DrillCard({ drill }: { drill: IssueDrilldown }) {
+function DrillCard({ drill, onView }: { drill: IssueDrilldown; onView: (title: string, cases: ExampleCase[]) => void }) {
   const isrPct = drill.totalCount > 0 ? (drill.isrCount / drill.totalCount * 100).toFixed(1) : '0';
   const extPct = drill.totalCount > 0 ? (drill.externalCount / drill.totalCount * 100).toFixed(1) : '0';
 
@@ -40,13 +42,29 @@ function DrillCard({ drill }: { drill: IssueDrilldown }) {
           <p className="text-xs text-[#a6aec4]">{drill.totalCount.toLocaleString()} cases total</p>
         </div>
         {/* Source split pills */}
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex items-center gap-3">
           <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-[#52c7c7]/10 border border-[#52c7c7]/20 text-[#52c7c7]">
             Ext {extPct}%
           </span>
           <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-[#8b7cff]/10 border border-[#8b7cff]/20 text-[#8b7cff]">
             ISR {isrPct}%
           </span>
+          {drill.exampleCases.length > 0 && (
+            <>
+              <button
+                onClick={() => onView(drill.issueLabel, drill.exampleCases)}
+                className="text-xs text-[#7aa2ff] hover:text-[#8fb3ff] font-medium whitespace-nowrap"
+              >
+                View {drill.totalCount.toLocaleString()}
+              </button>
+              <button
+                onClick={() => exportCasesToXlsx(drill.issueLabel, drill.exampleCases)}
+                className="text-xs text-[#a6aec4] hover:text-[#eceff7]"
+              >
+                ↓ Export
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -72,6 +90,7 @@ function DrillCard({ drill }: { drill: IssueDrilldown }) {
 export function DrilldownPage({ analysis }: Props) {
   const { issueDrilldowns, weekOnWeek, issueBreakdown } = analysis;
   const [activeFilter, setActiveFilter] = useState<string>('all');
+  const [activeDrilldown, setActiveDrilldown] = useState<{ title: string; cases: ExampleCase[] } | null>(null);
 
   const displayed = activeFilter === 'all'
     ? issueDrilldowns
@@ -152,7 +171,13 @@ export function DrilldownPage({ analysis }: Props) {
         </div>
       ) : (
         <div className="space-y-5">
-          {displayed.map(d => <DrillCard key={d.issueId} drill={d} />)}
+          {displayed.map(d => (
+            <DrillCard
+              key={d.issueId}
+              drill={d}
+              onView={(title, cases) => setActiveDrilldown({ title, cases })}
+            />
+          ))}
         </div>
       )}
 
@@ -233,6 +258,15 @@ export function DrilldownPage({ analysis }: Props) {
             </div>
           </div>
         </div>
+      )}
+
+      {activeDrilldown && (
+        <ExampleCasesPanel
+          title={activeDrilldown.title}
+          subtitle={`${activeDrilldown.cases.length} case${activeDrilldown.cases.length !== 1 ? 's' : ''} — sorted by confidence`}
+          cases={activeDrilldown.cases}
+          onClose={() => setActiveDrilldown(null)}
+        />
       )}
     </div>
   );

@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { Search, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { TAXONOMY_MAP } from '../lib/taxonomy';
+import { exportEnrichedToXlsx } from '../lib/exportAllCases';
 import type { AnalysisResult, EnrichedRecord } from '../types/analysis';
 
 interface Props { analysis: AnalysisResult }
@@ -189,6 +190,17 @@ export function ExplorerPage({ analysis }: Props) {
           />
           Review flags only
         </label>
+        {filtered.length > 0 && (
+          <button
+            onClick={() => exportEnrichedToXlsx(
+              reviewOnly ? 'Review Queue' : issueFilter ? `Cases — ${TAXONOMY_MAP[issueFilter]?.label ?? issueFilter}` : 'Case Explorer',
+              filtered,
+            )}
+            className="text-xs font-medium text-[#a6aec4] hover:text-[#eceff7] border border-[#2a2f3f] hover:border-[#3a3f52] bg-[#171922] rounded-md px-3 py-1.5 whitespace-nowrap"
+          >
+            ↓ Export {filtered.length.toLocaleString()}
+          </button>
+        )}
       </div>
 
       {/* Table */}

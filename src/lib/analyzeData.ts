@@ -735,6 +735,7 @@ export function runAnalysis(
       topAreas:        topN(areaCounts,  iss.count),
       externalCount:   issRecs.length - isrCount,
       isrCount,
+      exampleCases:    iss.exampleCases,
     };
   });
 

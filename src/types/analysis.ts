@@ -289,6 +289,8 @@ export interface IssueDrilldown {
   topAreas: IssueDriverItem[];
   externalCount: number;
   isrCount: number;
+  /** All cases for this issue — used by View cases / Export buttons */
+  exampleCases: ExampleCase[];
 }
 
 // ── Week-on-week change ──────────────────────────────────────────
