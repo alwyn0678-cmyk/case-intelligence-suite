@@ -2844,6 +2844,21 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
         clue_state = clue['state'] if clue['state'] != 'unknown' else _detect_state_windowed(normalized)
         return _build(clue['issueId'], clue_state, clue['confidence'], fb_used=True, rnk=ranked)
 
+    # 19b. Entity-pattern classification — if an ISO container, MRN, T1 ref, or
+    # load-ref value is found in text and nothing else matched, infer issue type
+    norm_upper = normalized.upper()
+    if _RE_CONTAINER.search(norm_upper):
+        _ep_state = _detect_state_windowed(normalized)
+        return _build('equipment', _ep_state, 0.45, fb_used=True, rnk=ranked)
+    if _RE_MRN_EXTRACT.search(normalized):
+        return _build('customs', 'missing', 0.50, fb_used=True, rnk=ranked)
+    if _RE_T1_EXTRACT.search(normalized):
+        return _build('t1', 'missing', 0.48, fb_used=True, rnk=ranked)
+    if _RE_LOAD_REF_EXTRACT.search(normalized):
+        return _build('load_ref', 'missing', 0.48, fb_used=True, rnk=ranked)
+    if _RE_BOOKING_EXTRACT.search(normalized):
+        return _build('load_ref', 'missing', 0.45, fb_used=True, rnk=ranked)
+
     # 20. RECOVERY_SIGNALS scan — broad phrase list applied unconstrained
     norm_lower = normalized.lower()
     for phrases, rec_issue_id in RECOVERY_SIGNALS:
