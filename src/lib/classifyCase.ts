@@ -350,7 +350,7 @@ function isPreventable(primaryIssue: string, text: string): boolean {
   if (NON_PREVENTABLE_SIGNALS.some(s => t.includes(s))) return false;
   if (PREVENTABLE_SIGNALS.some(s => t.includes(s))) return true;
   // Category-level defaults: these issue types are almost always preventable
-  const PREVENTABLE_CATEGORIES = ['load_ref', 'amendment', 'bl', 'vgm'];
+  const PREVENTABLE_CATEGORIES = ['load_ref', 'amendment', 'bl', 'vgm', 'customs', 't1'];
   return PREVENTABLE_CATEGORIES.includes(primaryIssue);
 }
 

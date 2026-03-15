@@ -601,3 +601,267 @@ console.log(`  Preventable issues:         ${preventableCount} / ${total}  (${pr
 console.log(`  Root cause detected:        ${withRootCause} / ${total}  (${withRootCausePct.toFixed(1)}%)`);
 console.log(`  Trend spikes (≥30%):        ${spikes.length}  — ${spikes.map(s => TAXONOMY_MAP[s.category]?.label ?? s.category).join(', ') || 'none'}`);
 console.log();
+
+// ─── Phase 13: Transporter performance metrics ────────────────────
+
+interface TransporterMetrics {
+  name: string;
+  total: number;
+  delay: number;
+  equipment: number;
+  customs: number;
+  amendment: number;
+  preventable: number;
+  delayRate: number;
+  preventableRate: number;
+}
+
+const tpMap: Record<string, TransporterMetrics> = {};
+
+for (const r of classified) {
+  const name = r.resolvedTransporter ?? '(Unknown)';
+  if (!tpMap[name]) {
+    tpMap[name] = { name, total: 0, delay: 0, equipment: 0, customs: 0, amendment: 0, preventable: 0, delayRate: 0, preventableRate: 0 };
+  }
+  const m = tpMap[name];
+  m.total++;
+  if (r.primaryIssue === 'delay')     m.delay++;
+  if (r.primaryIssue === 'equipment') m.equipment++;
+  if (['customs','t1','portbase','bl'].includes(r.primaryIssue)) m.customs++;
+  if (r.primaryIssue === 'amendment') m.amendment++;
+  if (r.preventableIssue)             m.preventable++;
+}
+
+for (const m of Object.values(tpMap)) {
+  m.delayRate       = m.total > 0 ? +(m.delay       / m.total * 100).toFixed(1) : 0;
+  m.preventableRate = m.total > 0 ? +(m.preventable / m.total * 100).toFixed(1) : 0;
+}
+
+const transporterPerfSorted = Object.values(tpMap).sort((a, b) => b.total - a.total);
+
+console.log('── TRANSPORTER PERFORMANCE (Phase 13) ─────────────────');
+for (const m of transporterPerfSorted.slice(0, 15)) {
+  console.log(`  ${m.name.padEnd(32)} total:${String(m.total).padStart(5)}  delay:${String(m.delay).padStart(4)} (${m.delayRate}%)  prev:${String(m.preventable).padStart(4)} (${m.preventableRate}%)`);
+}
+console.log();
+
+// ─── Phase 14: Preventable opportunity analysis ───────────────────
+
+// By category
+const prevByCategory: Record<string, number> = {};
+for (const r of classified) {
+  if (!r.preventableIssue) continue;
+  prevByCategory[r.primaryIssue] = (prevByCategory[r.primaryIssue] ?? 0) + 1;
+}
+const prevByCatSorted = Object.entries(prevByCategory).sort((a, b) => b[1] - a[1]);
+
+// By customer
+const prevByCustomer: Record<string, number> = {};
+for (const r of classified) {
+  if (!r.preventableIssue || !r.resolvedCustomer) continue;
+  prevByCustomer[r.resolvedCustomer] = (prevByCustomer[r.resolvedCustomer] ?? 0) + 1;
+}
+const prevByCustomerSorted = Object.entries(prevByCustomer).sort((a, b) => b[1] - a[1]);
+
+// By transporter
+const prevByTransporter: Record<string, number> = {};
+for (const r of classified) {
+  if (!r.preventableIssue || !r.resolvedTransporter) continue;
+  prevByTransporter[r.resolvedTransporter] = (prevByTransporter[r.resolvedTransporter] ?? 0) + 1;
+}
+const prevByTransporterSorted = Object.entries(prevByTransporter).sort((a, b) => b[1] - a[1]);
+
+// Preventable 8-week trend
+const prevWeeklyTrend: Record<string, number> = {};
+const last8Weeks = allWeeks.slice(-8);
+for (const r of classified) {
+  if (!r.preventableIssue || !r.date) continue;
+  const wk = isoWeekKey(r.date);
+  if (!last8Weeks.includes(wk)) continue;
+  prevWeeklyTrend[wk] = (prevWeeklyTrend[wk] ?? 0) + 1;
+}
+
+console.log('── PREVENTABLE OPPORTUNITIES (Phase 14) ────────────────');
+console.log('  By category (top 8):');
+for (const [cat, cnt] of prevByCatSorted.slice(0, 8)) {
+  console.log(`    ${(TAXONOMY_MAP[cat]?.label ?? cat).padEnd(40)} ${cnt}`);
+}
+console.log('  By customer (top 5):');
+for (const [cust, cnt] of prevByCustomerSorted.slice(0, 5)) {
+  console.log(`    ${cust.padEnd(40)} ${cnt}`);
+}
+console.log('  By transporter (top 5):');
+for (const [tp, cnt] of prevByTransporterSorted.slice(0, 5)) {
+  console.log(`    ${tp.padEnd(40)} ${cnt}`);
+}
+console.log('  8-week preventable trend:');
+for (const wk of last8Weeks) {
+  const cnt = prevWeeklyTrend[wk] ?? 0;
+  console.log(`    ${wk}  ${cnt}`);
+}
+console.log();
+
+// ─── Phase 15: Bottleneck detection ──────────────────────────────
+
+interface BottleneckEvent {
+  category: string;
+  week: string;
+  prevWeek: string;
+  prevCount: number;
+  currCount: number;
+  pctIncrease: number;
+  likelyCauses: string[];
+}
+
+const bottlenecks: BottleneckEvent[] = [];
+
+const BOTTLENECK_CAUSES: Record<string, string[]> = {
+  delay:           ['vessel omission', 'terminal congestion', 'haulier shortage', 'weather event'],
+  equipment:       ['container shortage', 'reefer equipment fault', 'genset availability'],
+  customs:         ['documentation backlog', 'incorrect MRN', 'portal outage'],
+  t1:              ['transit declaration errors', 'missing T1 documents'],
+  portbase:        ['pre-arrival notification delays', 'PCS system issues'],
+  amendment:       ['booking data quality', 'late instruction changes'],
+  load_ref:        ['missing reference numbers from customers'],
+  rate:            ['invoice discrepancies', 'rate table mismatch'],
+  transport_order: ['order volume spike', 'new customer onboarding'],
+  scheduling:      ['capacity constraints', 'barge/rail availability'],
+  closing_time:    ['late cargo tendering', 'terminal congestion'],
+};
+
+// WoW comparison: each consecutive week pair
+for (let i = 1; i < allWeeks.length; i++) {
+  const prevWk = allWeeks[i - 1];
+  const currWk = allWeeks[i];
+  for (const cat of allCategories) {
+    const prev = weekCounts[prevWk]?.[cat] ?? 0;
+    const curr = weekCounts[currWk]?.[cat] ?? 0;
+    if (prev === 0 || curr < 30) continue;
+    const pctIncrease = ((curr - prev) / prev) * 100;
+    if (pctIncrease >= 40) {
+      bottlenecks.push({
+        category:     cat,
+        week:         currWk,
+        prevWeek:     prevWk,
+        prevCount:    prev,
+        currCount:    curr,
+        pctIncrease:  +pctIncrease.toFixed(1),
+        likelyCauses: BOTTLENECK_CAUSES[cat] ?? ['investigate manually'],
+      });
+    }
+  }
+}
+
+bottlenecks.sort((a, b) => b.pctIncrease - a.pctIncrease);
+
+console.log('── BOTTLENECK EVENTS (Phase 15) ────────────────────────');
+if (bottlenecks.length === 0) {
+  console.log('  No bottlenecks detected (threshold: ≥40% WoW AND ≥30 cases)');
+} else {
+  for (const b of bottlenecks) {
+    const label = TAXONOMY_MAP[b.category]?.label ?? b.category;
+    console.log(`  ⚠  ${label.padEnd(38)} ${b.week}  ${b.prevCount}→${b.currCount}  +${b.pctIncrease}%`);
+    console.log(`       Likely: ${b.likelyCauses.slice(0, 2).join(', ')}`);
+  }
+}
+console.log();
+
+// ─── Phase 16: Operational intelligence report export ─────────────
+
+console.log('Exporting operational_intelligence_report.xlsx...');
+
+const reportWb = XLSX.utils.book_new();
+
+// ── Sheet 1: transporter_performance ──────────────────────────────
+{
+  const wsData = [
+    ['Transporter', 'Total Cases', 'Delay', 'Equipment', 'Customs', 'Amendment', 'Preventable', 'Delay Rate %', 'Preventable Rate %'],
+    ...transporterPerfSorted.map(m => [
+      m.name, m.total, m.delay, m.equipment, m.customs, m.amendment, m.preventable,
+      `${m.delayRate}%`, `${m.preventableRate}%`,
+    ]),
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [{ wch: 32 },{ wch: 13 },{ wch: 10 },{ wch: 12 },{ wch: 10 },{ wch: 12 },{ wch: 13 },{ wch: 14 },{ wch: 18 }];
+  XLSX.utils.book_append_sheet(reportWb, ws, 'transporter_performance');
+}
+
+// ── Sheet 2: preventable_opportunities ────────────────────────────
+{
+  const rows: unknown[][] = [
+    ['Dimension', 'Name', 'Preventable Cases'],
+  ];
+  rows.push(['─── By Category ───', '', '']);
+  for (const [cat, cnt] of prevByCatSorted) {
+    rows.push(['Category', TAXONOMY_MAP[cat]?.label ?? cat, cnt]);
+  }
+  rows.push(['─── By Customer ───', '', '']);
+  for (const [cust, cnt] of prevByCustomerSorted.slice(0, 20)) {
+    rows.push(['Customer', cust, cnt]);
+  }
+  rows.push(['─── By Transporter ───', '', '']);
+  for (const [tp, cnt] of prevByTransporterSorted.slice(0, 20)) {
+    rows.push(['Transporter', tp, cnt]);
+  }
+  rows.push(['─── 8-Week Trend ───', '', '']);
+  for (const wk of last8Weeks) {
+    rows.push(['Week', wk, prevWeeklyTrend[wk] ?? 0]);
+  }
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{ wch: 22 }, { wch: 40 }, { wch: 18 }];
+  XLSX.utils.book_append_sheet(reportWb, ws, 'preventable_opportunities');
+}
+
+// ── Sheet 3: category_trends ──────────────────────────────────────
+{
+  // Header: Dimension | Category | [week1] | [week2] | … | Direction | Latest | 4w Avg | % Change | Spike
+  const displayWeeks = allWeeks.slice(-12);
+  const header = [
+    'Category', ...displayWeeks, 'Direction', 'Latest', '4w Avg', '% Change', 'Spike',
+  ];
+  const dataRows = trendResults
+    .sort((a, b) => (b.pctChange ?? 0) - (a.pctChange ?? 0))
+    .map(t => {
+      const weeklyCounts = displayWeeks.map(wk => weekCounts[wk]?.[t.category] ?? 0);
+      return [
+        TAXONOMY_MAP[t.category]?.label ?? t.category,
+        ...weeklyCounts,
+        t.direction,
+        t.latestCount,
+        +t.rolling4wAvg.toFixed(1),
+        t.pctChange !== null ? `${t.pctChange > 0 ? '+' : ''}${t.pctChange.toFixed(0)}%` : 'n/a',
+        t.spike ? 'SPIKE' : '',
+      ];
+    });
+  const wsData = [header, ...dataRows];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  const cols = [{ wch: 38 }, ...displayWeeks.map(() => ({ wch: 8 })), { wch: 10 }, { wch: 8 }, { wch: 8 }, { wch: 10 }, { wch: 7 }];
+  ws['!cols'] = cols;
+  XLSX.utils.book_append_sheet(reportWb, ws, 'category_trends');
+}
+
+// ── Sheet 4: bottleneck_events ────────────────────────────────────
+{
+  const wsData = [
+    ['Category', 'Week', 'Prior Week', 'Prior Count', 'Current Count', 'Increase %', 'Likely Root Causes'],
+    ...bottlenecks.map(b => [
+      TAXONOMY_MAP[b.category]?.label ?? b.category,
+      b.week,
+      b.prevWeek,
+      b.prevCount,
+      b.currCount,
+      `+${b.pctIncrease}%`,
+      b.likelyCauses.join('; '),
+    ]),
+  ];
+  if (bottlenecks.length === 0) {
+    wsData.push(['No bottleneck events detected', '', '', '', '', '', '']);
+  }
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [{ wch: 38 },{ wch: 10 },{ wch: 12 },{ wch: 13 },{ wch: 15 },{ wch: 12 },{ wch: 60 }];
+  XLSX.utils.book_append_sheet(reportWb, ws, 'bottleneck_events');
+}
+
+const reportPath = path.join(path.dirname(inputPath), 'operational_intelligence_report.xlsx');
+XLSX.writeFile(reportWb, reportPath);
+console.log(`Exported: ${reportPath}\n`);
