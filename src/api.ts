@@ -176,7 +176,7 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
   // ── Build exampleCases from classified records ─────────────────
   // Converts an EnrichedRecord to the ExampleCase shape the modal expects.
   function toExampleCase(r: EnrichedRecord, label: string): ExampleCase {
-    const fmt = (d: Date | null): string | null =>
+    const fmt = (d: Date | null | undefined): string | null =>
       d ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : null;
     // Extract load ref from booking_ref or evidence
     const ev = r.evidence ?? [];
