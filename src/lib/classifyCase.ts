@@ -179,6 +179,12 @@ export interface CaseClassification {
   triggerPhrase: string;
   /** Which field the trigger phrase came from (description, subject, …) */
   triggerSourceField: string;
+
+  // ── Operational intelligence (Phase 8–10) ─────────────────────
+  /** Root cause label within the primary issue category */
+  rootCause: string | null;
+  /** True when the case was likely caused by avoidable data / process failure */
+  preventableIssue: boolean;
 }
 
 // ─── Reference extraction helpers ───────────────────────────────
@@ -215,6 +221,137 @@ function extractReferences(text: string): Record<string, string> {
   }
   delete refs['mrn_bare'];
   return refs;
+}
+
+// ─── Phase 8: Email domain → transporter map ────────────────────
+const EMAIL_DOMAIN_TRANSPORTER_MAP: Record<string, string> = {
+  'maersk.com':          'Maersk',
+  'msl.com':             'Maersk',
+  'hlag.com':            'Hapag Lloyd',
+  'hapag-lloyd.com':     'Hapag Lloyd',
+  'msc.com':             'MSC',
+  'cma-cgm.com':         'CMA CGM',
+  'cmacgm.com':          'CMA CGM',
+  'one-line.com':        'ONE',
+  'oceannetworkexpress.com': 'ONE',
+  'evergreen-line.com':  'Evergreen',
+  'emc.com.tw':          'Evergreen',
+  'cosco.com':           'COSCO',
+  'yangming.com':        'Yang Ming',
+  'zim.com':             'Zim',
+  'contargo.net':        'Contargo',
+  'contargo.com':        'Contargo',
+  'hgk.de':              'HGK',
+  'dp-world.com':        'Germersheim DPW',
+  'hutchison-ports.com': 'HP Duisburg',
+  'cts-gmbh.de':         'CTS Container-Terminal',
+  'ekb-transport.de':    'EKB Transport',
+  'falcoline.com':       'Falcoline',
+  'gts-coldchain.de':    'GTS Coldchain',
+  'ctv-vrede.de':        'CTV Vrede',
+  'starmans.nl':         'Starmans',
+  'optimodal.nl':        'Optimodal Nederland',
+};
+
+function resolveTransporterFromDomain(text: string): string | null {
+  const allDomains = [...text.matchAll(/@([\w.-]+\.[a-z]{2,})/gi)].map(m => m[1].toLowerCase());
+  for (const domain of allDomains) {
+    if (EMAIL_DOMAIN_TRANSPORTER_MAP[domain]) return EMAIL_DOMAIN_TRANSPORTER_MAP[domain];
+    // Try parent domain (sub.maersk.com → maersk.com)
+    const parts = domain.split('.');
+    if (parts.length > 2) {
+      const parent = parts.slice(-2).join('.');
+      if (EMAIL_DOMAIN_TRANSPORTER_MAP[parent]) return EMAIL_DOMAIN_TRANSPORTER_MAP[parent];
+    }
+  }
+  return null;
+}
+
+// ─── Phase 9: Root cause detection ──────────────────────────────
+function detectRootCause(primaryIssue: string, text: string): string | null {
+  const t = text.toLowerCase();
+
+  switch (primaryIssue) {
+    case 'delay':
+      if (t.includes('terminal congestion') || t.includes('port congestion') || t.includes('congestion at')) return 'terminal_congestion';
+      if (t.includes('customs hold') || t.includes('customs delay') || t.includes('on hold customs')) return 'customs_hold';
+      if (t.includes('missed cutoff') || (t.includes('missed') && t.includes('cutoff'))) return 'missed_cutoff';
+      if (t.includes('late booking') || t.includes('booking too late') || t.includes('laate boeking')) return 'late_booking';
+      if (t.includes('vessel delay') || t.includes('vessel late') || t.includes('ship delay') || t.includes('vessel omission')) return 'vessel_delay';
+      if (t.includes('barge delay') || t.includes('barge late') || t.includes('barge issue')) return 'barge_delay';
+      if (t.includes('train delay') || t.includes('rail delay') || t.includes('trein vertraging')) return 'rail_delay';
+      if (t.includes('driver late') || t.includes('truck late') || t.includes('chauffeur te laat') || t.includes('fahrer verspätet')) return 'haulier_delay';
+      if (t.includes('weather') || t.includes('storm') || t.includes('ice') || t.includes('wind')) return 'weather_delay';
+      if (t.includes('strike') || t.includes('staking') || t.includes('streik')) return 'industrial_action';
+      return null;
+
+    case 'rate':
+      if (t.includes('dispute') || t.includes('incorrect') || t.includes('wrong amount') || t.includes('onjuist bedrag') || t.includes('falsche') ) return 'invoice_dispute';
+      if (t.includes('extra cost') || t.includes('additional cost') || t.includes('surcharge') || t.includes('meerkosten') || t.includes('extrakosten')) return 'extra_cost';
+      if (t.includes('credit note') || t.includes('credit memo') || t.includes('creditnota') || t.includes('gutschrift')) return 'credit_note';
+      if (t.includes('clarif') || t.includes('question') || t.includes('query') || t.includes('vraag') || t.includes('anfrage')) return 'rate_clarification';
+      return null;
+
+    case 'customs':
+    case 't1':
+    case 'portbase':
+      if ((t.includes('missing') || t.includes('ontbreekt') || t.includes('fehlt')) && (t.includes('document') || t.includes('mrn') || t.includes('t1'))) return 'missing_document';
+      if (t.includes('incorrect') || t.includes('wrong') || t.includes('error in') || t.includes('fout in')) return 'incorrect_document';
+      if (t.includes('hold') || t.includes('held by customs') || t.includes('ingehouden door douane')) return 'customs_hold';
+      if (t.includes('released') || t.includes('vrijgegeven') || t.includes('freigegeben')) return 'customs_released';
+      return null;
+
+    case 'equipment':
+      if (t.includes('reefer') || t.includes('temperature') || t.includes('koeling') || t.includes('kühlcontainer')) return 'reefer_fault';
+      if (t.includes('genset') || t.includes('power failure') || t.includes('stroomstoring')) return 'power_failure';
+      if (t.includes('damaged') || t.includes('defect') || t.includes('beschadigd') || t.includes('defekt')) return 'equipment_defect';
+      if (t.includes('seal') || t.includes('zegel')) return 'seal_issue';
+      return null;
+
+    case 'amendment':
+      if (t.includes('address') || t.includes('adres') || t.includes('anschrift')) return 'address_correction';
+      if (t.includes('weight') || t.includes('gewicht') || t.includes('gewicht')) return 'weight_correction';
+      if (t.includes('consignee') || t.includes('geadresseerde') || t.includes('empfänger')) return 'consignee_change';
+      if (t.includes('cancel') || t.includes('annuleer') || t.includes('stornier')) return 'booking_cancellation';
+      return null;
+
+    default:
+      return null;
+  }
+}
+
+// ─── Phase 10: Preventable issue detection ───────────────────────
+const PREVENTABLE_SIGNALS: string[] = [
+  'missing reference', 'missing load ref', 'no load reference', 'no booking reference',
+  'missing booking ref', 'missing booking number', 'no booking number',
+  'late booking', 'booking too late', 'te laat geboekt', 'spät gebucht',
+  'incorrect documentation', 'wrong documentation', 'incorrect document', 'wrong document',
+  'missing customs document', 'missing customs info', 'incomplete documentation',
+  'missing information', 'ontbrekende informatie', 'fehlende information',
+  'incorrect address', 'wrong address', 'onjuist adres', 'falsche adresse',
+  'missing vgm', 'late vgm', 'incorrect weight', 'wrong weight',
+  'missing consignee', 'incorrect consignee', 'wrong consignee',
+  'booking error', 'data error', 'input error', 'invoerfout',
+  'wrong description', 'incorrect description',
+];
+
+const NON_PREVENTABLE_SIGNALS: string[] = [
+  'terminal congestion', 'port congestion', 'congestion',
+  'vessel delay', 'vessel late', 'ship delay', 'vessel omission', 'vessel cancelled',
+  'weather', 'storm', 'icing', 'bad weather', 'force majeure',
+  'strike', 'staking', 'streik', 'industrial action',
+  'barge delay', 'barge issue', 'barge breakdown',
+  'infrastructure failure', 'power outage', 'system outage',
+];
+
+/** Preventable if caused by missing/incorrect data or a process failure the shipper controls. */
+function isPreventable(primaryIssue: string, text: string): boolean {
+  const t = text.toLowerCase();
+  if (NON_PREVENTABLE_SIGNALS.some(s => t.includes(s))) return false;
+  if (PREVENTABLE_SIGNALS.some(s => t.includes(s))) return true;
+  // Category-level defaults: these issue types are almost always preventable
+  const PREVENTABLE_CATEGORIES = ['load_ref', 'amendment', 'bl', 'vgm'];
+  return PREVENTABLE_CATEGORIES.includes(primaryIssue);
 }
 
 // ─── Main classify function ──────────────────────────────────────
@@ -284,6 +421,8 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
       loadRefExtracted:    null,
       containerExtracted:  null,
       mrnRefExtracted:     null,
+      rootCause:           'extra_cost',
+      preventableIssue:    false,
     };
   }
 
@@ -1119,6 +1258,25 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   const primaryIssue   = issues[0];
   const secondaryIssue = issues.length > 1 ? issues[1] : null;
 
+  // ── Phase 8: Email domain transporter fallback ───────────────
+  // When entity resolution and raw column both yield null, scan all text
+  // fields for email addresses and map their domain to a canonical transporter.
+  const resolvedTransporterFinal: string | null =
+    resolvedTransporter ??
+    resolveTransporterFromDomain(
+      [record.description ?? '', record.isr_details ?? '', record.subject ?? ''].join(' ')
+    );
+
+  if (resolvedTransporterFinal && !resolvedTransporter) {
+    evidence.push(`[domain-transporter] resolved from email domain: ${resolvedTransporterFinal}`);
+  }
+
+  // ── Phase 9: Root cause detection ───────────────────────────
+  const rootCause = detectRootCause(primaryIssue, normalizedText);
+
+  // ── Phase 10: Preventable issue detection ───────────────────
+  const preventableIssue = isPreventable(primaryIssue, normalizedText);
+
   // ── Diagnostic transparency fields ───────────────────────────
   const detectedIntent      = TOPIC_INTENT[primaryIssue] ?? 'unknown';
   const detectedObject      = DETECTED_OBJECT_MAP[primaryIssue] ?? primaryIssue;
@@ -1130,7 +1288,7 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     secondaryIssue,
     issueState,
     confidence,
-    resolvedTransporter,
+    resolvedTransporter:     resolvedTransporterFinal,
     resolvedDepot,
     resolvedDeepseaTerminal,
     resolvedCustomer,
@@ -1152,5 +1310,7 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     loadRefExtracted:    refs.load_ref ?? null,
     containerExtracted:  refs.container ?? null,
     mrnRefExtracted:     refs.mrn ?? refs.t1_mrn ?? null,
+    rootCause,
+    preventableIssue,
   };
 }
