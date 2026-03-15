@@ -147,28 +147,28 @@ const FALLBACK_RULES: FallbackRule[] = [
   // ── Pickup / delivery planning ────────────────────────────────────
   { issueId: 'pickup_delivery', state: 'informational',
     pattern: /\b(plan|confirm|arrange).{0,25}(pickup|pick.up|collection|delivery)\b/i,
-    evidence: 'delivery planning pattern', confidence: 0.55 },
+    evidence: 'delivery planning pattern', confidence: 0.63 },
 
   // ── Scheduling / allocation ───────────────────────────────────────
   { issueId: 'scheduling', state: 'missing',
     pattern: /\b(slot|time.slot|appointment).{0,25}(needed|required|missing|not confirmed|not allocated)\b/i,
-    evidence: 'slot/appointment needed pattern', confidence: 0.55 },
+    evidence: 'slot/appointment needed pattern', confidence: 0.63 },
 
   // ── Booking / scheduling query (broad catch) ──────────────────
   { issueId: 'scheduling', state: 'informational',
     pattern: /\b(booking|reserve|book).{0,30}(confirm|confirmation|request|query|question|inquiry)\b/i,
-    evidence: 'booking query pattern', confidence: 0.50 },
+    evidence: 'booking query pattern', confidence: 0.63 },
   { issueId: 'scheduling', state: 'informational',
     pattern: /\b(can\s+(?:we|you|i)|please).{0,30}(book|reserve|schedule|arrange|organise)\b/i,
-    evidence: 'scheduling request pattern', confidence: 0.50 },
+    evidence: 'scheduling request pattern', confidence: 0.63 },
 
   // ── Status / informational queries ────────────────────────────
   { issueId: 'tracking', state: 'informational',
     pattern: /\b(status|update|progress|eta|expected).{0,30}(of|on|for).{0,30}(shipment|delivery|container|cargo|order)\b/i,
-    evidence: 'status inquiry pattern', confidence: 0.55 },
+    evidence: 'status inquiry pattern', confidence: 0.63 },
   { issueId: 'tracking', state: 'informational',
     pattern: /\b(please|kindly)\s+(advise|confirm|update|inform).{0,40}(status|whereabouts|location|eta)\b/i,
-    evidence: 'please advise status pattern', confidence: 0.55 },
+    evidence: 'please advise status pattern', confidence: 0.63 },
 
   // ── Documentation / reference provision ─────────────────────
   { issueId: 'ref_provided', state: 'provided',
@@ -176,12 +176,12 @@ const FALLBACK_RULES: FallbackRule[] = [
     evidence: 'reference value given pattern', confidence: 0.65 },
   { issueId: 'ref_provided', state: 'provided',
     pattern: /\b(please find|see|as per|with reference to).{0,20}(booking|ref|order|po)\b/i,
-    evidence: 'reference cross-reference pattern', confidence: 0.55 },
+    evidence: 'reference cross-reference pattern', confidence: 0.63 },
 
   // ── General logistics / transport queries ────────────────────
   { issueId: 'pickup_delivery', state: 'informational',
     pattern: /\b(collect|collection|pick.?up|deliver|delivery).{0,50}(date|time|window|slot|appointment|planned|scheduled)\b/i,
-    evidence: 'collection/delivery appointment pattern', confidence: 0.55 },
+    evidence: 'collection/delivery appointment pattern', confidence: 0.63 },
   { issueId: 'pickup_delivery', state: 'missing',
     pattern: /\b(collect|delivery|pickup).{0,30}(not|no|without).{0,20}(date|time|window|slot|appointment|instruction|address)\b/i,
     evidence: 'missing collection appointment pattern', confidence: 0.60 },
@@ -189,12 +189,12 @@ const FALLBACK_RULES: FallbackRule[] = [
   // ── Cargo / shipment general ─────────────────────────────────
   { issueId: 'tracking', state: 'informational',
     pattern: /\b(goods|cargo|shipment|consignment|load)\b.{0,60}\b(arrived|received|cleared|released|available)\b/i,
-    evidence: 'cargo arrived/available notification', confidence: 0.55 },
+    evidence: 'cargo arrived/available notification', confidence: 0.63 },
 
   // ── Missing information general ───────────────────────────────
   { issueId: 'amendment', state: 'missing',
     pattern: /\b(information|details?|data)\b.{0,30}\b(missing|required|needed|not provided|incomplete|outstanding)\b/i,
-    evidence: 'missing information pattern', confidence: 0.55 },
+    evidence: 'missing information pattern', confidence: 0.63 },
 
   // ── VGM / weight ─────────────────────────────────────────────
   { issueId: 'vgm', state: 'missing',
@@ -300,7 +300,7 @@ export function operationalClueScan(text: string): IssueMatch | null {
       return {
         issueId: clue.issueId,
         state: clue.state,
-        confidence: 0.42,
+        confidence: 0.62,
         evidence: [`operational clue: "${clue.keyword}"`],
       };
     }

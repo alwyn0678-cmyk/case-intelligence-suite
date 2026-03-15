@@ -36,7 +36,7 @@ export interface IssueMatch {
 export const STRONG_SIGNAL_CONFIDENCE = 0.85;
 
 /** Confidence assigned when only weakSignals fire. */
-export const WEAK_SIGNAL_CONFIDENCE = 0.55;
+export const WEAK_SIGNAL_CONFIDENCE = 0.68;
 
 /** Added to confidence when issue intent/state can be determined. */
 export const STATE_DETECTION_BONUS = 0.10;

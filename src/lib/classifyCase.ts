@@ -77,6 +77,10 @@ const FINANCIAL_SUBJECT_PATTERNS: string[] = [
   'kostenbericht', 'bestellnummer',
   // PO amount / value mismatch — subject patterns for invoice-vs-PO discrepancy
   'po mismatch', 'po amount', 'po discrepancy', 'po bedrag', 'po betrag',
+  // Open/unpaid/overdue invoice subjects — unambiguously financial
+  'open invoice', 'invoice per ', 'invoice nr', 'invoice no ', 'invoice #',
+  'unpaid invoice', 'overdue invoice', 'offene rechnung', 'offene faktuur',
+  'invoice outstanding', 'invoice overdue',
   // NOTE: bare 'demurrage', 'detention', 'wartezeit' are intentionally excluded —
   // they appear in operational waiting-time case subjects and must NOT be forced to rate.
   // Specific invoice/charge forms ('demurrage invoice', 'demurrage rechnung') remain
@@ -99,10 +103,10 @@ export const REVIEW_FLAG_THRESHOLD = 0.60;
  * This means the primary classification was driven entirely by the subject
  * or category fields — which are less operationally reliable than the body.
  */
-export const SUBJECT_ONLY_PENALTY = 0.18;
+export const SUBJECT_ONLY_PENALTY = 0.08;
 
 /** Minimum confidence after the subject-only penalty is applied. */
-export const SUBJECT_ONLY_FLOOR = 0.48;
+export const SUBJECT_ONLY_FLOOR = 0.60;
 
 /**
  * Minimum description length (chars, trimmed) that qualifies as "substantive".
@@ -181,10 +185,11 @@ export interface CaseClassification {
 
 const REF_PATTERNS: Record<string, RegExp> = {
   container:  /\b([A-Z]{4}[0-9]{7})\b/,
-  mrn:        /\b(?:MRN)\s*[:#\s]?\s*([A-Z0-9]{14,18})\b/i,
-  t1_mrn:     /\bT[12]\s*(?:MRN|mrn)?\s*[:#\s]?\s*([A-Z0-9]{14,18})\b/i,
+  mrn:        /\b(?:MRN)\s*[:#\s]?\s*([A-Z0-9]{12,22})\b/i,
+  t1_mrn:     /\bT[12]\s*(?:MRN|mrn)?\s*[:#\s]?\s*([A-Z0-9]{12,22})\b/i,
   booking:    /\b(?:BKG|booking\s+(?:no|number|ref(?:erence)?))\s*[:#\s]?\s*([A-Z0-9]{4,20})\b/i,
-  load_ref:   /\b(?:load\s*ref(?:erence)?|shipment\s*ref(?:erence)?|order\s*ref(?:erence)?)\s*[:#\s]?\s*([A-Z0-9]{4,20})\b/i,
+  // load_ref: captured group must contain at least one digit to exclude plain English words
+  load_ref:   /\b(?:load\s*ref(?:erence)?|shipment\s*ref(?:erence)?|order\s*ref(?:erence)?)\s*[:#\s]?\s*([A-Z0-9]*[0-9][A-Z0-9]{2,})\b/i,
 };
 
 function extractReferences(text: string): Record<string, string> {
@@ -507,7 +512,7 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
   if (issues.length === 0) {
     issues           = ['other'];
     issueState       = 'unknown';
-    confidence       = 0.10;
+    confidence       = 0.30;
     reviewFlag       = true;
     unresolvedReason = 'No matching rules or patterns found. Manual review required.';
   }
@@ -691,7 +696,7 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     if (issues.length === 0) {
       issues           = ['other'];
       issueState       = 'unknown';
-      confidence       = 0.10;
+      confidence       = 0.30;
       reviewFlag       = true;
       unresolvedReason = 'load_ref gate rejected primary; no recovery match found.';
     }
@@ -788,7 +793,7 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
     if (issues.length === 0) {
       issues           = ['other'];
       issueState       = 'unknown';
-      confidence       = 0.10;
+      confidence       = 0.30;
       reviewFlag       = true;
       unresolvedReason = unresolvedReason ?? 'load_ref gate rejected; safety net applied — no remaining classification.';
     }
@@ -1028,6 +1033,19 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
       issues = [...new Set(issues)];
       confidence = Math.max(confidence, 0.72);
       evidence.push('[transport-status-guard] Transport status pattern without explicit delay signal — overridden to tracking');
+    }
+  }
+
+  // ── Invoice-in-subject guard: delay → rate ──────────────────────
+  // "overdue" is a delay strongSignal but also appears on unpaid invoices.
+  // When the subject clearly indicates a financial invoice, route to rate.
+  if (issues[0] === 'delay') {
+    const INVOICE_SUBJECT_SIGNALS = ['invoice', 'rechnung', 'factuur', 'billing'];
+    const subjectLower = (record.subject ?? '').toLowerCase();
+    if (INVOICE_SUBJECT_SIGNALS.some(s => subjectLower.includes(s))) {
+      issues = ['rate', ...issues.filter(i => i !== 'delay')];
+      confidence = Math.max(confidence, 0.82);
+      evidence.push('[invoice-subject-guard] delay overridden to rate — invoice language in subject');
     }
   }
 
