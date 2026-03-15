@@ -5,7 +5,7 @@
  * only uploads the file and renders the returned AnalysisResult.
  */
 
-import type { AnalysisResult, CustomerBurdenItem, TransporterItem, AreaHotspot, EnrichedRecord } from './types/analysis';
+import type { AnalysisResult, CustomerBurdenItem, TransporterItem, AreaHotspot, EnrichedRecord, ExampleCase } from './types/analysis';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'https://case-intelligence-suite.onrender.com';
 
@@ -48,6 +48,40 @@ interface BackendResult {
   preventable_count: number;
   preventable_rate: number;
   cases: Record<string, unknown>[];
+  health_check?: {
+    status: string;
+    alerts: string[];
+    totalRows: number;
+    otherCount: number;
+    otherPct: number;
+    below60Count: number;
+    below60Pct: number;
+    reviewFlagCount: number;
+    reviewFlagPct: number;
+    reviewFlagViolations: number;
+    categoriesSeen: number;
+    unknownStatePct: number;
+    transporterCoverage: number;
+    bookingRefCoverage: number;
+    loadRefCoverage: number;
+    containerCoverage: number;
+    mrnCoverage: number;
+    zipCoverage: number;
+  };
+  forecast?: {
+    available: boolean;
+    reason?: string;
+    nextWeekVolume: number;
+    volumeTrend: string;
+    confidence: string;
+    weeksAnalyzed: number;
+    topIssues: Array<{ id: string; label: string; color: string; forecasted: number; trend: string }>;
+    risingRisk: Array<{ id: string; label: string; color: string; forecasted: number; trend: string }>;
+    riskyCustomers: Array<{ name: string; recentCount: number; trend: string; risk: string }>;
+    riskyTransporters: Array<{ name: string; delayRate: number; risk: string }>;
+    hotspots: Array<{ name: string; forecasted: number; trend: string }>;
+    actions: string[];
+  };
 }
 
 // ─── Map backend response → AnalysisResult ───────────────────────
@@ -112,36 +146,36 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       isr_details: (raw.isr_details as string) ?? null,
       customer: (raw.customer as string) ?? null,
       transporter: (raw.transporter as string) ?? null,
-      zip: (raw.zip as string) ?? null,
+      zip: (raw.zip as string) ?? (raw.ext_zip as string) ?? null,
       area: (raw.area as string) ?? null,
       date: raw.date ? new Date(raw.date as string) : null,
       case_number: (raw.case_number as string) ?? null,
-      booking_ref: (raw.booking_ref as string) ?? null,
+      booking_ref: (raw.booking_ref as string) ?? (raw.ext_booking_ref as string) ?? null,
       combinedText: '',
       issues: [raw.primaryIssue as string].filter(Boolean),
       primaryIssue: (raw.primaryIssue as string) ?? 'other',
-      secondaryIssue: null,
+      secondaryIssue: (raw.secondaryIssue as string) ?? null,
       issueState: (raw.issueState as string) ?? 'unknown',
       weekKey: (raw.weekKey as string) ?? '',
       resolvedArea: (raw.resolvedArea as string) ?? null,
       routingHint: null,
       routingAlignment: 'no_zip' as const,
       extractedZip: null,
-      resolvedCustomer: (raw.customer as string) ?? null,
-      resolvedTransporter: (raw.transporter as string) ?? null,
+      resolvedCustomer: (raw.resolvedCustomer as string) ?? (raw.customer as string) ?? null,
+      resolvedTransporter: (raw.resolvedTransporter as string) ?? (raw.ext_transporter as string) ?? (raw.transporter as string) ?? null,
       resolvedDepot: null,
       resolvedDeepseaTerminal: null,
       confidence: (raw.confidence as number) ?? 0.5,
-      reviewFlag: false,
+      reviewFlag: (raw.reviewFlag as boolean) ?? false,
       unresolvedReason: null,
       allEntities: [],
       unknownEntities: [],
-      evidence: [],
-      sourceFieldsUsed: [],
-      detectedIntent: '',
-      detectedObject: '',
-      triggerPhrase: '',
-      triggerSourceField: '',
+      evidence: (() => { try { return JSON.parse((raw.evidence as string) ?? '[]') as string[]; } catch { return []; } })(),
+      sourceFieldsUsed: (() => { try { return JSON.parse((raw.sourceFieldsUsed as string) ?? '[]') as string[]; } catch { return []; } })(),
+      detectedIntent: (raw.detectedIntent as string) ?? '',
+      detectedObject: (raw.detectedObject as string) ?? '',
+      triggerPhrase: (raw.triggerPhrase as string) ?? '',
+      triggerSourceField: (raw.triggerSourceField as string) ?? '',
       bookingRefExtracted: (raw.booking_ref as string) ?? null,
       loadRefExtracted: null,
       containerExtracted: null,
@@ -149,6 +183,8 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       _raw: raw,
     } as unknown as EnrichedRecord;
   });
+
+  const reviewFlagCount = records.filter(r => r.reviewFlag).length;
 
   // Build weeklyHistory from cases
   const weeklyHistory: Record<string, { total: number; issues: Record<string, number>; customers: Record<string, number>; transporters: Record<string, number>; areas: Record<string, number> }> = {};
@@ -166,11 +202,60 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
   const sortedWeeks = Object.keys(weeklyHistory).sort();
   const chartWeeks = sortedWeeks.slice(-16);
 
-  const issueBreakdown = b.issueBreakdown.map((item) => ({
-    ...item,
-    trend: 'stable' as const,
-    exampleCases: [],
-  }));
+  // ── Build exampleCases from classified records ─────────────────
+  // Converts an EnrichedRecord to the ExampleCase shape the modal expects.
+  function toExampleCase(r: EnrichedRecord, label: string): ExampleCase {
+    const fmt = (d: Date | null | undefined): string | null =>
+      d ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : null;
+    // Extract load ref from booking_ref or evidence
+    const ev = r.evidence ?? [];
+    const loadRef =
+      (r._raw?.ext_load_ref as string | undefined) ??
+      ev.find((e: string) => e.startsWith('ref[load_ref]='))?.slice('ref[load_ref]='.length) ??
+      r.booking_ref ??
+      null;
+    const containerNumber =
+      (r._raw?.ext_container as string | undefined) ??
+      ev.find((e: string) => e.startsWith('ref[container]='))?.slice('ref[container]='.length) ??
+      (r._raw?.container as string | undefined) ??
+      null;
+    const mrnRef =
+      (r._raw?.ext_mrn as string | undefined) ??
+      (r._raw?.ext_t1_ref as string | undefined) ??
+      ev.find((e: string) => e.startsWith('ref[mrn]='))?.slice('ref[mrn]='.length) ??
+      ev.find((e: string) => e.startsWith('ref[t1_mrn]='))?.slice('ref[t1_mrn]='.length) ??
+      null;
+    return {
+      caseNumber:      r.case_number ?? null,
+      bookingRef:      r.booking_ref ?? null,
+      primaryIssue:    r.primaryIssue,
+      issueLabel:      label,
+      issueState:      r.issueState ?? 'unknown',
+      subject:         r.subject ? r.subject.slice(0, 120) : null,
+      date:            fmt(r.date),
+      customer:        r.resolvedCustomer ?? r.customer ?? null,
+      transporter:     r.resolvedTransporter ?? r.transporter ?? null,
+      loadRef,
+      containerNumber,
+      mrnRef,
+      confidence:      r.confidence,
+    };
+  }
+
+  // Cap at 100 example cases per category, sorted by confidence desc
+  const MAX_EXAMPLES = 100;
+  const issueBreakdown = b.issueBreakdown.map((item) => {
+    const categoryRecords = records
+      .filter(r => r.primaryIssue === item.id)
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, MAX_EXAMPLES)
+      .map(r => toExampleCase(r, item.label));
+    return {
+      ...item,
+      trend: 'stable' as const,
+      exampleCases: categoryRecords,
+    };
+  });
 
   const topCustomer = customerBurden[0]?.name ?? '';
   const topTransporter = transporterPerformance[0]?.name ?? '';
@@ -182,6 +267,22 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       analyzedAt: new Date(b.meta.analyzedAt),
       hasZipMap: false,
     },
+    classificationHealth: b.health_check ? {
+      status:               b.health_check.status,
+      alerts:               b.health_check.alerts,
+      otherPct:             b.health_check.otherPct,
+      below60Pct:           b.health_check.below60Pct,
+      reviewFlagPct:        b.health_check.reviewFlagPct,
+      reviewFlagViolations: b.health_check.reviewFlagViolations,
+      categoriesSeen:       b.health_check.categoriesSeen,
+      unknownStatePct:      b.health_check.unknownStatePct ?? 0,
+      transporterCoverage:  b.health_check.transporterCoverage ?? 0,
+      bookingRefCoverage:   b.health_check.bookingRefCoverage ?? 0,
+      loadRefCoverage:      b.health_check.loadRefCoverage ?? 0,
+      containerCoverage:    b.health_check.containerCoverage ?? 0,
+      mrnCoverage:          b.health_check.mrnCoverage ?? 0,
+      zipCoverage:          b.health_check.zipCoverage ?? 0,
+    } : null,
     summary: {
       totalCases: b.summary.totalCases,
       totalHoursLost: b.summary.totalHoursLost,
@@ -199,7 +300,7 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       weekCount: b.summary.weekCount,
       quickWin: '',
       narrative: '',
-      reviewFlagCount: 0,
+      reviewFlagCount,
       unknownEntityCount: 0,
       unknownCustomerCount: 0,
     },
@@ -267,9 +368,22 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
     },
     repeatOffenders: [],
     actionInsights: [],
-    forecast: {
+    forecast: b.forecast ? {
+      available:          b.forecast.available,
+      reason:             b.forecast.reason,
+      nextWeekVolume:     b.forecast.nextWeekVolume,
+      volumeTrend:        (b.forecast.volumeTrend as 'up' | 'down' | 'stable') ?? 'stable',
+      confidence:         (b.forecast.confidence as 'HIGH' | 'MEDIUM' | 'LOW') ?? 'LOW',
+      weeksAnalyzed:      b.forecast.weeksAnalyzed,
+      topIssues:          b.forecast.topIssues.map(i => ({ ...i, trend: i.trend as 'up' | 'down' | 'stable' })),
+      risingRisk:         b.forecast.risingRisk.map(i => ({ ...i, trend: i.trend as 'up' | 'down' | 'stable' })),
+      riskyCustomers:     b.forecast.riskyCustomers,
+      riskyTransporters:  b.forecast.riskyTransporters,
+      hotspots:           b.forecast.hotspots.map(h => ({ ...h, trend: h.trend as 'up' | 'down' | 'stable' })),
+      actions:            b.forecast.actions,
+    } : {
       available: false,
-      reason: 'Forecast not yet computed by backend',
+      reason: 'Forecast not computed by backend',
       nextWeekVolume: 0,
       volumeTrend: 'stable' as const,
       confidence: 'LOW' as const,

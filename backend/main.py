@@ -1,6 +1,7 @@
 import os
 import math
 import json
+import traceback
 from datetime import date, datetime
 import pandas as pd
 from fastapi import FastAPI, UploadFile, File, HTTPException
@@ -54,4 +55,5 @@ async def upload(file: UploadFile = File(...)):
         result = analyse_file(contents, file.filename)
         return Response(content=safe_json(result), media_type="application/json")
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        tb = traceback.format_exc()
+        raise HTTPException(status_code=422, detail=f"{exc}\n\nTraceback:\n{tb}")

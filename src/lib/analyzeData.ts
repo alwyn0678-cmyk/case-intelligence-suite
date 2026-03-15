@@ -1150,6 +1150,7 @@ export function runAnalysis(
 
   return {
     meta: { filename: '', rowCount: rawRecords.length, analyzedAt: new Date(), hasZipMap: Object.keys(zipMap).length > 0 },
+    classificationHealth: null,
     summary,
     issueBreakdown,
     weeklyHistory,

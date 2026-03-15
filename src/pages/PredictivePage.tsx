@@ -10,11 +10,28 @@ const TREND_CLR: Record<string, string>  = { up: '#dc6d7d', down: '#52c7c7', sta
 
 export function PredictivePage({ analysis }: Props) {
   const f = analysis.forecast;
+  const total = analysis.summary.totalCases;
+  const flagged = analysis.summary.reviewFlagCount ?? 0;
+  const flaggedPct = total > 0 ? (flagged / total) * 100 : 0;
+  const lowQuality = flaggedPct > 50;
+
+  // Data quality warning — shown whenever classification accuracy is insufficient
+  const qualityBanner = lowQuality ? (
+    <div className="bg-[#dc6d7d]/10 border border-[#dc6d7d]/30 rounded-lg px-5 py-4">
+      <p className="text-sm font-semibold text-[#dc6d7d]">⚠ Low Classification Quality</p>
+      <p className="text-xs text-[#a6aec4] mt-1">
+        {flaggedPct.toFixed(0)}% of cases ({flagged.toLocaleString()}) are flagged for review due to low confidence.
+        Predictive outputs and trend analysis may be unreliable until upstream classification accuracy improves.
+        Address the Issue Intelligence review queue before relying on forecasts.
+      </p>
+    </div>
+  ) : null;
 
   if (!f.available) {
     return (
       <div className="p-8 space-y-6">
         <SectionHeader title="Predictive Intelligence" subtitle="Next-week forecast using weighted rolling trend model" />
+        {qualityBanner}
         <div className="bg-[#2a2f3f]/40 border border-[#2a2f3f] rounded-lg p-6 text-center">
           <p className="text-sm text-[#a6aec4]">{f.reason}</p>
           <p className="text-xs text-[#a6aec4]/60 mt-2">Upload multiple weeks of dated case data to enable forecasting.</p>
@@ -26,7 +43,7 @@ export function PredictivePage({ analysis }: Props) {
   return (
     <div className="p-8 space-y-8">
       <SectionHeader title="Predictive Intelligence" subtitle={`Based on ${f.weeksAnalyzed} weeks of data — weighted rolling average model`} />
-
+      {qualityBanner}
       {/* Headline forecast */}
       <div className="bg-[#8b7cff]/8 border border-[#8b7cff]/25 rounded-xl p-6">
         <p className="text-xs text-[#8b7cff] font-semibold uppercase tracking-wide mb-3">Next Week Forecast</p>

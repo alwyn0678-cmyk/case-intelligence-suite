@@ -454,6 +454,38 @@ TAXONOMY: list[dict] = [
 
 TAXONOMY_MAP: dict[str, dict] = {item["id"]: item for item in TAXONOMY}
 
+REVIEW_FLAG_THRESHOLD = 0.60  # confidence below this triggers review
+
+# Maps each issue_id → human-readable description of the detected operational object.
+# Mirrors DETECTED_OBJECT_MAP in src/lib/intentDetection.ts.
+DETECTED_OBJECT_MAP: dict[str, str] = {
+    'load_ref':          'Load / Booking Reference',
+    'ref_provided':      'Load / Booking Reference',
+    'transport_order':   'Transport Order / TRO',
+    'customs':           'Customs / Compliance Document',
+    'portbase':          'Portbase / Port Notification',
+    'bl':                'Bill of Lading (B/L)',
+    't1':                'T1 / Transit Document',
+    'delay':             'Shipment / Delivery',
+    'closing_time':      'Terminal / Vessel Cutoff',
+    'amendment':         'Booking / Order Details',
+    'waiting_time':      'Waiting Time / Demurrage Charge',
+    'rate':              'Invoice / Rate / Charge',
+    'damage':            'Cargo / Goods',
+    'equipment':         'Container / Equipment',
+    'tracking':          'Shipment Status / Visibility',
+    'communication':     'Service / Escalation',
+    'equipment_release': 'Release Pin / Delivery Order',
+    'scheduling':        'Slot / Appointment',
+    'pickup_delivery':   'Pickup / Delivery Planning',
+    'capacity':          'Capacity / Availability',
+    'shipping_advice':   'Shipping Advice / Status Notice',
+    'vgm':               'VGM / Weight Certificate',
+    'seal':              'Seal Number / Container Seal',
+    'dangerous_goods':   'Dangerous Goods / IMO / ADR Declaration',
+    'other':             'Unclassified',
+}
+
 # ─────────────────────────────────────────────────────────────────
 # CATEGORY → ISSUE DIRECT MAPPING
 # When the Excel Category/Type column clearly names the issue, map it
@@ -752,6 +784,116 @@ def _canonical_transporter_name(name: str) -> str | None:
     if 'transporter' in roles:
         return canonical
     return None
+
+
+# ─────────────────────────────────────────────────────────────────
+# TEXT EXTRACTION LAYER
+# Extract reference values from free-text (subject + description + isr)
+# ─────────────────────────────────────────────────────────────────
+
+# ISO 6346 container: 3 owner letters + category (U/J/Z) + 6 digits + optional check digit
+_RE_CONTAINER = re.compile(r'\b([A-Z]{3}[UJZ])\s?(\d{6})\s?(\d)?\b')
+
+# Booking ref: keyword + optional qualifier + value
+_RE_BOOKING_EXTRACT = re.compile(
+    r'\b(?:booking|bkg|bkng|reserv(?:ation)?)\s*(?:ref(?:erence)?|no\.?|num(?:ber)?|#)?\s*[:\-]?\s*([A-Z0-9]{4,20})\b',
+    re.I)
+
+# Load ref: keyword + value
+_RE_LOAD_REF_EXTRACT = re.compile(
+    r'\b(?:load[\s\-]?ref(?:erence)?|loadref|laadreferentie|ladereferenz|laad[\s\-]?ref)\s*[:\-]?\s*([A-Z0-9]{4,20})\b',
+    re.I)
+
+# MRN: EU customs reference (year + country + 14-16 alphanumeric)
+_RE_MRN_EXTRACT = re.compile(r'\bMRN\s*[:\-]?\s*([0-9]{2}[A-Z]{2}[A-Z0-9]{12,16})\b', re.I)
+
+# T1 transit reference
+_RE_T1_EXTRACT = re.compile(
+    r'\bT1\s*(?:doc(?:ument)?)?\s*(?:no\.?|num(?:ber)?|#|ref(?:erence)?)?\s*[:\-]?\s*([A-Z0-9][\w\-]{5,24})\b',
+    re.I)
+
+# ZIP: Dutch (4 digits + 2 letters), German (5 digits)
+_RE_ZIP_NL = re.compile(r'\b(\d{4})\s?([A-Z]{2})\b')
+_RE_ZIP_DE = re.compile(r'(?<!\d)(\d{5})(?!\d)')
+
+_EXTRACT_STOPWORDS = frozenset([
+    'THE', 'FOR', 'OUR', 'YOUR', 'REF', 'AND', 'FROM', 'WITH',
+    'THIS', 'THAT', 'HAVE', 'BEEN', 'ALSO', 'WILL', 'DOES', 'NOT',
+])
+
+
+def _extract_container(text: str) -> str | None:
+    m = _RE_CONTAINER.search(text.upper())
+    if m:
+        return m.group(1) + m.group(2) + (m.group(3) or '')
+    return None
+
+
+def _extract_booking_ref(text: str) -> str | None:
+    m = _RE_BOOKING_EXTRACT.search(text)
+    if m:
+        val = m.group(1).strip().upper()
+        return None if (val in _EXTRACT_STOPWORDS or len(val) < 4) else val
+    return None
+
+
+def _extract_load_ref_value(text: str) -> str | None:
+    m = _RE_LOAD_REF_EXTRACT.search(text)
+    if m:
+        val = m.group(1).strip().upper()
+        return None if (val in _EXTRACT_STOPWORDS or len(val) < 4) else val
+    return None
+
+
+def _extract_mrn(text: str) -> str | None:
+    m = _RE_MRN_EXTRACT.search(text)
+    return m.group(1).upper() if m else None
+
+
+def _extract_t1_ref(text: str) -> str | None:
+    m = _RE_T1_EXTRACT.search(text)
+    if m:
+        val = m.group(1).strip().upper()
+        return None if (val in _EXTRACT_STOPWORDS or len(val) < 4) else val
+    return None
+
+
+def _extract_zip_from_text(text: str) -> str | None:
+    m = _RE_ZIP_NL.search(text)
+    if m:
+        return f"{m.group(1)}{m.group(2)}"
+    m = _RE_ZIP_DE.search(text)
+    if m:
+        raw = m.group(1)
+        return raw if len(raw) == 5 else None
+    return None
+
+
+def _extract_transporter_from_text(text: str) -> str | None:
+    """Find a known transporter entity name in combined free text."""
+    t_lower = text.lower()
+    best_canon: str | None = None
+    best_len = 0
+    for alias, (canonical, _etype, roles) in _ALIAS_MAP.items():
+        if 'transporter' not in roles or len(alias) < 4:
+            continue
+        if alias in t_lower and len(alias) > best_len:
+            best_canon = canonical
+            best_len = len(alias)
+    return best_canon
+
+
+def _extract_all_refs(combined: str) -> dict:
+    """Extract all reference values from combined free text."""
+    return {
+        'ext_container':   _extract_container(combined),
+        'ext_booking_ref': _extract_booking_ref(combined),
+        'ext_load_ref':    _extract_load_ref_value(combined),
+        'ext_mrn':         _extract_mrn(combined),
+        'ext_t1_ref':      _extract_t1_ref(combined),
+        'ext_zip':         _extract_zip_from_text(combined),
+        'ext_transporter': _extract_transporter_from_text(combined),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -1055,6 +1197,14 @@ _TOPIC_RULES: list[dict] = [
             'missed time slot', 'delivery window missed',
             'hasn\'t arrived', 'have not arrived', 'still not here',
             'not yet delivered', 'not yet collected', 'driver no show',
+            # Dutch
+            'nog niet aangekomen', 'niet tijdig', 'te laat aangekomen',
+            'nog steeds niet', 'nog wachten op', 'niet opgehaald',
+            'niet bezorgd', 'niet afgeleverd', 'vertraging gemeld',
+            # German
+            'noch nicht angekommen', 'nicht rechtzeitig', 'zu spät',
+            'immer noch nicht', 'nicht abgeholt', 'nicht zugestellt',
+            'verzögert angekommen',
         ],
         'weak': [
             'delay', 'late', 'still waiting', 'expected today', 'expected yesterday',
@@ -1168,6 +1318,16 @@ _TOPIC_RULES: list[dict] = [
             'proof of delivery', 'pod not received', 'pod missing',
             'delivery confirmation', 'delivery proof', 'signed delivery',
             'eta update', 'current eta', 'revised eta', 'expected arrival',
+            # Common tracking requests
+            'can you confirm delivery', 'please confirm receipt', 'confirm arrival',
+            'track and trace update', 'please advise status', 'any news on',
+            'what is the current status', 'update on delivery',
+            # Dutch
+            'waar is mijn', 'waar zijn mijn', 'status van', 'update over',
+            'wanneer wordt', 'kunt u bevestigen', 'graag bevestiging',
+            # German
+            'wo ist meine', 'wo sind meine', 'status von', 'update zu',
+            'wann kommt', 'bitte bestätigen', 'können sie bestätigen',
         ],
         'weak': [
             'tracking', 'where is', 'status update', 'no update',
@@ -1245,7 +1405,6 @@ _TOPIC_RULES: list[dict] = [
             'commercial invoice query', 'commercial invoice dispute',
             'price correction', 'price adjustment', 'rate correction',
             'wrong rate applied', 'incorrect rate applied', 'corrected invoice', 'invoice correction',
-            'purchase order', 'po number', 'po no',
             # Dutch/German
             'inkooporder', 'bestelnummer', 'bestellnummer',
             'po bedrag fout', 'po verschil', 'po abweichung',
@@ -1260,6 +1419,7 @@ _TOPIC_RULES: list[dict] = [
             'tariff', 'refund request', 'payment dispute',
             'invoice', 'billing', 'extra cost', 'extra costs', 'additional charge',
             'cost report',
+            'purchase order', 'po number', 'po no',
         ],
     },
     {
@@ -1377,6 +1537,35 @@ _TOPIC_RULES: list[dict] = [
             'sicherheitsdatenblatt',
         ],
         'weak': ['imo', 'adr', 'hazardous'],
+    },
+    {
+        'topic': 'ref_provided',
+        'strong': [
+            # Direct provision signals (person IS providing a reference)
+            'ref below', 'reference below', 'load ref below', 'booking ref below',
+            'please find the ref', 'ref provided below', 'see ref below',
+            'reference update', 'updated reference', 'updated load ref',
+            'correct reference', 'corrected reference', 'correct load ref',
+            'providing reference', 'reference provided', 'ref has been provided',
+            'ref has been sent', 'reference attached', 'load ref attached',
+            'booking ref attached', 'load ref: ', 'booking ref: ', 'ref: ',
+            'load reference is ', 'the booking ref is', 'the load ref is',
+            'ref confirmed', 'booking ref confirmed', 'load ref confirmed',
+            'sending load ref', 'forwarding load ref', 'sending booking ref',
+            # Dutch
+            'referentie hieronder', 'ref hieronder', 'ref bijgevoegd',
+            'referentie bijgevoegd', 'loadref bijgevoegd', 'referentie is ',
+            'loadref is ', 'loadref: ', 'laadreferentie is',
+            # German
+            'referenz unten', 'referenz anbei', 'referenz beigefügt',
+            'referenz beigefuegt', 'die referenz ist ', 'referenz: ',
+            'ladereferenz ist ', 'ladereferenz: ',
+        ],
+        'weak': [
+            'ref provided', 'reference provided', 'ref sent', 'reference sent',
+            'ref confirmed', 'booking confirmed', 'load confirmed',
+            'reference update', 'ref update', 'info provided',
+        ],
     },
 ]
 
@@ -1542,6 +1731,67 @@ _FALLBACK_RULES: list[dict] = [
     {'issueId': 'scheduling',        'state': 'missing',
      'pattern': re.compile(r'\b(slot|time.slot|appointment).{0,25}(needed|required|missing|not confirmed|not allocated)\b', re.I),
      'confidence': 0.55},
+    # ── RECOVERY_SIGNALS patterns (integrated from unused RECOVERY_SIGNALS list) ──
+    # Scheduling / timing
+    {'issueId': 'scheduling', 'state': 'unknown',
+     'pattern': re.compile(r'\b(what time will|confirm time|delivery window|morning delivery|afternoon delivery|morning slot|afternoon slot|arrival window|loading time|unloading time|what day will|which day will)\b', re.I),
+     'confidence': 0.60},
+    # Pickup / delivery arrangement
+    {'issueId': 'pickup_delivery', 'state': 'unknown',
+     'pattern': re.compile(r'\b(please arrange|please organise|please organize|need to arrange|requires delivery to|need delivery to|please book transport|arrange collection from|arrange delivery to|requesting transport|book transport|organize transport)\b', re.I),
+     'confidence': 0.60},
+    # Shipping advice
+    {'issueId': 'shipping_advice', 'state': 'informational',
+     'pattern': re.compile(r'\b(booking confirmed|booking acknowledgement|shipment confirmed|pre.?alert|arrival notice|departure notice|goods dispatched|goods shipped|shipped today|vessel departed|loaded on vessel)\b', re.I),
+     'confidence': 0.60},
+    # Waiting / demurrage
+    {'issueId': 'waiting_time', 'state': 'unknown',
+     'pattern': re.compile(r'\b(waiting at gate|waiting at terminal|driver waiting|truck waiting|free time expired|free days expired|per diem|storage accruing|demurrage accruing|futile trip|wasted journey|empty trip)\b', re.I),
+     'confidence': 0.65},
+    # Damage / shortage
+    {'issueId': 'damage', 'state': 'unknown',
+     'pattern': re.compile(r'\b(goods were damaged|arrived damaged|items missing|goods missing|short delivery|short shipment|partial delivery|not all items received|goods not received|incorrect quantity|cargo damage|damaged goods)\b', re.I),
+     'confidence': 0.65},
+    # Capacity / feasibility
+    {'issueId': 'capacity', 'state': 'unknown',
+     'pattern': re.compile(r'\b(is it possible to|can you do|can you handle|is there capacity|is it feasible|do you have space|slot available|is there a slot|can this be loaded)\b', re.I),
+     'confidence': 0.60},
+    # Equipment release / pin
+    {'issueId': 'equipment_release', 'state': 'unknown',
+     'pattern': re.compile(r'\b(release code|release pin|pin code|container pin|vbs pin|require pin|need pin|pin for|pin number|release number|collect container|container collection|pickup container|terminal release|port release|collect at terminal)\b', re.I),
+     'confidence': 0.65},
+    # BL related
+    {'issueId': 'bl', 'state': 'unknown',
+     'pattern': re.compile(r'\b(release cargo|cargo release|release shipment|surrender bl|telex release|cargo documents required|original documents required|draft bl|bl draft)\b', re.I),
+     'confidence': 0.60},
+    # VGM / weight
+    {'issueId': 'vgm', 'state': 'unknown',
+     'pattern': re.compile(r'\b(gross weight|gross mass|total weight|weight declaration|vgm declaration|weighing slip|weight slip|shipper weight|verified weight)\b', re.I),
+     'confidence': 0.65},
+    # Seal details
+    {'issueId': 'seal', 'state': 'unknown',
+     'pattern': re.compile(r'\b(seal no\.|seal nr|container seal|seal intact|seal broken|seal ok|seal check|seal discrepancy)\b', re.I),
+     'confidence': 0.65},
+    # Dangerous goods
+    {'issueId': 'dangerous_goods', 'state': 'unknown',
+     'pattern': re.compile(r'\b(un number|dg class|imo class|hazardous material|dangerous cargo|dg cargo|imdg|dg document|dangerous goods form|un no|adnr|regulated goods)\b', re.I),
+     'confidence': 0.70},
+    # Closing time / cutoff
+    {'issueId': 'closing_time', 'state': 'unknown',
+     'pattern': re.compile(r'\b(what is the cutoff|what is the closing|when is the cutoff|when is the closing|gate closes at|gate opening time|gate close time)\b', re.I),
+     'confidence': 0.60},
+    # Ref provided — direct provision
+    {'issueId': 'ref_provided', 'state': 'provided',
+     'pattern': re.compile(r'\b(reference update|updated ref|correct ref|ref below|please find the ref|load ref below|booking ref below|load ref provided|reference provided|ref has been sent)\b', re.I),
+     'confidence': 0.65},
+    # Communication / escalation
+    {'issueId': 'communication', 'state': 'escalated',
+     'pattern': re.compile(r'\b(chasing|following up|follow.up|no reply|no response|unanswered|third reminder|second reminder|first reminder|as per my previous|as per my email|did you receive|awaiting your response|urgent reminder|reminder email|this is a reminder)\b', re.I),
+     'confidence': 0.60},
+    # Amendment / correction — common patterns
+    {'issueId': 'amendment', 'state': 'amended',
+     'pattern': re.compile(r'\b(wrong address|incorrect address|address correction|address change|wrong name|incorrect name|name correction|correction needed|wrong details|incorrect details|mistake in|wrong date|incorrect date|error in booking)\b', re.I),
+     'confidence': 0.65},
 ]
 
 def _fallback_classify(text: str) -> dict | None:
@@ -1578,7 +1828,7 @@ def _operational_clue_scan(text: str) -> dict | None:
     t = text.lower()
     for keyword, issue_id, state in _OPERATIONAL_CLUES:
         if keyword in t:
-            return {'issueId': issue_id, 'state': state, 'confidence': 0.35}
+            return {'issueId': issue_id, 'state': state, 'confidence': 0.50}
     return None
 
 
@@ -1681,7 +1931,7 @@ _TOPIC_INTENT: dict[str, str] = {
     'equipment':        'equipment',
     'equipment_release':'equipment',
     # planning group (matches intentDetection.ts exactly)
-    'amendment':        'planning',
+    'amendment':        'operational',
     'capacity':         'planning',
     'scheduling':       'planning',
     'pickup_delivery':  'planning',
@@ -1711,38 +1961,34 @@ _TOPIC_INTENT: dict[str, str] = {
 _STRONG_INTENT_THRESHOLD = 0.75
 
 _FINANCIAL_GUARD_KEYWORDS: list[str] = [
-    # Core financial
-    'invoice', 'billing', 'charge', 'rate', 'cost', 'fee', 'payment',
-    'debit', 'credit', 'surcharge', 'overcharge', 'refund', 'price',
-    'pricing', 'quotation', 'tariff', 'freight rate', 'base rate',
-    # Storage / waiting
-    'storage costs', 'storage cost', 'waiting time cost', 'waiting time charges',
-    'waiting costs invoice', 'detention charge', 'detention invoice',
-    'demurrage charge', 'demurrage invoice', 'storage invoice',
-    # Extra costs — all variants from intentDetection.ts
-    'extra costs', 'extra cost', 'extra cost invoice', 'extra costs invoice',
-    'extra costs report', 'extra cost report', 'extrakostenrechnung',
-    'extra kosten rapport', 'extra kosten report', 'meerkosten rapport',
-    'meerkosten report', 'additional charge',
-    # Billing types
-    'billing report', 'billing dispute', 'billing issue', 'billing error', 'billing query',
-    'cost invoice', 'waiting cost invoice', 'cost report',
-    # Credit / debit notes
-    'credit note', 'credit memo', 'debit note', 'debit memo',
-    # Invoice specifics
-    'invoice query', 'invoice dispute', 'invoice incorrect', 'invoice error',
-    'charge dispute',
-    # Self-billing / DCH
+    # Self-billing / DCH (always financial, never customs/reference)
     'selfbilling', 'self billing', 'self-billing', 'selfbill', 'self bill',
     'dch invoice', 'dch billing', 'dch report',
-    # PO / purchase order
-    'purchase order', 'po number', 'po no', 'po amount mismatch', 'po mismatch',
-    'po discrepancy', 'po bedrag', 'po betrag', 'po abweichung', 'po differenz',
+    # Extra costs — all variants
+    'extra cost invoice', 'extra costs invoice',
+    'extra costs report', 'extra cost report', 'extrakostenrechnung',
+    'extra kosten rapport', 'extra kosten report',
+    'meerkosten rapport', 'meerkosten report',
+    # Billing specifics
+    'billing report', 'billing dispute', 'billing issue', 'billing error',
+    'cost invoice', 'waiting cost invoice', 'waiting costs invoice',
+    # Storage and waiting-time financial charges
+    'demurrage invoice', 'detention invoice', 'storage invoice',
+    'storage cost invoice', 'storage costs invoice',
+    # Credit / debit notes
+    'credit note', 'credit memo', 'debit note', 'debit memo',
+    # Invoice / charge disputes
+    'invoice query', 'invoice dispute', 'invoice incorrect', 'invoice error',
+    'charge dispute', 'billing query',
+    'overcharged', 'overcharge',
+    # PO mismatches
+    'po amount mismatch', 'po mismatch', 'po discrepancy', 'po bedrag',
+    'po betrag', 'po abweichung', 'po differenz',
     # Cost allocation
     'cost allocation', 'kosten rapport', 'kostenbericht',
     # Other languages
-    'extra kosten', 'meerkosten', 'opslagkosten', 'wachttijd kost',
-    'extrakosten', 'lagerkosten', 'wartezeit kost', 'bestellnummer', 'inkooporder',
+    'wachttijd kosten', 'opslagkosten', 'wartezeit kosten',
+    'lagerkosten', 'meerkosten',
 ]
 
 
@@ -2002,8 +2248,8 @@ _PROVIDED_DOC_PATTERNS: list[re.Pattern] = [
     re.compile(r'\bsending\s+customs\b', re.I),
     re.compile(r'\bcustoms\s+documents\s+attached\b', re.I),
     re.compile(r'\bplease\s+find\s+the\s+(?:t1|mrn)\b', re.I),
-    re.compile(r'\b(?:mrn|t1)\s+(?:below|number\s+below|is)\b', re.I),
-    re.compile(r'\bthe\s+mrn\s+is\b', re.I),
+    re.compile(r'\b(?:mrn|t1)\s+(?:below|number\s+below|is(?!\s*(?:missing|absent|not\s|required|needed|still\s|wrong|incorrect|unavailable)))\b', re.I),
+    re.compile(r'\bthe\s+mrn\s+is\b(?!\s*(?:missing|absent|not\s|required|needed|still\s|wrong|incorrect|unavailable))', re.I),
     re.compile(r'\bfind\s+attached\s+mrn\b', re.I),
     re.compile(r'\bplease\s+find\s+attached\s+mrn\b', re.I),
     # Dutch
@@ -2052,24 +2298,112 @@ _SUBJECT_ONLY_PENALTY    = 0.18
 _SUBJECT_ONLY_FLOOR      = 0.48
 _SUBSTANTIVE_DESC_MIN    = 30
 
+# ── Post-classification guard constants (mirrors classifyCase.ts guards) ──────
+
+_OPERATIONAL_CONTEXT_KEYWORDS: list[str] = [
+    'haulier', 'hauler', 'driver', 'truck', 'lorry', 'transporter', 'carrier',
+    'forwarder', 'freight forwarder', 'customs agent', 'customs broker',
+    'container', 'cntr', 'pickup', 'pick up', 'pick-up', 'delivery',
+    'collect', 'collection', 'loading', 'unloading', 'discharge',
+    'terminal', 'depot', 'warehouse', 'gate out', 'gate in',
+    'blocked', 'held', 'on hold', 'clearance', 'release', 'cargo',
+    'shipment', 'freight', 'transport order', 'movement',
+]
+
+_EQUIPMENT_OVERRIDE_SIGNALS: list[str] = [
+    'portable not ok', 'container damaged', 'damaged container',
+    'equipment issue', 'reefer issue', 'seal broken', 'container not ok',
+    'container defect', 'container beschadigd', 'container defekt',
+    'unit not ok', 'equipment not ok', 'trailer not ok',
+]
+
+_MISSING_DOC_OVERRIDE_SIGNALS: list[str] = [
+    'missing customs docs portbase', 'customs documents in portbase missing',
+    'portbase customs missing', 'portbase customs docs missing',
+    'missing customs docs', 'customs documents missing',
+    't1 missing', 'missing t1', 'mrn missing', 'missing mrn',
+]
+
+_FINANCIAL_CHARGE_SIGNALS: list[str] = [
+    'invoice', 'factuur', 'rechnung', 'charge', 'cost', 'kosten',
+    'costs', 'billing', 'payment', 'betaling', 'rechnen',
+]
+
+_STRONG_TIMING_FAILURE_SIGNALS: list[str] = [
+    'truck not arriving', 'barge delay', 'train delay', 'missed vessel',
+    'missed cutoff', 'missed cco', 'driver delayed', 'arrival delay',
+    'container late', 'not on time', 'late delivery', 'late arrival',
+    'late pickup', 'vertraging', 'vertraagd', 'verspätung', 'verspätet',
+    'niet op tijd', 'nicht pünktlich', 'rollover',
+    'delayed', 'overdue', 'behind schedule', 'no show', 'not arrived',
+    'late collection', 'not collected', 'not delivered', 'running late',
+    'past eta', 'missed appointment', 'driver late', 'vehicle delayed',
+    'truck delayed', 'failed delivery', 'failed collection',
+    'missed time slot', 'delivery window missed',
+]
+
+_TRANSPORT_STATUS_PATTERNS: list[str] = [
+    'transport status', 'shipment status', 'status update', 'transport update',
+    'update transport', 'statusmeldung', 'transportmeldung', 'sendungsstatus',
+]
+
+_EXPLICIT_DELAY_SIGNALS: list[str] = [
+    'delayed', 'delay', 'vertraging', 'vertraagd', 'verspätung', 'verspätet',
+    'not loaded', 'niet geladen', 'nicht geladen',
+    'rollover', 'missed cutoff', 'cutoff gemist', 'cutoff verpasst',
+    'failed pickup', 'unable to deliver', 'niet afgeleverd', 'nicht zugestellt',
+    'overdue', 'not on time', 'behind schedule', 'late arrival',
+    'late delivery', 'missed eta', 'no show', 'not arrived',
+]
+
+
+def _find_trigger_signal(text: str, issue_id: str) -> str:
+    """Return the strongest signal phrase from text relevant to issue_id."""
+    t = text.lower()
+    # For ref_provided, search doc topics that fork to it
+    search_topics: list[str] = []
+    if issue_id == 'ref_provided':
+        search_topics = ['load_ref', 'customs', 't1', 'portbase', 'bl']
+    else:
+        search_topics = [issue_id]
+
+    for rule in _TOPIC_RULES:
+        if rule['topic'] not in search_topics:
+            continue
+        for sig in rule['strong']:
+            if sig in t:
+                return sig
+        for sig in rule['weak']:
+            if sig in t:
+                return sig
+
+    # Rate: check financial subject patterns
+    if issue_id == 'rate':
+        for pat in _FINANCIAL_SUBJECT_PATTERNS:
+            if pat in t:
+                return pat
+
+    # Check fallback rules
+    for fb_rule in _FALLBACK_RULES:
+        if fb_rule['issueId'] == issue_id:
+            m = fb_rule['pattern'].search(text)
+            if m:
+                return m.group(0)[:80]
+
+    # Operational clue keywords
+    for keyword, mapped_id, _ in _OPERATIONAL_CLUES:
+        if mapped_id == issue_id and keyword in t:
+            return keyword
+
+    return ''
+
 
 def _classify_row(subject: str, description: str, isr: str, category: str) -> dict:
     """
-    Classify a single row. Full pipeline mirrors classifyCase.ts + intentDetection.ts + loadRefGuards.ts:
-    1.  Direct category column mapping
-    2.  Financial subject early-exit
-    3.  Per-field weighted classification
-    4.  filterByIntentPriority — suppress lower-priority topics when strong higher-priority match
-    5.  Subject-only penalty (no substantive description → lower confidence)
-    6.  Description-first override (with intent priority guard)
-    7.  validateLoadRefMissing — strict gate
-    8.  load_ref → ref_provided when body explicitly provides a ref value
-    9.  ref_provided wins over load_ref
-    10. Doc provision guard (customs/t1/bl/portbase → ref_provided when providing docs)
-    11. Planning compliance guard (reduce confidence for doc topics without missing language)
-    12. Fallback regex rules (+ financial context guard)
-    13. Operational clue scan
-    14. Other
+    Classify a single row. Returns full diagnostic dict including:
+    primaryIssue, secondaryIssue, issueState, confidence, reviewFlag,
+    detectedIntent, detectedObject, triggerPhrase, triggerSourceField,
+    evidence, sourceFieldsUsed, fallbackUsed, unresolvedReason.
     """
     fields: dict[str, str] = {
         'description': description or '',
@@ -2078,6 +2412,75 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
         'category':    category or '',
     }
 
+    source_fields_used = [k for k, v in fields.items() if v.strip()]
+    fallback_used = False
+    ranked: list[dict] = []
+
+    # ── inline helper to build final result dict ─────────────────────
+    def _build(primary_issue: str, state: str, conf: float,
+               fb_used: bool = False, rnk: list[dict] | None = None) -> dict:
+        nonlocal fallback_used
+        fallback_used = fb_used
+        # Confidence assertion
+        assert 0.0 <= conf <= 1.0, f"Confidence {conf} out of range 0–1 for issue {primary_issue}"
+
+        review_flag = conf < REVIEW_FLAG_THRESHOLD
+
+        # Secondary issue — first ranked result that differs from primary
+        secondary = None
+        for m in (rnk or []):
+            if m['issueId'] != primary_issue:
+                secondary = m['issueId']
+                break
+
+        detected_intent = _TOPIC_INTENT.get(primary_issue, 'unknown')
+        detected_object = DETECTED_OBJECT_MAP.get(primary_issue, '')
+
+        # Trigger phrase — search best field for primary issue signals
+        trigger_phrase = ''
+        trigger_source = ''
+        for field_key, _ in _FIELD_WEIGHTS:
+            txt = fields[field_key]
+            if not txt.strip():
+                continue
+            phrase = _find_trigger_signal(txt, primary_issue)
+            if phrase:
+                trigger_phrase = phrase
+                trigger_source = field_key
+                break
+
+        # Evidence trail
+        evidence: list[str] = []
+        if trigger_phrase and trigger_source:
+            evidence.append(f'[{trigger_source}] strong signal: "{trigger_phrase}"')
+        if fb_used:
+            evidence.append(f'fallback: {primary_issue}')
+        if primary_issue == 'other':
+            evidence.append('no classification signals found')
+
+        # Unresolved reason
+        unresolved: str | None = None
+        if primary_issue == 'other':
+            unresolved = 'No classification signals found in available fields'
+        elif conf < REVIEW_FLAG_THRESHOLD:
+            unresolved = f'Low confidence ({conf:.0%}) — manual review needed'
+
+        return {
+            'primaryIssue':       primary_issue,
+            'secondaryIssue':     secondary,
+            'issueState':         state,
+            'confidence':         round(conf, 4),
+            'reviewFlag':         review_flag,
+            'detectedIntent':     detected_intent,
+            'detectedObject':     detected_object,
+            'triggerPhrase':      trigger_phrase,
+            'triggerSourceField': trigger_source,
+            'evidence':           evidence,
+            'sourceFieldsUsed':   source_fields_used,
+            'fallbackUsed':       fb_used,
+            'unresolvedReason':   unresolved,
+        }
+
     # 1. Direct category column mapping (highest confidence, bypasses scoring)
     if category:
         cat_key = category.lower().strip()
@@ -2085,13 +2488,13 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
             mapped = CATEGORY_MAP[cat_key]
             combined = ' '.join(filter(None, [description, subject, isr]))
             state = _detect_state_windowed(combined)
-            return {'primaryIssue': mapped, 'issueState': state, 'confidence': 0.88}
+            return _build(mapped, state, 0.88)
 
     # 2. Financial subject early-exit — unambiguous financial subjects override everything
     subj_lower = subject.lower()
     for pat in _FINANCIAL_SUBJECT_PATTERNS:
         if pat in subj_lower:
-            return {'primaryIssue': 'rate', 'issueState': 'unknown', 'confidence': 0.92}
+            return _build('rate', 'unknown', 0.92)
 
     # 3. Per-field weighted classification
     match_map: dict[str, dict] = {}
@@ -2102,15 +2505,13 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
             continue
         field_matches = _classify_by_rules(field_text)
         for m in field_matches:
-            # load_ref from subject is severely down-weighted (billing emails often mention
-            # "load ref" incidentally in the subject line without it being the core issue)
             eff_weight = _LOAD_REF_SUBJECT_WEIGHT if (field_key == 'subject' and m['issueId'] == 'load_ref') else weight
             weighted_conf = min(m['confidence'] * eff_weight, 0.98)
             existing = match_map.get(m['issueId'])
             if not existing or weighted_conf > existing['confidence']:
                 match_map[m['issueId']] = {**m, 'confidence': weighted_conf, '_field': field_key}
 
-    # Fall back to combined text if no per-field matches (e.g. very short rows)
+    # Fall back to combined text if no per-field matches
     if not match_map:
         normalized = ' '.join(filter(None, [description, subject, isr, category]))
         for m in _classify_by_rules(normalized):
@@ -2118,8 +2519,7 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
 
     ranked = sorted(match_map.values(), key=lambda m: m['confidence'], reverse=True)
 
-    # 4. filterByIntentPriority — primary guard against customs over-classification.
-    # If rate/damage/waiting_time scores ≥ 0.75, suppress customs/t1/portbase/bl/load_ref.
+    # 4. filterByIntentPriority
     ranked = _filter_by_intent_priority(ranked)
 
     if ranked:
@@ -2128,17 +2528,18 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
         state      = best['state']
         confidence = best['confidence']
 
-        # 5. Subject-only penalty — if best match came from subject and description is empty/short,
-        # reduce confidence (description is the authoritative source of truth).
+        # 4b. State fallback — if windowed state is unknown, scan full combined text
+        if state == 'unknown':
+            combined_for_state = ' '.join(filter(None, [description, subject, isr]))
+            state = _detect_state_windowed(combined_for_state)
+
+        # 5. Subject-only penalty
         desc_is_substantive = len((description or '').strip()) >= _SUBSTANTIVE_DESC_MIN
         isr_has_content = len((isr or '').strip()) > 10
         if not desc_is_substantive and not isr_has_content and best.get('_field') == 'subject':
             confidence = max(confidence - _SUBJECT_ONLY_PENALTY, _SUBJECT_ONLY_FLOOR)
 
         # 6. Description-first override
-        # If description classifies as a DIFFERENT topic at ≥ 0.55 confidence,
-        # description wins (body is source of truth over subject shorthand).
-        # Guard: don't let lower-priority-intent description override higher-priority subject.
         if desc_is_substantive:
             desc_matches = _classify_by_rules(description)
             desc_matches = _filter_by_intent_priority(desc_matches)
@@ -2149,7 +2550,6 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
                     not (desc_primary['issueId'] == 'ref_provided' and issue_id == 'load_ref') and
                     not (desc_primary['issueId'] == 'load_ref'    and issue_id == 'ref_provided')
                 )
-                # Intent priority guard: description intent must be same or higher priority
                 desc_intent_p = _INTENT_PRIORITY.get(_TOPIC_INTENT.get(desc_primary['issueId'], 'operational'), 9)
                 curr_intent_p = _INTENT_PRIORITY.get(_TOPIC_INTENT.get(issue_id, 'operational'), 9)
                 intent_allows_override = desc_intent_p <= curr_intent_p
@@ -2158,16 +2558,13 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
                     state      = desc_primary['state']
                     confidence = min(desc_primary['confidence'], confidence + 0.05)
 
-        # 6. validateLoadRefMissing strict gate
-        # If classified as load_ref but doesn't pass the 7-step gate, demote it.
+        # 7. validateLoadRefMissing strict gate
         if issue_id == 'load_ref':
             if not _validate_load_ref_missing(subject, description, isr):
-                # Check if body actually provides a ref value
                 body = ' '.join(filter(None, [description, subject, isr]))
                 if _text_provides_ref(body):
-                    return {'primaryIssue': 'ref_provided', 'issueState': 'provided', 'confidence': 0.72}
-                # Demote load_ref — use next best ranked match
-                remaining = [m for m in ranked if m['issueId'] not in ('load_ref',)]
+                    return _build('ref_provided', 'provided', 0.72, rnk=ranked)
+                remaining = [m for m in ranked if m['issueId'] != 'load_ref']
                 if remaining:
                     issue_id   = remaining[0]['issueId']
                     state      = remaining[0]['state']
@@ -2176,19 +2573,19 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
                     issue_id = None  # Fall through to fallback
 
         if issue_id:
-            # 7. load_ref → ref_provided when body provides an explicit reference value
+            # 8. load_ref → ref_provided when body explicitly provides a ref value
             if issue_id == 'load_ref':
                 body = ' '.join(filter(None, [description, subject, isr]))
                 if _text_provides_ref(body):
                     issue_id = 'ref_provided'
                     state    = 'provided'
 
-            # 8. ref_provided and load_ref cannot coexist — ref_provided wins
+            # 9. ref_provided wins over load_ref
             if 'ref_provided' in match_map and issue_id == 'load_ref':
                 issue_id = 'ref_provided'
                 state    = 'provided'
 
-            # 9. Doc provision guard — customs/t1/bl/portbase + provision language → ref_provided
+            # 10. Doc provision guard — customs/t1/bl/portbase + provision language → ref_provided
             if issue_id in _DOC_TOPICS_STRICT:
                 body = ' '.join(filter(None, [description, subject, isr]))
                 if _doc_provision_detected(body):
@@ -2196,13 +2593,11 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
                     state      = 'provided'
                     confidence = 0.72
 
-            # 10. Planning compliance guard — doc topics without explicit missing language
-            # e.g. feasibility emails that mention "customs" → reduce confidence
+            # 11. Planning compliance guard
             if issue_id in _DOC_TOPICS_STRICT:
                 body = ' '.join(filter(None, [description, subject, isr]))
                 if _has_planning_context(body) and not _has_doc_missing_language(body):
                     confidence = max(confidence - 0.25, 0.30)
-                    # If confidence dropped below threshold, demote to next best
                     if confidence <= 0.35:
                         remaining = [m for m in ranked if m['issueId'] not in _DOC_TOPICS_STRICT]
                         if remaining:
@@ -2210,25 +2605,99 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
                             state      = remaining[0]['state']
                             confidence = remaining[0]['confidence']
 
-            return {'primaryIssue': issue_id, 'issueState': state, 'confidence': confidence}
+            # 12. Customs operational context check — soft penalty when no
+            # transporter or operational movement context (mirrors classifyCase.ts §Section 3)
+            if issue_id in _DOC_TOPICS_STRICT:
+                body_ctx = ' '.join(filter(None, [description, subject, isr])).lower()
+                if not any(kw in body_ctx for kw in _OPERATIONAL_CONTEXT_KEYWORDS):
+                    confidence = max(confidence - 0.15, 0.30)
 
-    # 11. Fallback regex rules
+            # 13. FIX E: ref_provided sanity check — override when stronger signal detected
+            if issue_id == 'ref_provided':
+                body_sane = ' '.join(filter(None, [description, subject, isr])).lower()
+                if _has_strong_financial_context(body_sane):
+                    issue_id   = 'rate'
+                    confidence = max(confidence, 0.80)
+                elif any(s in body_sane for s in _EQUIPMENT_OVERRIDE_SIGNALS):
+                    issue_id   = 'equipment'
+                    confidence = max(confidence, 0.80)
+                elif any(s in body_sane for s in _MISSING_DOC_OVERRIDE_SIGNALS):
+                    has_portbase = 'portbase' in body_sane and 'customs' in body_sane
+                    issue_id   = 'customs' if (has_portbase or 't1' not in body_sane) else 't1'
+                    state      = 'missing'
+                    confidence = max(confidence, 0.80)
+
+            # 14. GAP C: waiting_time + financial charge language → rate
+            if issue_id == 'waiting_time':
+                body_wt = ' '.join(filter(None, [description, subject, isr])).lower()
+                if any(s in body_wt for s in _FINANCIAL_CHARGE_SIGNALS):
+                    issue_id   = 'rate'
+                    confidence = max(confidence, 0.78)
+
+            # 15. FIX B: closing_time + customs + missing → customs
+            if issue_id == 'closing_time':
+                body_ct = ' '.join(filter(None, [description, subject, isr])).lower()
+                has_customs_kw = any(kw in body_ct for kw in ('customs', 'douane', 'zoll'))
+                has_missing_kw = any(kw in body_ct for kw in ('missing', 'ontbreekt', 'fehlt'))
+                if has_customs_kw and has_missing_kw:
+                    issue_id   = 'customs'
+                    state      = 'missing'
+                    confidence = max(confidence, 0.80)
+
+            # 16. GAP D: delay low-confidence dampening — prevent informational
+            # mentions of "delay" from classifying as Delay / Not On Time
+            if issue_id == 'delay' and confidence < 0.65:
+                body_dl = ' '.join(filter(None, [description, subject, isr])).lower()
+                if not any(s in body_dl for s in _STRONG_TIMING_FAILURE_SIGNALS):
+                    confidence = max(confidence - 0.15, 0.30)
+
+            # 17. FIX 1: transport status generic → tracking (no explicit delay signal)
+            if issue_id == 'delay':
+                body_ts = ' '.join(filter(None, [description, subject, isr])).lower()
+                has_status_pat  = any(p in body_ts for p in _TRANSPORT_STATUS_PATTERNS)
+                has_expl_delay  = any(s in body_ts for s in _EXPLICIT_DELAY_SIGNALS)
+                if has_status_pat and not has_expl_delay:
+                    issue_id   = 'tracking'
+                    confidence = max(confidence, 0.72)
+
+            return _build(issue_id, state, confidence, rnk=ranked)
+
+    # 18. Fallback regex rules (with intent-family constraint per STEP 5)
     normalized = ' '.join(filter(None, [description, subject, isr, category]))
+
+    # Determine winning intent context from ranked pass so fallback can be constrained
+    # Only constrain when there was a strong-signal ranked match (confidence >= threshold)
+    _winning_intent_ctx: str | None = None
+    if ranked and ranked[0]['confidence'] >= _STRONG_INTENT_THRESHOLD:
+        _winning_intent_ctx = _TOPIC_INTENT.get(ranked[0]['issueId'], 'unknown')
+
     fb = _fallback_classify(normalized)
     if fb:
-        # Financial context guard: if fallback gives a doc/ref topic but strong financial
-        # context is present (e.g. billing email with "no customs docs"), keep it as rate.
+        # Financial guard — doc/ref fallback inside financial context → rate
         if fb['issueId'] in ('customs', 't1', 'portbase', 'bl', 'load_ref') and _has_strong_financial_context(normalized):
-            return {'primaryIssue': 'rate', 'issueState': 'unknown', 'confidence': 0.65}
-        return {'primaryIssue': fb['issueId'], 'issueState': fb['state'], 'confidence': fb['confidence']}
+            return _build('rate', 'unknown', 0.70, fb_used=True, rnk=ranked)
+        # STEP 5: Constrain fallback to detected intent family
+        if _winning_intent_ctx and _winning_intent_ctx != 'unknown':
+            fb_intent = _TOPIC_INTENT.get(fb['issueId'], 'unknown')
+            if fb_intent != _winning_intent_ctx:
+                fb = None  # Reject: fallback conflicts with stronger detected intent
 
-    # 12. Operational clue scan
+    if fb:
+        return _build(fb['issueId'], fb['state'], fb['confidence'], fb_used=True, rnk=ranked)
+
+    # 19. Operational clue scan (also constrained to detected intent family)
     clue = _operational_clue_scan(normalized)
     if clue:
-        return {'primaryIssue': clue['issueId'], 'issueState': clue['state'], 'confidence': clue['confidence']}
+        if _winning_intent_ctx and _winning_intent_ctx != 'unknown':
+            clue_intent = _TOPIC_INTENT.get(clue['issueId'], 'unknown')
+            if clue_intent != _winning_intent_ctx:
+                clue = None
+    if clue:
+        clue_state = clue['state'] if clue['state'] != 'unknown' else _detect_state_windowed(normalized)
+        return _build(clue['issueId'], clue_state, clue['confidence'], fb_used=True, rnk=ranked)
 
-    # 13. Unclassified
-    return {'primaryIssue': 'other', 'issueState': 'unknown', 'confidence': 0.10}
+    # 20. Unclassified
+    return _build('other', 'unknown', 0.10, fb_used=True, rnk=ranked)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -2272,6 +2741,290 @@ def _normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────
+# FORECAST
+# ─────────────────────────────────────────────────────────────────
+
+def _compute_forecast(df: 'pd.DataFrame', issue_breakdown: list[dict]) -> dict:
+    """
+    Compute a next-week volume forecast using a weighted rolling average of
+    the last 3 weeks (50% / 30% / 20% recency weighting).
+    Only high-confidence rows (>= 0.60) are used so low-quality classifications
+    don't inflate predictions.
+    """
+    _FORECAST_MIN_CONF = 0.60
+    _FORECAST_WEIGHTS  = [0.50, 0.30, 0.20]  # most-recent first
+
+    # Filter to weeks that have at least some classified data
+    hq = df[df["confidence"] >= _FORECAST_MIN_CONF].copy()
+    weeks = sorted(w for w in hq["weekKey"].unique() if w)
+
+    if len(weeks) < 2:
+        return {
+            "available": False,
+            "reason": "Need at least 2 weeks of high-confidence data for forecasting.",
+            "nextWeekVolume": 0,
+            "volumeTrend": "stable",
+            "confidence": "LOW",
+            "weeksAnalyzed": len(weeks),
+            "topIssues": [], "risingRisk": [],
+            "riskyCustomers": [], "riskyTransporters": [],
+            "hotspots": [], "actions": [],
+        }
+
+    # Per-week totals and per-issue counts (high-confidence only)
+    weekly_totals: dict[str, int] = {}
+    weekly_issues: dict[str, dict[str, int]] = {}
+    weekly_customers: dict[str, dict[str, int]] = {}
+    weekly_transporters: dict[str, dict[str, int]] = {}
+    weekly_areas: dict[str, dict[str, int]] = {}
+
+    for wk in weeks:
+        wk_df = hq[hq["weekKey"] == wk]
+        weekly_totals[wk] = len(wk_df)
+        weekly_issues[wk] = wk_df["primaryIssue"].value_counts().to_dict()
+        weekly_customers[wk] = wk_df["resolvedCustomer"].dropna().value_counts().to_dict()
+        weekly_transporters[wk] = wk_df["resolvedTransporter"].dropna().value_counts().to_dict()
+        weekly_areas[wk] = wk_df["resolvedArea"].dropna().value_counts().to_dict()
+
+    use_weeks = weeks[-3:]  # up to 3 most recent
+    wts = _FORECAST_WEIGHTS[:len(use_weeks)][::-1]  # oldest→newest order
+
+    # Weighted total volume
+    vol_weighted = sum(weekly_totals[w] * wts[i] for i, w in enumerate(use_weeks))
+    next_week_vol = max(0, round(vol_weighted))
+
+    # Volume trend
+    if len(use_weeks) >= 2:
+        prev_vol = weekly_totals[use_weeks[-2]]
+        curr_vol = weekly_totals[use_weeks[-1]]
+        vol_trend = "up" if curr_vol > prev_vol * 1.10 else ("down" if curr_vol < prev_vol * 0.90 else "stable")
+    else:
+        vol_trend = "stable"
+
+    # Forecast confidence based on weeks available and data quality
+    if len(weeks) >= 4:
+        fc_conf = "HIGH"
+    elif len(weeks) >= 2:
+        fc_conf = "MEDIUM"
+    else:
+        fc_conf = "LOW"
+
+    # Per-issue forecast
+    issue_map = {i["id"]: i for i in issue_breakdown if i["id"] != "other"}
+    top_issue_forecast: list[dict] = []
+    rising_risk: list[dict] = []
+
+    all_issue_ids = set()
+    for wk in use_weeks:
+        all_issue_ids |= set(weekly_issues[wk].keys())
+
+    for iid in all_issue_ids:
+        if iid == "other" or iid not in issue_map:
+            continue
+        counts = [weekly_issues[w].get(iid, 0) for w in use_weeks]
+        weighted = round(sum(c * wts[i] for i, c in enumerate(counts)))
+        cur = counts[-1]
+        prev = counts[-2] if len(counts) >= 2 else cur
+        trend = "up" if cur > prev * 1.20 else ("down" if cur < prev * 0.80 else "stable")
+        meta = issue_map[iid]
+        top_issue_forecast.append({
+            "id": iid, "label": meta["label"], "color": meta["color"],
+            "forecasted": weighted, "trend": trend,
+        })
+        if trend == "up" and cur >= 3:
+            rising_risk.append({
+                "id": iid, "label": meta["label"], "color": meta["color"],
+                "forecasted": weighted, "trend": trend,
+            })
+
+    top_issue_forecast.sort(key=lambda x: x["forecasted"], reverse=True)
+    rising_risk.sort(key=lambda x: x["forecasted"], reverse=True)
+
+    # Risky customers (appeared in most recent 2 weeks with increasing trend)
+    risky_customers: list[dict] = []
+    all_custs = set()
+    for wk in use_weeks[-2:]:
+        all_custs |= set(weekly_customers.get(wk, {}).keys())
+    for cust in all_custs:
+        if not cust or cust.lower() in ("", "none", "nan"):
+            continue
+        recent = weekly_customers.get(use_weeks[-1], {}).get(cust, 0)
+        prev_c = weekly_customers.get(use_weeks[-2], {}).get(cust, 0) if len(use_weeks) >= 2 else 0
+        trend = "up" if recent > prev_c * 1.20 else ("down" if recent < prev_c * 0.80 else "stable")
+        score = recent + (prev_c * 0.5)
+        risk = "HIGH" if score >= 10 else ("MEDIUM" if score >= 4 else "LOW")
+        if risk != "LOW":
+            risky_customers.append({"name": cust, "recentCount": recent, "trend": trend, "risk": risk})
+    risky_customers.sort(key=lambda x: x["recentCount"], reverse=True)
+
+    # Risky transporters (high issue rate in recent week)
+    risky_transporters: list[dict] = []
+    last_wk = use_weeks[-1]
+    tp_counts = weekly_transporters.get(last_wk, {})
+    for tp, cnt in tp_counts.items():
+        if not tp or tp.lower() in ("", "none", "nan") or cnt < 2:
+            continue
+        total_wk = weekly_totals.get(last_wk, 1)
+        rate = round(cnt / total_wk * 100, 1)
+        risk = "HIGH" if rate >= 20 else ("MEDIUM" if rate >= 10 else "LOW")
+        if risk != "LOW":
+            risky_transporters.append({"name": tp, "delayRate": rate, "risk": risk})
+    risky_transporters.sort(key=lambda x: x["delayRate"], reverse=True)
+
+    # Area hotspots
+    hotspots: list[dict] = []
+    all_areas = set()
+    for wk in use_weeks:
+        all_areas |= set(weekly_areas.get(wk, {}).keys())
+    for area in all_areas:
+        if not area or area.lower() in ("", "none", "nan"):
+            continue
+        counts_a = [weekly_areas.get(w, {}).get(area, 0) for w in use_weeks]
+        weighted_a = round(sum(c * wts[i] for i, c in enumerate(counts_a)))
+        cur_a = counts_a[-1]
+        prev_a = counts_a[-2] if len(counts_a) >= 2 else cur_a
+        trend_a = "up" if cur_a > prev_a * 1.15 else ("down" if cur_a < prev_a * 0.85 else "stable")
+        if weighted_a > 0:
+            hotspots.append({"name": area, "forecasted": weighted_a, "trend": trend_a})
+    hotspots.sort(key=lambda x: x["forecasted"], reverse=True)
+
+    # Auto-generated actions
+    actions: list[str] = []
+    if vol_trend == "up":
+        actions.append(f"Volume is rising — ensure sufficient capacity for ~{next_week_vol} cases next week.")
+    if rising_risk:
+        actions.append(f"Escalating categories: {', '.join(r['label'] for r in rising_risk[:3])}. Initiate proactive customer outreach.")
+    if risky_customers:
+        top_risk = risky_customers[0]['name']
+        actions.append(f"Account {top_risk} has the highest recent case volume. Schedule a review call.")
+    if risky_transporters:
+        top_tp = risky_transporters[0]['name']
+        actions.append(f"Transporter {top_tp} has a high issue rate this week — consider SLA review.")
+    if not actions:
+        actions.append("No significant risks detected. Maintain current operational cadence.")
+
+    return {
+        "available": True,
+        "nextWeekVolume": next_week_vol,
+        "volumeTrend": vol_trend,
+        "confidence": fc_conf,
+        "weeksAnalyzed": len(weeks),
+        "topIssues": top_issue_forecast[:6],
+        "risingRisk": rising_risk[:4],
+        "riskyCustomers": risky_customers[:5],
+        "riskyTransporters": risky_transporters[:5],
+        "hotspots": hotspots[:9],
+        "actions": actions[:5],
+    }
+
+
+# ─────────────────────────────────────────────────────────────────
+# HEALTH CHECK
+# ─────────────────────────────────────────────────────────────────
+
+def _compute_health_check(df: 'pd.DataFrame', issue_counts: dict, total: int) -> dict:
+    """Post-classification health metrics. Fail conditions logged as alerts."""
+    if total == 0:
+        return {"status": "no_data", "alerts": []}
+
+    other_count = issue_counts.get("other", 0)
+    other_pct = round(other_count / total * 100, 1)
+
+    below_60_count = int((df["confidence"] < 0.60).sum())
+    below_60_pct = round(below_60_count / total * 100, 1)
+
+    review_true_count = int(df["reviewFlag"].sum()) if "reviewFlag" in df.columns else 0
+    review_pct = round(review_true_count / total * 100, 1)
+
+    blank_intent = int((df["detectedIntent"].fillna("").str.strip() == "").sum()) if "detectedIntent" in df.columns else total
+    blank_intent_pct = round(blank_intent / total * 100, 1)
+
+    blank_object = int((df["detectedObject"].fillna("").str.strip() == "").sum()) if "detectedObject" in df.columns else total
+    blank_object_pct = round(blank_object / total * 100, 1)
+
+    # reviewFlag=False while confidence < 0.60 violations
+    if "reviewFlag" in df.columns:
+        violations = int(((df["confidence"] < 0.60) & (~df["reviewFlag"].astype(bool))).sum())
+    else:
+        violations = 0
+
+    categories_seen = len([k for k in issue_counts if k != "other" and issue_counts[k] > 0])
+
+    # Core categories expected in any non-trivial dataset
+    _CORE_CATEGORIES = [
+        'delay', 'load_ref', 'customs', 'rate', 'amendment',
+        'tracking', 'equipment', 'ref_provided', 'communication',
+    ]
+
+    alerts = []
+    status = "pass"
+
+    # Extraction coverage metrics
+    def _col_coverage(col: str) -> float:
+        if col not in df.columns:
+            return 0.0
+        filled = df[col].notna() & (df[col].astype(str).str.strip() != '') & (df[col].astype(str) != 'None')
+        return round(float(filled.sum()) / total * 100, 1) if total else 0.0
+
+    transporter_pct  = _col_coverage('resolvedTransporter')
+    booking_ref_pct  = _col_coverage('ext_booking_ref')
+    load_ref_pct     = _col_coverage('ext_load_ref')
+    container_pct    = _col_coverage('ext_container')
+    mrn_pct          = _col_coverage('ext_mrn')
+    zip_pct          = _col_coverage('zip')
+    unknown_state_pct = round(float((df['issueState'] == 'unknown').sum()) / total * 100, 1) if total else 0.0
+
+    if other_pct > 15:
+        alerts.append(f"FAIL: Other/Unclassified {other_pct}% > 15% threshold")
+        status = "fail"
+    if blank_intent_pct > 1:
+        alerts.append(f"FAIL: Blank detectedIntent {blank_intent_pct}% > 1% threshold")
+        status = "fail"
+    if blank_object_pct > 1:
+        alerts.append(f"FAIL: Blank detectedObject {blank_object_pct}% > 1% threshold")
+        status = "fail"
+    if violations > 0:
+        alerts.append(f"FAIL: {violations} rows have confidence < 0.60 but reviewFlag=False")
+        status = "fail"
+    if categories_seen < 6:
+        alerts.append(f"WARN: Only {categories_seen} non-Other categories in output — taxonomy underreach")
+        if status == "pass":
+            status = "warn"
+    # Flag missing core categories for datasets >= 100 rows
+    if total >= 100:
+        missing_core = [c for c in _CORE_CATEGORIES if issue_counts.get(c, 0) == 0]
+        if missing_core:
+            alerts.append(f"WARN: Core categories with zero rows (dataset={total}): {', '.join(missing_core)}")
+            if status == "pass":
+                status = "warn"
+
+    return {
+        "status": status,
+        "totalRows": total,
+        "otherCount": other_count,
+        "otherPct": other_pct,
+        "below60Count": below_60_count,
+        "below60Pct": below_60_pct,
+        "reviewFlagCount": review_true_count,
+        "reviewFlagPct": review_pct,
+        "blankIntentCount": blank_intent,
+        "blankIntentPct": blank_intent_pct,
+        "blankObjectCount": blank_object,
+        "blankObjectPct": blank_object_pct,
+        "reviewFlagViolations": violations,
+        "categoriesSeen": categories_seen,
+        "alerts": alerts,
+        "transporterCoverage": transporter_pct,
+        "bookingRefCoverage":  booking_ref_pct,
+        "loadRefCoverage":     load_ref_pct,
+        "containerCoverage":   container_pct,
+        "mrnCoverage":         mrn_pct,
+        "zipCoverage":         zip_pct,
+        "unknownStatePct":     unknown_state_pct,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────
 # MAIN ENTRY POINT
 # ─────────────────────────────────────────────────────────────────
 
@@ -2290,10 +3043,10 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
         if col not in df.columns:
             df[col] = ""
 
-    # Coerce types
-    for col in ["subject", "description", "isr_details", "customer", "transporter",
-                "zip", "area", "case_number", "booking_ref", "category", "status", "priority"]:
-        if col in df.columns:
+    # Coerce types — fill NaN in ALL object columns to empty string
+    # (openpyxl may return float NaN for empty cells even with dtype=str)
+    for col in df.columns:
+        if df[col].dtype == object:
             df[col] = df[col].fillna("").astype(str).str.strip()
 
     # Parse dates
@@ -2312,16 +3065,28 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
         )),
         axis=1,
     )
-    df["primaryIssue"] = classified["primaryIssue"]
-    df["issueState"] = classified["issueState"]
-    df["confidence"] = classified["confidence"]
+    df["primaryIssue"]       = classified["primaryIssue"]
+    df["secondaryIssue"]     = classified["secondaryIssue"]
+    df["issueState"]         = classified["issueState"]
+    df["confidence"]         = classified["confidence"]
+    df["reviewFlag"]         = classified["reviewFlag"]
+    df["detectedIntent"]     = classified["detectedIntent"]
+    df["detectedObject"]     = classified["detectedObject"]
+    df["triggerPhrase"]      = classified["triggerPhrase"]
+    df["triggerSourceField"] = classified["triggerSourceField"]
+    df["evidence"]           = classified["evidence"]
+    df["sourceFieldsUsed"]   = classified["sourceFieldsUsed"]
+    df["fallbackUsed"]       = classified["fallbackUsed"]
+    df["unresolvedReason"]   = classified["unresolvedReason"]
 
     # Resolve area
     def _row_area(r) -> str | None:
-        if r.get("area", "").strip():
-            return r["area"].strip()
-        if r.get("zip", "").strip():
-            return _resolve_zip_to_area(r["zip"])
+        area_val = _clean_text(r.get("area", ""))
+        if area_val:
+            return area_val
+        zip_val = _clean_text(r.get("zip", ""))
+        if zip_val:
+            return _resolve_zip_to_area(zip_val)
         combined = " ".join([_clean_text(r.get("subject", "")),
                              _clean_text(r.get("description", ""))])
         zips_found = re.findall(r'\b\d{5}\b', combined)
@@ -2348,13 +3113,23 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
         tp = _clean_text(r.get("transporter", ""))
         if tp:
             canon = _canonical_transporter_name(tp)
-            return canon if canon else (tp if _is_operational_transporter(tp) else None)
+            if canon:
+                return canon
+            if _is_operational_transporter(tp):
+                return tp
         # Fallback: check customer column
         cust = _clean_text(r.get("customer", ""))
         if cust:
             canon = _canonical_transporter_name(cust)
-            return canon
-        return None
+            if canon:
+                return canon
+        # Fallback: extract from combined text
+        combined = ' '.join(filter(None, [
+            _clean_text(str(r.get('subject', '') or '')),
+            _clean_text(str(r.get('description', '') or '')),
+            _clean_text(str(r.get('isr_details', '') or '')),
+        ]))
+        return _extract_transporter_from_text(combined)
 
     df["resolvedTransporter"] = df.apply(_get_resolved_transporter, axis=1)
 
@@ -2368,6 +3143,26 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
         return cust
 
     df["resolvedCustomer"] = df.apply(_get_resolved_customer, axis=1)
+
+    # ── TEXT EXTRACTION — extract reference values from free text ──
+    def _extract_row(r: pd.Series) -> pd.Series:
+        combined = ' '.join(filter(None, [
+            _clean_text(str(r.get('subject', '') or '')),
+            _clean_text(str(r.get('description', '') or '')),
+            _clean_text(str(r.get('isr_details', '') or '')),
+        ]))
+        return pd.Series(_extract_all_refs(combined))
+
+    extracted = df.apply(_extract_row, axis=1)
+    for col in ['ext_container', 'ext_booking_ref', 'ext_load_ref', 'ext_mrn', 'ext_t1_ref', 'ext_zip', 'ext_transporter']:
+        df[col] = extracted[col]
+
+    # Merge extracted ZIP into zip column (fill blanks)
+    df['zip'] = df.apply(
+        lambda r: (_clean_text(r.get('zip', '')) or _clean_text(r.get('ext_zip', '') or '')), axis=1
+    )
+    # Re-resolve area with any newly extracted ZIP
+    df['resolvedArea'] = df.apply(_row_area, axis=1)
 
     # ── AGGREGATIONS ──────────────────────────────────────────────
 
@@ -2437,8 +3232,8 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
             pct = round((c - p) / p * 100, 1) if p else None
             wow_delta[issue_id] = {"current": c, "prior": p, "pct_change": pct}
 
-    # Issue breakdown (top 10)
-    top_issues = sorted(issue_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+    # Issue breakdown — all categories (no top-10 cap; dashboard filters as needed)
+    top_issues = sorted(issue_counts.items(), key=lambda x: x[1], reverse=True)
     issue_breakdown = []
     for iid, cnt in top_issues:
         tax = TAXONOMY_MAP.get(iid, TAXONOMY_MAP["other"])
@@ -2473,11 +3268,31 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
 
     # Return only key fields per case to keep response small
     import json as _json
-    KEY_FIELDS = ["case_number", "subject", "customer", "transporter", "date",
-                  "zip", "area", "booking_ref", "category", "primaryIssue",
-                  "issueState", "confidence", "resolvedArea", "weekKey", "missing_load_ref"]
+    KEY_FIELDS = [
+        "case_number", "subject", "description", "isr_details", "customer", "transporter",
+        "date", "status", "priority", "zip", "area", "booking_ref", "category",
+        "primaryIssue", "secondaryIssue", "issueState",
+        "confidence", "reviewFlag",
+        "detectedIntent", "detectedObject",
+        "triggerPhrase", "triggerSourceField",
+        "fallbackUsed", "unresolvedReason",
+        "resolvedArea", "resolvedCustomer", "resolvedTransporter",
+        "weekKey", "missing_load_ref",
+        # Extracted reference fields
+        "ext_container", "ext_booking_ref", "ext_load_ref",
+        "ext_mrn", "ext_t1_ref", "ext_zip", "ext_transporter",
+    ]
     keep_cols = [c for c in KEY_FIELDS if c in df.columns]
     cases_df = df[keep_cols].copy()
+
+    # Serialize list/array columns to JSON strings for transport
+    for list_col in ["evidence", "sourceFieldsUsed"]:
+        if list_col in df.columns:
+            import json as _json_inner
+            cases_df[list_col] = df[list_col].apply(
+                lambda v: _json_inner.dumps(v) if isinstance(v, list) else (v or "[]")
+            )
+
     cases = _json.loads(cases_df.to_json(orient='records', date_format='iso', default_handler=str))
 
     # Summary
@@ -2523,4 +3338,6 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
         "preventable_count": preventable_count,
         "preventable_rate": preventable_rate,
         "cases": cases,
+        "health_check": _compute_health_check(df, issue_counts, total),
+        "forecast": _compute_forecast(df, issue_breakdown),
     }

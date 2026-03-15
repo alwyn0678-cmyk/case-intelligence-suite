@@ -327,6 +327,23 @@ export interface ActionInsight {
   text: string;
 }
 
+export interface ClassificationHealth {
+  status: string;
+  alerts: string[];
+  otherPct: number;
+  below60Pct: number;
+  reviewFlagPct: number;
+  reviewFlagViolations: number;
+  categoriesSeen: number;
+  unknownStatePct: number;
+  transporterCoverage: number;
+  bookingRefCoverage: number;
+  loadRefCoverage: number;
+  containerCoverage: number;
+  mrnCoverage: number;
+  zipCoverage: number;
+}
+
 export interface AnalysisResult {
   meta: {
     filename: string;
@@ -334,6 +351,7 @@ export interface AnalysisResult {
     analyzedAt: Date;
     hasZipMap: boolean;
   };
+  classificationHealth: ClassificationHealth | null;
   summary: AnalysisSummary;
   issueBreakdown: IssueBreakdownItem[];
   weeklyHistory: Record<string, WeeklySnapshot>;
