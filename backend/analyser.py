@@ -691,6 +691,10 @@ RECOVERY_SIGNALS: list[tuple[list[str], str]] = [
     (["waiting at gate", "waiting at terminal", "driver waiting", "truck waiting",
       "free time expired", "free days expired", "per diem",
       "storage accruing", "demurrage accruing"], "waiting_time"),
+    # Informational / acknowledgment standalone (last-resort for very short emails)
+    (["noted", "noted thanks", "ok thanks", "ok thank you", "please proceed",
+      "as discussed", "as agreed", "understood", "will do", "duly noted",
+      "received, thank you", "received thanks", "will action"], "ref_provided"),
 ]
 
 # ─────────────────────────────────────────────────────────────────
@@ -833,6 +837,8 @@ def _canonical_transporter_name(name: str) -> str | None:
 
 # ISO 6346 container: 3 owner letters + category (U/J/Z) + 6 digits + optional check digit
 _RE_CONTAINER = re.compile(r'\b([A-Z]{3}[UJZ])\s?(\d{6})\s?(\d)?\b')
+# Broader container pattern: any 4 uppercase letters + exactly 7 digits (user-specified [A-Z]{4}[0-9]{7})
+_RE_CONTAINER_BROAD = re.compile(r'\b([A-Z]{4})(\d{7})\b')
 
 # Booking ref: keyword + optional qualifier + value
 _RE_BOOKING_EXTRACT = re.compile(
@@ -1218,6 +1224,8 @@ _TOPIC_RULES: list[dict] = [
             'missing mrn', 'cannot proceed without mrn', 'mrn not received',
             'mrn not provided', 'mrn required', 'need mrn', 'require mrn',
             'portbase customs missing', 'portbase customs docs missing',
+            'mrn needed', 'customs clearance required', 'customs clearance needed',
+            'awaiting customs clearance', 'customs pending', 'goods held at customs',
             # Import / export document variants
             'import document', 'import documents', 'import doc', 'import docs',
             'export document', 'export documents', 'export doc', 'export docs',
@@ -1505,6 +1513,10 @@ _TOPIC_RULES: list[dict] = [
             'storage cost', 'storage costs', 'waiting time charges',
             'waiting time invoice', 'waiting costs invoice',
             'opslagkosten', 'wachttijd kosten', 'lagerkosten', 'wartezeit kosten',
+            # Direct invoice / billing signals
+            'billing question', 'billing inquiry', 'billing enquiry',
+            'rate question', 'cost query', 'charge question', 'extra charge',
+            'invoice raised', 'invoice issued', 'invoice sent',
         ],
         'weak': [
             ' rate ', 'rate query', 'rate dispute', 'rate correction', 'rate discrepancy',
@@ -1559,6 +1571,8 @@ _TOPIC_RULES: list[dict] = [
             'delivery appointment', 'collection appointment', 'pickup appointment',
             'delivery time slot', 'collection time slot', 'pickup time slot',
             'confirm pickup', 'confirm delivery', 'confirm collection',
+            'pickup confirmed', 'delivery confirmed', 'collection confirmed',
+            'pick-up confirmed', 'drop-off confirmed', 'drop off confirmed',
             'arrange pickup', 'arrange delivery', 'arrange collection',
             # Dutch/German
             'afhaal planning', 'lever planning', 'ophaalplanning',
@@ -1669,6 +1683,14 @@ _TOPIC_RULES: list[dict] = [
             'referenz unten', 'referenz anbei', 'referenz beigefügt',
             'referenz beigefuegt', 'die referenz ist ', 'referenz: ',
             'ladereferenz ist ', 'ladereferenz: ',
+            # Informational acknowledgments — standalone short responses
+            'noted', 'noted thanks', 'noted thank you', 'noted, thank you',
+            'ok thanks', 'ok thank you', 'thanks noted', 'thank you, noted',
+            'please proceed', 'please go ahead', 'you may proceed',
+            'as discussed', 'as agreed', 'as per our discussion',
+            'understood', 'understood thanks', 'understood, thank you',
+            'duly noted', 'noted and understood', 'will do', 'will action',
+            'received, thank you', 'received thanks', 'noted and will action',
         ],
         'weak': [
             'ref provided', 'reference provided', 'ref sent', 'reference sent',
@@ -2929,7 +2951,7 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
     # Load ref        → Missing Load Reference
     # Booking ref     → Transport Order
     norm_upper = normalized.upper()
-    if _RE_CONTAINER.search(norm_upper):
+    if _RE_CONTAINER.search(norm_upper) or _RE_CONTAINER_BROAD.search(norm_upper):
         _ep_state = _detect_state_windowed(normalized)
         return _build('equipment', _ep_state, 0.48, fb_used=True, rnk=ranked)
     if _RE_MRN_EXTRACT.search(normalized):

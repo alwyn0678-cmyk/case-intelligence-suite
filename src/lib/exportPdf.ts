@@ -374,13 +374,14 @@ export async function exportToPdf(analysis: AnalysisResult): Promise<void> {
     areaHotspots,
     forecast,
     actions,
+    classificationHealth: ch,
   } = analysis;
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' }) as DocWithAutoTable;
   const W = doc.internal.pageSize.getWidth();
   const MARGIN = 18;
 
-  const TOTAL_PAGES = 9;
+  const TOTAL_PAGES = ch ? 10 : 9;
   let pg = 1;
 
   // ── Derived KPI values ────────────────────────────────────────
@@ -935,7 +936,130 @@ export async function exportToPdf(analysis: AnalysisResult): Promise<void> {
   addPageFooter(doc, pg, TOTAL_PAGES, W, MARGIN);
 
   // ══════════════════════════════════════════════════════════════════
-  // PAGE 8 — AREA HOTSPOTS
+  // PAGE 8 — DATA QUALITY & CLASSIFICATION HEALTH
+  // ══════════════════════════════════════════════════════════════════
+  if (ch) {
+    doc.addPage(); pg++;
+    paintPageBackground(doc);
+
+    y = sectionHeader(doc, 18, 'Data Quality & Classification Health', W, MARGIN);
+
+    y = introText(
+      doc, y,
+      'Classification health metrics validate the accuracy and coverage of the AI-assisted issue detection pipeline. ' +
+      'Low confidence rates and high "Other / Unclassified" percentages indicate cases requiring manual review or ' +
+      'additional training data.',
+      W, MARGIN,
+    );
+
+    // ── 4 KPI tiles: key accuracy metrics ─────────────────────────
+    const dqKpiW  = (W - MARGIN * 2 - 12) / 4;
+    const dqKpiH  = 28;
+    const dqKpiGap = 4;
+    const dqKpiY  = y;
+
+    kpiTile(doc, MARGIN,                             dqKpiY, dqKpiW, dqKpiH,
+      `${ch.otherPct.toFixed(1)}%`, 'Other / Unclassified %');
+    kpiTile(doc, MARGIN + (dqKpiW + dqKpiGap),      dqKpiY, dqKpiW, dqKpiH,
+      `${ch.avgConfidence.toFixed(1)}%`, 'Avg Confidence %');
+    kpiTile(doc, MARGIN + (dqKpiW + dqKpiGap) * 2,  dqKpiY, dqKpiW, dqKpiH,
+      `${ch.below60Pct.toFixed(1)}%`, 'Below 60% Confidence');
+    kpiTile(doc, MARGIN + (dqKpiW + dqKpiGap) * 3,  dqKpiY, dqKpiW, dqKpiH,
+      String(ch.categoriesSeen), 'Categories Detected');
+
+    y = dqKpiY + dqKpiH + 10;
+
+    // ── Classification accuracy table ────────────────────────────
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    textColor(doc, COLORS.textPrimary);
+    doc.text('Classification Accuracy Metrics', MARGIN, y);
+    y += 4;
+
+    autoTable(doc, {
+      startY: y,
+      head: [['Metric', 'Value', 'Threshold', 'Status']],
+      body: [
+        ['Other / Unclassified %',   `${ch.otherPct.toFixed(1)}%`,      '< 10%',  ch.otherPct < 10  ? 'PASS' : ch.otherPct < 20 ? 'WARN' : 'FAIL'],
+        ['Average Confidence %',     `${ch.avgConfidence.toFixed(1)}%`,  '≥ 70%',  ch.avgConfidence >= 70 ? 'PASS' : ch.avgConfidence >= 50 ? 'WARN' : 'FAIL'],
+        ['Below 60% Confidence %',   `${ch.below60Pct.toFixed(1)}%`,     '< 30%',  ch.below60Pct < 30 ? 'PASS' : ch.below60Pct < 50 ? 'WARN' : 'FAIL'],
+        ['Unknown Issue State %',    `${ch.unknownStatePct.toFixed(1)}%`,'< 40%',  ch.unknownStatePct < 40 ? 'PASS' : 'WARN'],
+        ['Categories Detected',      String(ch.categoriesSeen),          '≥ 5',    ch.categoriesSeen >= 5 ? 'PASS' : 'WARN'],
+      ],
+      columnStyles: {
+        0: { cellWidth: 90 },
+        1: { cellWidth: 28, halign: 'right' as const },
+        2: { cellWidth: 28, halign: 'center' as const },
+        3: { cellWidth: 28, halign: 'center' as const },
+      },
+      didParseCell: (data) => {
+        if (data.column.index === 3 && data.section === 'body') {
+          const val = String(data.cell.raw ?? '');
+          if (val === 'FAIL') {
+            data.cell.styles.textColor = COLORS.highlightRed;
+            data.cell.styles.fontStyle = 'bold';
+          } else if (val === 'WARN') {
+            data.cell.styles.textColor = COLORS.highlightAmber;
+          } else if (val === 'PASS') {
+            data.cell.styles.textColor = COLORS.highlightGreen;
+          }
+        }
+      },
+      ...tableDefaults(),
+    });
+
+    y = (doc.lastAutoTable?.finalY ?? y + 40) + 8;
+
+    // ── Extraction coverage ──────────────────────────────────────
+    if (y < 230) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      textColor(doc, COLORS.textPrimary);
+      doc.text('Field Extraction Coverage (% of rows populated)', MARGIN, y);
+      y += 4;
+
+      const coverageItems = [
+        { label: 'Transporter',  value: ch.transporterCoverage },
+        { label: 'Booking Ref',  value: ch.bookingRefCoverage  },
+        { label: 'Load Ref',     value: ch.loadRefCoverage     },
+        { label: 'Container',    value: ch.containerCoverage   },
+        { label: 'MRN / T1',     value: ch.mrnCoverage         },
+        { label: 'ZIP / Area',   value: ch.zipCoverage         },
+      ];
+      const maxCov = Math.max(...coverageItems.map(c => c.value), 1);
+      y = drawHorizBarChart(
+        doc, MARGIN, y, W - MARGIN * 2,
+        coverageItems.map(c => ({ label: c.label, value: c.value })),
+        maxCov,
+        5, 3,
+        COLORS.highlightGreen as [number,number,number],
+      );
+    }
+
+    // ── Alerts ───────────────────────────────────────────────────
+    if (ch.alerts.length > 0 && y < 250) {
+      y += 4;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      textColor(doc, COLORS.textAccent);
+      doc.text('Classification Alerts', MARGIN, y);
+      y += 5;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      textColor(doc, COLORS.textSecondary);
+      for (const alert of ch.alerts) {
+        if (y > 265) break;
+        const lines = doc.splitTextToSize(`\u2022  ${alert}`, W - MARGIN * 2 - 4);
+        doc.text(lines, MARGIN + 2, y);
+        y += lines.length * 4.5 + 2;
+      }
+    }
+
+    addPageFooter(doc, pg, TOTAL_PAGES, W, MARGIN);
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // PAGE 8/9 — AREA HOTSPOTS
   // ══════════════════════════════════════════════════════════════════
   doc.addPage(); pg++;
   paintPageBackground(doc);
