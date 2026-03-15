@@ -3043,10 +3043,10 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
         if col not in df.columns:
             df[col] = ""
 
-    # Coerce types
-    for col in ["subject", "description", "isr_details", "customer", "transporter",
-                "zip", "area", "case_number", "booking_ref", "category", "status", "priority"]:
-        if col in df.columns:
+    # Coerce types — fill NaN in ALL object columns to empty string
+    # (openpyxl may return float NaN for empty cells even with dtype=str)
+    for col in df.columns:
+        if df[col].dtype == object:
             df[col] = df[col].fillna("").astype(str).str.strip()
 
     # Parse dates
