@@ -3220,6 +3220,23 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
 
     df["rootCause"] = df.apply(_detect_root_cause, axis=1)
 
+    # ── EVIDENCE TOKEN PARITY ──────────────────────────────────────
+    # Append structured ref[...] tokens so the frontend toExampleCase()
+    # can extract reference values directly from the evidence array,
+    # matching the expected format: ref[loadRef]=..., ref[containerNumber]=...,
+    # ref[mrnRef]=...
+    def _append_ref_tokens(r: pd.Series) -> list:
+        evid = list(r.get("evidence") or [])
+        if r.get("ext_load_ref"):
+            evid.append(f"ref[loadRef]={r['ext_load_ref']}")
+        if r.get("ext_container"):
+            evid.append(f"ref[containerNumber]={r['ext_container']}")
+        if r.get("ext_mrn"):
+            evid.append(f"ref[mrnRef]={r['ext_mrn']}")
+        return evid
+
+    df["evidence"] = df.apply(_append_ref_tokens, axis=1)
+
     # ── AGGREGATIONS ──────────────────────────────────────────────
 
     total = len(df)
