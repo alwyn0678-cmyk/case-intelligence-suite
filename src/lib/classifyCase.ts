@@ -184,12 +184,18 @@ export interface CaseClassification {
 // ─── Reference extraction helpers ───────────────────────────────
 
 const REF_PATTERNS: Record<string, RegExp> = {
+  // ISO 6346 container: 4 uppercase letters + 7 digits
   container:  /\b([A-Z]{4}[0-9]{7})\b/,
-  mrn:        /\b(?:MRN)\s*[:#\s]?\s*([A-Z0-9]{12,22})\b/i,
-  t1_mrn:     /\bT[12]\s*(?:MRN|mrn)?\s*[:#\s]?\s*([A-Z0-9]{12,22})\b/i,
-  booking:    /\b(?:BKG|booking\s+(?:no|number|ref(?:erence)?))\s*[:#\s]?\s*([A-Z0-9]{4,20})\b/i,
-  // load_ref: captured group must contain at least one digit to exclude plain English words
-  load_ref:   /\b(?:load\s*ref(?:erence)?|shipment\s*ref(?:erence)?|order\s*ref(?:erence)?)\s*[:#\s]?\s*([A-Z0-9]*[0-9][A-Z0-9]{2,})\b/i,
+  // EU MRN bare format: 2-digit year + 2-char country + 14–18 alphanumeric (e.g. 26NL000510HT31XXJ1)
+  mrn_bare:   /\b(\d{2}[A-Z]{2}[A-Z0-9]{14,18})\b/,
+  // MRN with keyword prefix (MRN:, customs ref, transit ref)
+  mrn:        /\b(?:MRN|customs\s*ref(?:erence)?|transit\s*ref(?:erence)?)\s*[:#\-\s]?\s*([A-Z0-9]{12,22})\b/i,
+  // T1 / T2 transit document
+  t1_mrn:     /\bT[12]\s*(?:MRN|mrn|ref(?:erence)?)?\s*[:#\-\s]?\s*([A-Z0-9]{12,22})\b/i,
+  // Booking ref — BKG, BK prefix OR "booking" + optional qualifier
+  booking:    /\b(?:BKG|BK\d{4,10}|booking\s*(?:no|nr|number|#|ref(?:erence)?)?)\s*[:#\-\s]?\s*([A-Z0-9][A-Z0-9\-]{3,19})\b/i,
+  // Load ref — keyword required + at least one digit in value to exclude plain words
+  load_ref:   /\b(?:load\s*ref(?:erence)?|shipment\s*ref(?:erence)?|order\s*ref(?:erence)?)\s*[:#\-\s]?\s*([A-Z0-9]*[0-9][A-Z0-9]{2,})\b/i,
 };
 
 function extractReferences(text: string): Record<string, string> {
@@ -203,6 +209,11 @@ function extractReferences(text: string): Record<string, string> {
       refs[key] = groups[groups.length - 1] ?? m[0];
     }
   }
+  // Merge mrn_bare into mrn if no keyed mrn was found
+  if (!refs['mrn'] && refs['mrn_bare']) {
+    refs['mrn'] = refs['mrn_bare'];
+  }
+  delete refs['mrn_bare'];
   return refs;
 }
 
@@ -957,6 +968,45 @@ export function classifyCase(record: NormalisedRecord): CaseClassification {
       issues = ['rate', ...issues.filter(i => i !== 'waiting_time')];
       confidence = Math.max(confidence, 0.78);
       evidence.push('[waiting-time-financial-guard] waiting_time overridden to rate — financial charge language detected');
+    }
+  }
+
+  // ── Phase 6: Equipment dominance guard ───────────────────────────────────────
+  // Words strongly associated with equipment defects or specialised equipment
+  // override non-equipment primary classifications at meaningful confidence.
+  {
+    const lnEq = normalizedText.toLowerCase();
+    const EQUIPMENT_DOMINANT_SIGNALS = [
+      'genset', 'reefer unit', 'reefer defect', 'chassis defect',
+      'portable not ok', 'container damaged', 'damaged container',
+      'equipment defect', 'unit defect', 'seal broken', 'seal missing',
+      'reefer failure', 'reefer alarm', 'power failure container',
+    ];
+    if (!['equipment', 'damage'].includes(issues[0]) &&
+        EQUIPMENT_DOMINANT_SIGNALS.some(s => lnEq.includes(s))) {
+      issues = ['equipment', ...issues.filter(i => i !== 'equipment')];
+      confidence = Math.max(confidence, 0.82);
+      evidence.push('[equipment-dominance] equipment defect signals override primary classification');
+    }
+  }
+
+  // ── Phase 6: Customs/MRN dominance guard ─────────────────────────────────────
+  // Strong customs identifiers (MRN number, T1 document, transit ref) override
+  // low-confidence primary classifications that are not already customs-family.
+  {
+    const lnCu = normalizedText.toLowerCase();
+    const CUSTOMS_DOMINANT_SIGNALS = [
+      'transit ref', 'transit document', 'transit declaration',
+      't1 document', 't1 missing', 'mrn missing', 'missing mrn',
+      'customs declaration', 'zollanmeldung', 'douaneverklaring',
+    ];
+    const isCustomsFamily = ['customs', 't1', 'portbase', 'bl'].includes(issues[0]);
+    if (!isCustomsFamily && confidence < 0.75 &&
+        CUSTOMS_DOMINANT_SIGNALS.some(s => lnCu.includes(s))) {
+      const newIssue = lnCu.includes('t1') || lnCu.includes('transit') ? 't1' : 'customs';
+      issues = [newIssue, ...issues.filter(i => i !== newIssue)];
+      confidence = Math.max(confidence, 0.78);
+      evidence.push(`[customs-dominance] customs/transit signals override to ${newIssue}`);
     }
   }
 

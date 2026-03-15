@@ -287,3 +287,99 @@ for (const g of gates) {
   console.log(`${status}  ${g.label.padEnd(30)} ${g.value.padEnd(10)} (target ${g.target})`);
 }
 console.log();
+
+// ─── Phase 1: Export qa_validation_samples.xlsx ───────────────────
+console.log('Exporting qa_validation_samples.xlsx...');
+
+const VALIDATION_SHEETS: Array<{ sheetName: string; issueId: string; label: string }> = [
+  { sheetName: 'validation_delay',             issueId: 'delay',           label: 'Delay / Not On Time' },
+  { sheetName: 'validation_reference_update',  issueId: 'ref_provided',    label: 'Reference Update' },
+  { sheetName: 'validation_transport_order',   issueId: 'transport_order', label: 'Transport Order' },
+  { sheetName: 'validation_container_equipment', issueId: 'equipment',     label: 'Container / Equipment' },
+  { sheetName: 'validation_rate_invoice',      issueId: 'rate',            label: 'Rate / Invoice' },
+  { sheetName: 'validation_customs',           issueId: 'customs',         label: 'Customs / Documentation' },
+  { sheetName: 'validation_other',             issueId: 'other',           label: 'Other / Unclassified' },
+];
+
+const SAMPLE_SIZE = 50;
+
+/** Seeded shuffle to get a reproducible random sample */
+function seededShuffle<T>(arr: T[], seed: number): T[] {
+  const a = [...arr];
+  let s = seed;
+  for (let i = a.length - 1; i > 0; i--) {
+    s = (s * 1664525 + 1013904223) & 0xffffffff;
+    const j = Math.abs(s) % (i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+const qaWb = XLSX.utils.book_new();
+
+for (const sheet of VALIDATION_SHEETS) {
+  const rows = classified.filter(r => r.primaryIssue === sheet.issueId);
+  const sample = seededShuffle(rows, 42).slice(0, SAMPLE_SIZE);
+
+  const wsData = [
+    // Header row
+    [
+      'Case Number',
+      'Subject',
+      'Description Snippet',
+      'Assigned Primary Issue',
+      'Confidence %',
+      'Issue State',
+      'Booking Ref',
+      'Container',
+      'Load Ref',
+      'MRN / T1',
+      'Resolved Transporter',
+      'Trigger Evidence',
+    ],
+    // Data rows
+    ...sample.map(r => {
+      const label = TAXONOMY_MAP[r.primaryIssue]?.label ?? r.primaryIssue;
+      const topEvidence = r.evidence.slice(0, 3).join(' | ');
+      return [
+        r.case_number,
+        r.subject.slice(0, 120),
+        r.description.replace(/\s+/g, ' ').slice(0, 180),
+        label,
+        `${(r.confidence * 100).toFixed(0)}%`,
+        r.issueState,
+        r.bookingRef ?? '',
+        r.containerExtracted ?? '',
+        r.loadRefExtracted ?? '',
+        r.mrnRefExtracted ?? '',
+        r.resolvedTransporter ?? '',
+        topEvidence,
+      ];
+    }),
+  ];
+
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+  // Column widths
+  ws['!cols'] = [
+    { wch: 18 }, // Case Number
+    { wch: 55 }, // Subject
+    { wch: 70 }, // Description
+    { wch: 30 }, // Category
+    { wch: 12 }, // Confidence
+    { wch: 14 }, // State
+    { wch: 18 }, // Booking Ref
+    { wch: 14 }, // Container
+    { wch: 18 }, // Load Ref
+    { wch: 22 }, // MRN
+    { wch: 25 }, // Transporter
+    { wch: 60 }, // Evidence
+  ];
+
+  XLSX.utils.book_append_sheet(qaWb, ws, sheet.sheetName);
+  console.log(`  ${sheet.sheetName}: ${sample.length} rows (${rows.length} total in category)`);
+}
+
+const outputPath = path.join(path.dirname(inputPath), 'qa_validation_samples.xlsx');
+XLSX.writeFile(qaWb, outputPath);
+console.log(`\nExported: ${outputPath}\n`);

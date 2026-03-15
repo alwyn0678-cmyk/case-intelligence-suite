@@ -166,6 +166,29 @@ export const KNOWN_CARRIERS: EntityEntry[] = [
   { canonicalName: 'Nacco',               entityType: 'carrier', roles: ['carrier'], aliases: ['nacco','nacco logistics','naco'] },
 ];
 
+// ─────────────────────────────────────────────────────────────────
+// OCEAN LINE TRANSPORTERS
+// Major shipping lines that act as the transport party in
+// cross-border container logistics cases. These appear in
+// Transporter Performance and are blocked from Customer charts.
+// Aliases kept short/distinctive to avoid false positives.
+// ─────────────────────────────────────────────────────────────────
+export const OCEAN_LINE_TRANSPORTERS: EntityEntry[] = [
+  { canonicalName: 'Maersk',      entityType: 'transporter', roles: ['transporter'], aliases: ['maersk line','maersk','a.p. moller maersk','ap moller maersk','msl','maeu'] },
+  { canonicalName: 'MSC',         entityType: 'transporter', roles: ['transporter'], aliases: ['mediterranean shipping','msc mediterranean'] },
+  { canonicalName: 'Hapag Lloyd', entityType: 'transporter', roles: ['transporter'], aliases: ['hapag-lloyd','hapag lloyd','hapag loyd','hlag'] },
+  { canonicalName: 'CMA CGM',     entityType: 'transporter', roles: ['transporter'], aliases: ['cma cgm','cma-cgm'] },
+  { canonicalName: 'Evergreen',   entityType: 'transporter', roles: ['transporter'], aliases: ['evergreen line','evergreen marine','emc evergreen'] },
+  { canonicalName: 'COSCO',       entityType: 'transporter', roles: ['transporter'], aliases: ['cosco shipping','cosco line','coscon'] },
+  { canonicalName: 'ONE',         entityType: 'transporter', roles: ['transporter'], aliases: ['ocean network express','one-line','one ocean'] },
+  { canonicalName: 'Yang Ming',   entityType: 'transporter', roles: ['transporter'], aliases: ['yang ming line','yangming','yang ming marine'] },
+  { canonicalName: 'Zim',         entityType: 'transporter', roles: ['transporter'], aliases: ['zim line','zim integrated shipping','zim shipping'] },
+  { canonicalName: 'PIL',         entityType: 'transporter', roles: ['transporter'], aliases: ['pacific international lines','pil shipping'] },
+  { canonicalName: 'Turkon',      entityType: 'transporter', roles: ['transporter'], aliases: ['turkon line','turkon container','turkon'] },
+  { canonicalName: 'KMTC',        entityType: 'transporter', roles: ['transporter'], aliases: ['kmtc','korea marine transport','kmtc line'] },
+  { canonicalName: 'Wanhai',      entityType: 'transporter', roles: ['transporter'], aliases: ['wan hai','wanhai lines','wan hai lines'] },
+];
+
 // Combined export for backward compatibility
 export const TRANSPORTERS: EntityEntry[] = [...APPROVED_TRANSPORTERS, ...KNOWN_CARRIERS];
 
@@ -176,6 +199,7 @@ export const ALL_ENTITIES: EntityEntry[] = [
   ...DEEPSEA_TERMINALS,
   ...INLAND_DEPOTS,
   ...APPROVED_TRANSPORTERS,
+  ...OCEAN_LINE_TRANSPORTERS,
   ...KNOWN_CARRIERS,
 ];
 
