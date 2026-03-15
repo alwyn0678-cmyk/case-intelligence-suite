@@ -2741,6 +2741,184 @@ def _normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────
+# FORECAST
+# ─────────────────────────────────────────────────────────────────
+
+def _compute_forecast(df: 'pd.DataFrame', issue_breakdown: list[dict]) -> dict:
+    """
+    Compute a next-week volume forecast using a weighted rolling average of
+    the last 3 weeks (50% / 30% / 20% recency weighting).
+    Only high-confidence rows (>= 0.60) are used so low-quality classifications
+    don't inflate predictions.
+    """
+    _FORECAST_MIN_CONF = 0.60
+    _FORECAST_WEIGHTS  = [0.50, 0.30, 0.20]  # most-recent first
+
+    # Filter to weeks that have at least some classified data
+    hq = df[df["confidence"] >= _FORECAST_MIN_CONF].copy()
+    weeks = sorted(w for w in hq["weekKey"].unique() if w)
+
+    if len(weeks) < 2:
+        return {
+            "available": False,
+            "reason": "Need at least 2 weeks of high-confidence data for forecasting.",
+            "nextWeekVolume": 0,
+            "volumeTrend": "stable",
+            "confidence": "LOW",
+            "weeksAnalyzed": len(weeks),
+            "topIssues": [], "risingRisk": [],
+            "riskyCustomers": [], "riskyTransporters": [],
+            "hotspots": [], "actions": [],
+        }
+
+    # Per-week totals and per-issue counts (high-confidence only)
+    weekly_totals: dict[str, int] = {}
+    weekly_issues: dict[str, dict[str, int]] = {}
+    weekly_customers: dict[str, dict[str, int]] = {}
+    weekly_transporters: dict[str, dict[str, int]] = {}
+    weekly_areas: dict[str, dict[str, int]] = {}
+
+    for wk in weeks:
+        wk_df = hq[hq["weekKey"] == wk]
+        weekly_totals[wk] = len(wk_df)
+        weekly_issues[wk] = wk_df["primaryIssue"].value_counts().to_dict()
+        weekly_customers[wk] = wk_df["resolvedCustomer"].dropna().value_counts().to_dict()
+        weekly_transporters[wk] = wk_df["resolvedTransporter"].dropna().value_counts().to_dict()
+        weekly_areas[wk] = wk_df["resolvedArea"].dropna().value_counts().to_dict()
+
+    use_weeks = weeks[-3:]  # up to 3 most recent
+    wts = _FORECAST_WEIGHTS[:len(use_weeks)][::-1]  # oldest→newest order
+
+    # Weighted total volume
+    vol_weighted = sum(weekly_totals[w] * wts[i] for i, w in enumerate(use_weeks))
+    next_week_vol = max(0, round(vol_weighted))
+
+    # Volume trend
+    if len(use_weeks) >= 2:
+        prev_vol = weekly_totals[use_weeks[-2]]
+        curr_vol = weekly_totals[use_weeks[-1]]
+        vol_trend = "up" if curr_vol > prev_vol * 1.10 else ("down" if curr_vol < prev_vol * 0.90 else "stable")
+    else:
+        vol_trend = "stable"
+
+    # Forecast confidence based on weeks available and data quality
+    if len(weeks) >= 4:
+        fc_conf = "HIGH"
+    elif len(weeks) >= 2:
+        fc_conf = "MEDIUM"
+    else:
+        fc_conf = "LOW"
+
+    # Per-issue forecast
+    issue_map = {i["id"]: i for i in issue_breakdown if i["id"] != "other"}
+    top_issue_forecast: list[dict] = []
+    rising_risk: list[dict] = []
+
+    all_issue_ids = set()
+    for wk in use_weeks:
+        all_issue_ids |= set(weekly_issues[wk].keys())
+
+    for iid in all_issue_ids:
+        if iid == "other" or iid not in issue_map:
+            continue
+        counts = [weekly_issues[w].get(iid, 0) for w in use_weeks]
+        weighted = round(sum(c * wts[i] for i, c in enumerate(counts)))
+        cur = counts[-1]
+        prev = counts[-2] if len(counts) >= 2 else cur
+        trend = "up" if cur > prev * 1.20 else ("down" if cur < prev * 0.80 else "stable")
+        meta = issue_map[iid]
+        top_issue_forecast.append({
+            "id": iid, "label": meta["label"], "color": meta["color"],
+            "forecasted": weighted, "trend": trend,
+        })
+        if trend == "up" and cur >= 3:
+            rising_risk.append({
+                "id": iid, "label": meta["label"], "color": meta["color"],
+                "forecasted": weighted, "trend": trend,
+            })
+
+    top_issue_forecast.sort(key=lambda x: x["forecasted"], reverse=True)
+    rising_risk.sort(key=lambda x: x["forecasted"], reverse=True)
+
+    # Risky customers (appeared in most recent 2 weeks with increasing trend)
+    risky_customers: list[dict] = []
+    all_custs = set()
+    for wk in use_weeks[-2:]:
+        all_custs |= set(weekly_customers.get(wk, {}).keys())
+    for cust in all_custs:
+        if not cust or cust.lower() in ("", "none", "nan"):
+            continue
+        recent = weekly_customers.get(use_weeks[-1], {}).get(cust, 0)
+        prev_c = weekly_customers.get(use_weeks[-2], {}).get(cust, 0) if len(use_weeks) >= 2 else 0
+        trend = "up" if recent > prev_c * 1.20 else ("down" if recent < prev_c * 0.80 else "stable")
+        score = recent + (prev_c * 0.5)
+        risk = "HIGH" if score >= 10 else ("MEDIUM" if score >= 4 else "LOW")
+        if risk != "LOW":
+            risky_customers.append({"name": cust, "recentCount": recent, "trend": trend, "risk": risk})
+    risky_customers.sort(key=lambda x: x["recentCount"], reverse=True)
+
+    # Risky transporters (high issue rate in recent week)
+    risky_transporters: list[dict] = []
+    last_wk = use_weeks[-1]
+    tp_counts = weekly_transporters.get(last_wk, {})
+    for tp, cnt in tp_counts.items():
+        if not tp or tp.lower() in ("", "none", "nan") or cnt < 2:
+            continue
+        total_wk = weekly_totals.get(last_wk, 1)
+        rate = round(cnt / total_wk * 100, 1)
+        risk = "HIGH" if rate >= 20 else ("MEDIUM" if rate >= 10 else "LOW")
+        if risk != "LOW":
+            risky_transporters.append({"name": tp, "delayRate": rate, "risk": risk})
+    risky_transporters.sort(key=lambda x: x["delayRate"], reverse=True)
+
+    # Area hotspots
+    hotspots: list[dict] = []
+    all_areas = set()
+    for wk in use_weeks:
+        all_areas |= set(weekly_areas.get(wk, {}).keys())
+    for area in all_areas:
+        if not area or area.lower() in ("", "none", "nan"):
+            continue
+        counts_a = [weekly_areas.get(w, {}).get(area, 0) for w in use_weeks]
+        weighted_a = round(sum(c * wts[i] for i, c in enumerate(counts_a)))
+        cur_a = counts_a[-1]
+        prev_a = counts_a[-2] if len(counts_a) >= 2 else cur_a
+        trend_a = "up" if cur_a > prev_a * 1.15 else ("down" if cur_a < prev_a * 0.85 else "stable")
+        if weighted_a > 0:
+            hotspots.append({"name": area, "forecasted": weighted_a, "trend": trend_a})
+    hotspots.sort(key=lambda x: x["forecasted"], reverse=True)
+
+    # Auto-generated actions
+    actions: list[str] = []
+    if vol_trend == "up":
+        actions.append(f"Volume is rising — ensure sufficient capacity for ~{next_week_vol} cases next week.")
+    if rising_risk:
+        actions.append(f"Escalating categories: {', '.join(r['label'] for r in rising_risk[:3])}. Initiate proactive customer outreach.")
+    if risky_customers:
+        top_risk = risky_customers[0]['name']
+        actions.append(f"Account {top_risk} has the highest recent case volume. Schedule a review call.")
+    if risky_transporters:
+        top_tp = risky_transporters[0]['name']
+        actions.append(f"Transporter {top_tp} has a high issue rate this week — consider SLA review.")
+    if not actions:
+        actions.append("No significant risks detected. Maintain current operational cadence.")
+
+    return {
+        "available": True,
+        "nextWeekVolume": next_week_vol,
+        "volumeTrend": vol_trend,
+        "confidence": fc_conf,
+        "weeksAnalyzed": len(weeks),
+        "topIssues": top_issue_forecast[:6],
+        "risingRisk": rising_risk[:4],
+        "riskyCustomers": risky_customers[:5],
+        "riskyTransporters": risky_transporters[:5],
+        "hotspots": hotspots[:9],
+        "actions": actions[:5],
+    }
+
+
+# ─────────────────────────────────────────────────────────────────
 # HEALTH CHECK
 # ─────────────────────────────────────────────────────────────────
 
@@ -3159,4 +3337,5 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
         "preventable_rate": preventable_rate,
         "cases": cases,
         "health_check": _compute_health_check(df, issue_counts, total),
+        "forecast": _compute_forecast(df, issue_breakdown),
     }

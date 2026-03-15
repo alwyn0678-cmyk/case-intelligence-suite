@@ -68,6 +68,20 @@ interface BackendResult {
     mrnCoverage: number;
     zipCoverage: number;
   };
+  forecast?: {
+    available: boolean;
+    reason?: string;
+    nextWeekVolume: number;
+    volumeTrend: string;
+    confidence: string;
+    weeksAnalyzed: number;
+    topIssues: Array<{ id: string; label: string; color: string; forecasted: number; trend: string }>;
+    risingRisk: Array<{ id: string; label: string; color: string; forecasted: number; trend: string }>;
+    riskyCustomers: Array<{ name: string; recentCount: number; trend: string; risk: string }>;
+    riskyTransporters: Array<{ name: string; delayRate: number; risk: string }>;
+    hotspots: Array<{ name: string; forecasted: number; trend: string }>;
+    actions: string[];
+  };
 }
 
 // ─── Map backend response → AnalysisResult ───────────────────────
@@ -350,9 +364,22 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
     },
     repeatOffenders: [],
     actionInsights: [],
-    forecast: {
+    forecast: b.forecast ? {
+      available:          b.forecast.available,
+      reason:             b.forecast.reason,
+      nextWeekVolume:     b.forecast.nextWeekVolume,
+      volumeTrend:        (b.forecast.volumeTrend as 'up' | 'down' | 'stable') ?? 'stable',
+      confidence:         (b.forecast.confidence as 'HIGH' | 'MEDIUM' | 'LOW') ?? 'LOW',
+      weeksAnalyzed:      b.forecast.weeksAnalyzed,
+      topIssues:          b.forecast.topIssues.map(i => ({ ...i, trend: i.trend as 'up' | 'down' | 'stable' })),
+      risingRisk:         b.forecast.risingRisk.map(i => ({ ...i, trend: i.trend as 'up' | 'down' | 'stable' })),
+      riskyCustomers:     b.forecast.riskyCustomers,
+      riskyTransporters:  b.forecast.riskyTransporters,
+      hotspots:           b.forecast.hotspots.map(h => ({ ...h, trend: h.trend as 'up' | 'down' | 'stable' })),
+      actions:            b.forecast.actions,
+    } : {
       available: false,
-      reason: 'Forecast not yet computed by backend',
+      reason: 'Forecast not computed by backend',
       nextWeekVolume: 0,
       volumeTrend: 'stable' as const,
       confidence: 'LOW' as const,
