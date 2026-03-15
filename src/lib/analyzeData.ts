@@ -314,6 +314,8 @@ export function runAnalysis(
       // that would corrupt Customer Burden reporting.
       transporter: cls.resolvedTransporter ?? r.transporter,
       customer: cls.resolvedCustomer ?? undefined,
+      rootCause: cls.rootCause ?? null,
+      preventableIssue: cls.preventableIssue ?? false,
     };
   });
 
@@ -1172,5 +1174,136 @@ export function runAnalysis(
     forecast,
     actions,
     records,
+    controlTower: buildControlTower(records, issueBreakdown, weeklyHistory, sortedWeeks),
+  };
+}
+
+// ── Minimal control tower computation for the client-side path ───
+function buildControlTower(
+  records: EnrichedRecord[],
+  issueBreakdown: import('../types/analysis').IssueBreakdownItem[],
+  weeklyHistory: Record<string, import('../types/analysis').WeeklySnapshot>,
+  sortedWeeks: string[],
+): import('../types/analysis').ControlTowerData {
+  const HOURS_PER_PREVENTABLE = 1.5;
+  const preventable = records.filter(r => r.preventableIssue);
+  const avgConf = records.length > 0 ? records.reduce((s, r) => s + r.confidence, 0) / records.length : 0;
+  const lowConfRate = records.length > 0 ? (records.filter(r => r.confidence < 0.70).length / records.length) * 100 : 0;
+
+  const prevWeek = sortedWeeks[sortedWeeks.length - 2] ?? '';
+  const currWeek = sortedWeeks[sortedWeeks.length - 1] ?? '';
+  const recentSet = new Set(sortedWeeks.slice(-4));
+  const priorSet  = new Set(sortedWeeks.slice(-8, -4));
+  const recentRecs = records.filter(r => recentSet.has(r.weekKey));
+  const priorRecs  = records.filter(r => priorSet.has(r.weekKey));
+
+  const categoryDistribution = issueBreakdown.map(item => {
+    const c = weeklyHistory[currWeek]?.issues[item.id] ?? 0;
+    const p = weeklyHistory[prevWeek]?.issues[item.id] ?? 0;
+    const trend: 'up' | 'down' | 'stable' = c > p * 1.1 ? 'up' : c < p * 0.9 ? 'down' : 'stable';
+    return { id: item.id, name: item.label, value: item.count, color: item.color, percent: item.percent, trend };
+  });
+
+  const categoryRows = issueBreakdown.map(item => {
+    const catRecs = records.filter(r => r.primaryIssue === item.id);
+    const prevCount = catRecs.filter(r => r.preventableIssue).length;
+    const prevRate  = catRecs.length > 0 ? +(prevCount / catRecs.length * 100).toFixed(1) : 0;
+    const rec4 = recentRecs.filter(r => r.primaryIssue === item.id).length;
+    const pri4 = priorRecs.filter(r => r.primaryIssue === item.id).length;
+    const trendPct = pri4 > 0 ? Math.round((rec4 - pri4) / pri4 * 100) : 0;
+    const trend: 'up' | 'down' | 'stable' = rec4 > pri4 * 1.1 ? 'up' : rec4 < pri4 * 0.9 ? 'down' : 'stable';
+    return { id: item.id, label: item.label, color: item.color, count: item.count,
+             percent: item.percent, hoursLost: item.hoursLost, preventableRate: prevRate, trend, trendPct };
+  });
+
+  // Bottlenecks
+  const bottlenecks: import('../types/analysis').CtBottleneck[] = [];
+  for (let wi = 1; wi < sortedWeeks.length; wi++) {
+    const wk = sortedWeeks[wi], pw = sortedWeeks[wi - 1];
+    const cur = weeklyHistory[wk], pri = weeklyHistory[pw];
+    if (!cur || !pri) continue;
+    for (const [issueId, cnt] of Object.entries(cur.issues)) {
+      const prior = pri.issues[issueId] ?? 0;
+      if (cnt < 30 || prior === 0) continue;
+      const spike = Math.round(((cnt - prior) / prior) * 100);
+      if (spike >= 40) bottlenecks.push({
+        category: issueId, categoryLabel: issueId, week: wk, caseCount: cnt, spikePercent: spike, priorCount: prior,
+      });
+    }
+  }
+
+  // Preventable opportunities
+  const prevByCat: Record<string, { count: number; label: string; color: string }> = {};
+  const totalByCat: Record<string, number> = {};
+  for (const r of records) {
+    totalByCat[r.primaryIssue] = (totalByCat[r.primaryIssue] ?? 0) + 1;
+    if (r.preventableIssue) {
+      const item = issueBreakdown.find(i => i.id === r.primaryIssue);
+      if (!prevByCat[r.primaryIssue]) prevByCat[r.primaryIssue] = { count: 0, label: item?.label ?? r.primaryIssue, color: item?.color ?? '#8b7cff' };
+      prevByCat[r.primaryIssue].count++;
+    }
+  }
+  const preventableOpportunities = Object.entries(prevByCat).map(([id, v]) => {
+    const total = totalByCat[id] ?? 0;
+    const rec4 = recentRecs.filter(r => r.primaryIssue === id && r.preventableIssue).length;
+    const pri4 = priorRecs.filter(r => r.primaryIssue === id && r.preventableIssue).length;
+    const trend: 'up' | 'down' | 'stable' = rec4 > pri4 * 1.1 ? 'up' : rec4 < pri4 * 0.9 ? 'down' : 'stable';
+    return { categoryId: id, categoryLabel: v.label, preventableCount: v.count, totalCount: total,
+             preventableRate: total > 0 ? +(v.count / total * 100).toFixed(1) : 0,
+             hoursLost: +(v.count * HOURS_PER_PREVENTABLE).toFixed(1), trend };
+  }).sort((a, z) => z.hoursLost - a.hoursLost);
+
+  // Root causes
+  const CAUSE_LABELS: Record<string, string> = {
+    weather_delay: 'Weather Delay', terminal_congestion: 'Terminal Congestion', customs_hold: 'Customs Hold',
+    missed_cutoff: 'Missed Cutoff', equipment_unavailable: 'Equipment Unavailable',
+    documentation_error: 'Documentation Error', late_booking: 'Late Booking',
+    carrier_delay: 'Carrier Delay', haulier_delay: 'Haulier Delay', vessel_delay: 'Vessel Delay',
+    extra_cost: 'Extra Cost', unknown: 'Unknown / Other',
+  };
+  const rcCount: Record<string, number> = {};
+  const rcRecent: Record<string, number> = {};
+  const rcPrior:  Record<string, number> = {};
+  for (const r of records)    { const c = r.rootCause ?? 'unknown'; rcCount[c]  = (rcCount[c]  ?? 0) + 1; }
+  for (const r of recentRecs) { const c = r.rootCause ?? 'unknown'; rcRecent[c] = (rcRecent[c] ?? 0) + 1; }
+  for (const r of priorRecs)  { const c = r.rootCause ?? 'unknown'; rcPrior[c]  = (rcPrior[c]  ?? 0) + 1; }
+  const rcTotal = Object.values(rcCount).reduce((s, n) => s + n, 0);
+  const rootCauses = Object.entries(rcCount).sort(([, a], [, z]) => z - a).map(([cause, count]) => {
+    const rec = rcRecent[cause] ?? 0, pri = rcPrior[cause] ?? 0;
+    const trendPct = pri > 0 ? Math.round((rec - pri) / pri * 100) : 0;
+    return { cause, causeLabel: CAUSE_LABELS[cause] ?? cause, count,
+             percent: rcTotal > 0 ? +(count / rcTotal * 100).toFixed(1) : 0,
+             trend: rec > pri * 1.1 ? 'up' as const : rec < pri * 0.9 ? 'down' as const : 'stable' as const,
+             trendPct, recentCount: rec, priorCount: pri };
+  });
+
+  const riskSummary: import('../types/analysis').CtRiskSummary = {
+    highestDelayTransporter: null,
+    largestPreventableCategory: preventableOpportunities[0]
+      ? { label: preventableOpportunities[0].categoryLabel, hoursLost: preventableOpportunities[0].hoursLost, count: preventableOpportunities[0].preventableCount }
+      : null,
+    fastestGrowingCategory: categoryRows.filter(c => c.trendPct > 0 && c.count >= 10).sort((a, z) => z.trendPct - a.trendPct)[0]
+      ? (() => { const c = categoryRows.filter(r => r.trendPct > 0 && r.count >= 10).sort((a, z) => z.trendPct - a.trendPct)[0]; return { label: c.label, trendPct: c.trendPct, count: c.count }; })()
+      : null,
+    mostFrequentRootCause: rootCauses[0] ? { label: rootCauses[0].causeLabel, count: rootCauses[0].count, percent: rootCauses[0].percent } : null,
+  };
+
+  return {
+    totalCases: records.length,
+    preventableCases: preventable.length,
+    preventableHoursLost: Math.round(preventable.length * HOURS_PER_PREVENTABLE),
+    avgConfidence: +((avgConf * 100).toFixed(1)),
+    lowConfidenceRate: +lowConfRate.toFixed(1),
+    categoryDistribution,
+    categoryRows,
+    bottlenecks: bottlenecks.slice(0, 20),
+    transporterRisks: [],
+    preventableOpportunities,
+    rootCauses,
+    validationPassed: true,
+    validationNotes: ['Client-side mode — backend validation not available.'],
+    alerts: [],
+    forecasts: [],
+    riskSummary,
   };
 }

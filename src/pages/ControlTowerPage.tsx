@@ -249,7 +249,7 @@ function CaseDrilldown({ title, records, onClose }: { title: string; records: En
 export function ControlTowerPage({ analysis }: Props) {
   const [panel, setPanel] = useState<Panel>('overview');
   const [drill, setDrill] = useState<{ title: string; records: EnrichedRecord[] } | null>(null);
-  const { controlTower, issueBreakdown, records, weeklyHistory, chartWeeks, sortedWeeks } = analysis;
+  const { controlTower, records, weeklyHistory, chartWeeks, sortedWeeks } = analysis;
   const ct = controlTower;
 
   // Pre-compute filter options for investigation panel
