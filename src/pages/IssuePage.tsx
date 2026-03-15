@@ -10,10 +10,33 @@ interface Props { analysis: AnalysisResult }
 const TREND_ICON: Record<string, string> = { up: '↑', down: '↓', stable: '→' };
 const TREND_CLR: Record<string, string>  = { up: '#dc6d7d', down: '#52c7c7', stable: '#a6aec4' };
 
+function recordToCase(r: import('../types/analysis').EnrichedRecord, label: string): import('../types/analysis').ExampleCase {
+  const fmt = (d: Date | null | undefined): string | null =>
+    d ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : null;
+  const ev = r.evidence ?? [];
+  return {
+    caseNumber:      r.case_number ?? null,
+    bookingRef:      (r._raw?.ext_booking_ref as string | undefined) ?? r.booking_ref ?? null,
+    primaryIssue:    r.primaryIssue,
+    issueLabel:      label,
+    issueState:      r.issueState ?? 'unknown',
+    subject:         r.subject ? r.subject.slice(0, 120) : null,
+    date:            fmt(r.date),
+    customer:        r.resolvedCustomer ?? r.customer ?? null,
+    transporter:     r.resolvedTransporter ?? r.transporter ?? null,
+    loadRef:         (r._raw?.ext_load_ref as string | undefined) ??
+                     ev.find((e: string) => e.startsWith('ref[load_ref]='))?.slice('ref[load_ref]='.length) ?? null,
+    containerNumber: (r._raw?.ext_container as string | undefined) ?? null,
+    mrnRef:          (r._raw?.ext_mrn as string | undefined) ?? (r._raw?.ext_t1_ref as string | undefined) ?? null,
+    confidence:      r.confidence,
+  };
+}
+
 export function IssuePage({ analysis }: Props) {
   const { issueBreakdown, weeklyHistory, chartWeeks, sortedWeeks } = analysis;
 
   const [selected, setSelected] = useState<IssueBreakdownItem | null>(null);
+  const [selectedCases, setSelectedCases] = useState<import('../types/analysis').ExampleCase[]>([]);
 
   // Complete Data Extract state
   const [extractSelected, setExtractSelected] = useState<Set<string>>(
@@ -61,9 +84,9 @@ export function IssuePage({ analysis }: Props) {
       {selected && (
         <ExampleCasesPanel
           title={`Example Cases — ${selected.label}`}
-          subtitle={`${selected.count} case${selected.count !== 1 ? 's' : ''} · ${selected.percent.toFixed(1)}% of total · ${selected.hoursLost.toFixed(1)}h lost`}
-          cases={selected.exampleCases}
-          onClose={() => setSelected(null)}
+          subtitle={`${selectedCases.length} case${selectedCases.length !== 1 ? 's' : ''} · ${selected.percent.toFixed(1)}% of total · ${selected.hoursLost.toFixed(1)}h lost`}
+          cases={selectedCases}
+          onClose={() => { setSelected(null); setSelectedCases([]); }}
         />
       )}
 
@@ -79,7 +102,7 @@ export function IssuePage({ analysis }: Props) {
               </span>
               {i.exampleCases.length > 0 && (
                 <button
-                  onClick={() => setSelected(i)}
+                  onClick={() => { setSelected(i); setSelectedCases(analysis.records.filter(r => r.primaryIssue === i.id).sort((a,b) => b.confidence - a.confidence).map(r => recordToCase(r, i.label))); }}
                   className="text-xs text-[#dc6d7d] hover:text-[#e07d8b] font-medium shrink-0"
                 >
                   View cases
@@ -133,10 +156,10 @@ export function IssuePage({ analysis }: Props) {
                   <div className="flex items-center justify-end gap-3">
                     {iss.count > 0 && (
                       <button
-                        onClick={() => setSelected(iss)}
+                        onClick={() => { setSelected(iss); setSelectedCases(analysis.records.filter(r => r.primaryIssue === iss.id).sort((a,b) => b.confidence - a.confidence).map(r => recordToCase(r, iss.label))); }}
                         className="text-xs text-[#7aa2ff] hover:text-[#8fb3ff] font-medium whitespace-nowrap"
                       >
-                        View {iss.exampleCases.length > 0 ? iss.exampleCases.length : iss.count}
+                        View {iss.count}
                       </button>
                     )}
                     {iss.count > 0 && (

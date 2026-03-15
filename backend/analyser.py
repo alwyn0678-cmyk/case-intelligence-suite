@@ -701,7 +701,7 @@ _ENTITY_DATA: list[tuple[str, str, list[str], list[str]]] = [
     ('Henk Dammes',         'transporter', ['transporter'],          ['henk dammes','dammes']),
     ('Falcoline',           'transporter', ['transporter'],          ['falcoline','falcoline gmbh','falcoline transport','falcoline spedition','falcoline belgium','falcoline belgie','falco lines belgium nv','falco lines belgium','falcolines belgium nv','falco lines nv']),
     ('GTS Coldchain',       'transporter', ['transporter'],          ['gts coldchain','gts cold','gts truck','gts logistics','gts duisburg','gts transport','gts']),
-    ('CTV Vrede',           'transporter', ['transporter','depot'],  ['ctv vrede','ctv transport','ctv','ctv spedition','ctv gmbh']),
+    ('CTV',                 'transporter', ['transporter','depot'],  ['ctv vrede','ctv verde','ctv barge','ctv service','ctv logistics','ctv transport','ctv','ctv spedition','ctv gmbh','ctv schiffahrt','ctv rijn']),
     ('EKB Transport',       'transporter', ['transporter','depot'],  ['ekb transport','ekb']),
     ('Optimodal Nederland', 'transporter', ['transporter'],          ['optimodal nederland bv','optimodal nederland','optimodal']),
     ('Kiem Transport',      'transporter', ['transporter'],          ['kiem transport','kiem']),
@@ -1805,9 +1805,10 @@ def _fallback_classify(text: str) -> dict | None:
     return best
 
 _OPERATIONAL_CLUES = [
+    # English
     ('shipment',   'tracking',          'unknown'),
     ('container',  'equipment',         'unknown'),
-    ('transport',  'delay',             'unknown'),
+    ('transport',  'transport_order',   'unknown'),
     ('transit',    't1',                'unknown'),
     ('customs',    'customs',           'unknown'),
     ('document',   'customs',           'unknown'),
@@ -1822,6 +1823,38 @@ _OPERATIONAL_CLUES = [
     ('release',    'equipment_release', 'unknown'),
     ('damage',     'damage',            'unknown'),
     ('complaint',  'communication',     'escalated'),
+    ('pickup',     'pickup_delivery',   'unknown'),
+    ('pre-advise', 'shipping_advice',   'unknown'),
+    ('vgm',        'vgm',              'unknown'),
+    ('seal',       'seal',             'unknown'),
+    # Dutch
+    ('vervoer',    'transport_order',   'unknown'),
+    ('transport',  'transport_order',   'unknown'),
+    ('chauffeur',  'delay',             'unknown'),
+    ('afhaling',   'pickup_delivery',   'unknown'),
+    ('ophalen',    'pickup_delivery',   'unknown'),
+    ('levering',   'delay',             'unknown'),
+    ('douane',     'customs',           'unknown'),
+    ('zending',    'tracking',          'unknown'),
+    ('referentie', 'load_ref',          'unknown'),
+    ('factuur',    'rate',              'unknown'),
+    ('kosten',     'rate',              'unknown'),
+    ('schade',     'damage',            'unknown'),
+    ('container',  'equipment',         'unknown'),
+    ('laadreferentie', 'load_ref',      'unknown'),
+    ('loadref',    'load_ref',          'unknown'),
+    # German
+    ('fahrer',     'delay',             'unknown'),
+    ('abholung',   'pickup_delivery',   'unknown'),
+    ('lieferung',  'delay',             'unknown'),
+    ('zoll',       'customs',           'unknown'),
+    ('rechnung',   'rate',              'unknown'),
+    ('kosten',     'rate',              'unknown'),
+    ('schaden',    'damage',            'unknown'),
+    ('referenz',   'load_ref',          'unknown'),
+    ('ladereferenz', 'load_ref',        'unknown'),
+    ('sendung',    'tracking',          'unknown'),
+    ('transport',  'transport_order',   'unknown'),
 ]
 
 def _operational_clue_scan(text: str) -> dict | None:
@@ -2998,6 +3031,12 @@ def _compute_health_check(df: 'pd.DataFrame', issue_counts: dict, total: int) ->
             if status == "pass":
                 status = "warn"
 
+    avg_confidence = round(float(df["confidence"].mean()) * 100, 1) if total else 0.0
+    if avg_confidence < 50.0:
+        alerts.append(f"WARN: Average confidence {avg_confidence:.1f}% below 50% threshold")
+        if status == "pass":
+            status = "warn"
+
     return {
         "status": status,
         "totalRows": total,
@@ -3021,6 +3060,7 @@ def _compute_health_check(df: 'pd.DataFrame', issue_counts: dict, total: int) ->
         "mrnCoverage":         mrn_pct,
         "zipCoverage":         zip_pct,
         "unknownStatePct":     unknown_state_pct,
+        "avgConfidence":       avg_confidence,
     }
 
 

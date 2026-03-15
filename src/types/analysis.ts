@@ -346,6 +346,7 @@ export interface ClassificationHealth {
   containerCoverage: number;
   mrnCoverage: number;
   zipCoverage: number;
+  avgConfidence: number;
 }
 
 // ── Control Tower types ───────────────────────────────────────────

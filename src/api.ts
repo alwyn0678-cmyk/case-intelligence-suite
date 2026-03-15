@@ -67,6 +67,7 @@ interface BackendResult {
     containerCoverage: number;
     mrnCoverage: number;
     zipCoverage: number;
+    avgConfidence?: number;
   };
   forecast?: {
     available: boolean;
@@ -244,8 +245,8 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
     };
   }
 
-  // Cap at 100 example cases per category, sorted by confidence desc
-  const MAX_EXAMPLES = 100;
+  // Cap at 5000 example cases per category, sorted by confidence desc
+  const MAX_EXAMPLES = 5000;
   const issueBreakdown = b.issueBreakdown.map((item) => {
     const categoryRecords = records
       .filter(r => r.primaryIssue === item.id)
@@ -682,6 +683,7 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       containerCoverage:    b.health_check.containerCoverage ?? 0,
       mrnCoverage:          b.health_check.mrnCoverage ?? 0,
       zipCoverage:          b.health_check.zipCoverage ?? 0,
+      avgConfidence:        b.health_check.avgConfidence ?? 0,
     } : null,
     summary: {
       totalCases: b.summary.totalCases,

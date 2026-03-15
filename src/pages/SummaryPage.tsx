@@ -246,14 +246,16 @@ export function SummaryPage({ analysis }: Props) {
             {/* Classification accuracy metrics */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
-                { label: 'Other / Unclassified', value: analysis.classificationHealth.otherPct, unit: '%', warn: 15 },
-                { label: 'Below 60% Confidence', value: analysis.classificationHealth.below60Pct, unit: '%', warn: 30 },
-                { label: 'Unknown Issue State', value: analysis.classificationHealth.unknownStatePct, unit: '%', warn: 40 },
-                { label: 'Categories Detected', value: analysis.classificationHealth.categoriesSeen, unit: '', warn: null, good: true },
+                { label: 'Other / Unclassified', value: analysis.classificationHealth.otherPct, unit: '%', warn: 15, good: false, warnBelow: null },
+                { label: 'Below 60% Confidence', value: analysis.classificationHealth.below60Pct, unit: '%', warn: 30, good: false, warnBelow: null },
+                { label: 'Unknown Issue State', value: analysis.classificationHealth.unknownStatePct, unit: '%', warn: 40, good: false, warnBelow: null },
+                { label: 'Categories Detected', value: analysis.classificationHealth.categoriesSeen, unit: '', warn: null, good: true, warnBelow: null },
+                { label: 'Avg Confidence', value: analysis.classificationHealth.avgConfidence, unit: '%', warn: null, good: true, warnBelow: 50 },
               ].map(m => (
                 <div key={m.label} className="bg-[#1d2030] rounded-lg px-4 py-3">
                   <p className="text-[10px] text-[#a6aec4] uppercase tracking-wide mb-1">{m.label}</p>
                   <p className={`text-xl font-semibold ${
+                    m.warnBelow !== null && m.value < m.warnBelow ? 'text-[#dc6d7d]' :
                     m.good ? 'text-[#52c7c7]' :
                     m.warn !== null && m.value > m.warn ? 'text-[#dc6d7d]' : 'text-[#52c7c7]'
                   }`}>{m.value}{m.unit}</p>
