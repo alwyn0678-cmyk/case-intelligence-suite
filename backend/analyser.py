@@ -1180,14 +1180,22 @@ _TOPIC_RULES: list[dict] = [
             'work order', 'workorder', 'work-order',
             'work order missing', 'missing work order', 'work order not received',
             'work order required', 'please send work order', 'no work order',
+            # Request/arrange forms
+            'arrange transport', 'arrange a truck', 'arrange truck', 'arrange lorry',
+            'transport request', 'transport booking', 'book transport', 'book a truck',
+            'book truck', 'please arrange transport', 'please book transport',
+            'please organize transport', 'please organise transport',
+            'organise transport', 'organize transport', 'request transport',
+            'need transport', 'require transport', 'need a truck', 'need truck',
             # Dutch/German
             'transportorder', 'transport opdracht', 'transportopdracht',
             'graag transportopdracht sturen', 'transportorder ontbreekt',
+            'transport aanvragen', 'vervoer aanvragen', 'transport boeken',
             'transportauftrag', 'transportauftrag fehlt', 'bitte transportauftrag senden',
-            'fahrauftrag', 'fahrauftrag fehlt',
+            'fahrauftrag', 'fahrauftrag fehlt', 'transport beauftragen',
         ],
         'weak': ['tro', 'carrier instruction', 'carrier order', 'transport confirmation',
-                 'haulage instruction', 'movement order'],
+                 'haulage instruction', 'movement order', 'truck request', 'lorry request'],
     },
     {
         'topic': 'customs',
@@ -1208,13 +1216,20 @@ _TOPIC_RULES: list[dict] = [
             'missing mrn', 'cannot proceed without mrn', 'mrn not received',
             'mrn not provided', 'mrn required', 'need mrn', 'require mrn',
             'portbase customs missing', 'portbase customs docs missing',
+            # Import / export document variants
+            'import document', 'import documents', 'import doc', 'import docs',
+            'export document', 'export documents', 'export doc', 'export docs',
+            'import paperwork', 'export paperwork',
+            'transit document', 'transit documents', 'transit paperwork',
             # Dutch
             'douane documenten ontbreken', 'douane documenten niet ontvangen',
             'graag douane documenten sturen', 'mrn ontbreekt',
             'douanedocumenten ontbreken', 'douanepapieren ontbreken',
+            'invoerdocumenten', 'uitvoerdocumenten',
             # German
             'zolldokumente fehlen', 'zollpapiere fehlen',
             'bitte zollpapiere senden', 'mrn fehlt',
+            'einfuhrdokumente', 'ausfuhrdokumente',
         ],
         'weak': [
             'duty',
@@ -1251,18 +1266,23 @@ _TOPIC_RULES: list[dict] = [
             'not arrived', 'late collection', 'not collected', 'not delivered',
             'running late', 'past eta', 'missed appointment',
             'driver late', 'driver delayed', 'vehicle delayed', 'truck delayed',
+            'truck late', 'lorry late', 'lorry delayed', 'vehicle late',
             'not on-time', 'failed delivery', 'failed collection',
             'missed time slot', 'delivery window missed',
             'hasn\'t arrived', 'have not arrived', 'still not here',
             'not yet delivered', 'not yet collected', 'driver no show',
+            'arrival delay', 'delay arrival', 'delay in arrival', 'delay in delivery',
+            'delay in collection', 'delivery delayed', 'collection delayed',
+            'missed slot', 'missed loading slot', 'missed delivery slot',
             # Dutch
             'nog niet aangekomen', 'niet tijdig', 'te laat aangekomen',
             'nog steeds niet', 'nog wachten op', 'niet opgehaald',
             'niet bezorgd', 'niet afgeleverd', 'vertraging gemeld',
+            'chauffeur te laat', 'voertuig te laat', 'levering vertraagd',
             # German
             'noch nicht angekommen', 'nicht rechtzeitig', 'zu spät',
             'immer noch nicht', 'nicht abgeholt', 'nicht zugestellt',
-            'verzögert angekommen',
+            'verzögert angekommen', 'fahrer zu spät', 'fahrzeug zu spät',
         ],
         'weak': [
             'delay', 'late', 'still waiting', 'expected today', 'expected yesterday',
@@ -1359,9 +1379,16 @@ _TOPIC_RULES: list[dict] = [
             'trailer not ok', 'not roadworthy', 'unit defective', 'unit damaged',
             'equipment defect', 'equipment failure', 'equipment fault',
             'container defect', 'container fault', 'trailer defect', 'trailer fault',
+            # Additional equipment problem phrases
+            'equipment problem', 'container problem', 'trailer problem',
+            'unit problem', 'equipment issue', 'reefer problem', 'genset problem',
+            'reefer issue', 'genset issue', 'reefer not working', 'genset not working',
+            'container missing', 'trailer missing', 'wrong container',
+            'wrong trailer', 'wrong equipment', 'wrong unit',
             # Dutch/German
             'container beschadigd', 'container niet ok', 'container defect',
             'reefer defect', 'container beschaedigt', 'container defekt', 'reefer defekt',
+            'container probleem', 'uitrusting probleem', 'container kapot',
         ],
         'weak': [
             'equipment issue', 'container not available', 'no container',
@@ -1380,12 +1407,19 @@ _TOPIC_RULES: list[dict] = [
             'can you confirm delivery', 'please confirm receipt', 'confirm arrival',
             'track and trace update', 'please advise status', 'any news on',
             'what is the current status', 'update on delivery',
+            'tracking request', 'where is container', 'where is the container',
+            'where is the shipment', 'where is the truck', 'where is the driver',
+            'container status', 'shipment status update', 'delivery status update',
+            'can you provide an update', 'please provide update', 'please provide status',
+            'any update on', 'status of shipment', 'status of container',
             # Dutch
             'waar is mijn', 'waar zijn mijn', 'status van', 'update over',
             'wanneer wordt', 'kunt u bevestigen', 'graag bevestiging',
+            'waar is de container', 'status van de zending',
             # German
             'wo ist meine', 'wo sind meine', 'status von', 'update zu',
             'wann kommt', 'bitte bestätigen', 'können sie bestätigen',
+            'wo ist der container', 'status der sendung',
         ],
         'weak': [
             'tracking', 'where is', 'status update', 'no update',
@@ -1518,9 +1552,16 @@ _TOPIC_RULES: list[dict] = [
             'last-mile', 'last mile', 'home delivery', 'residential delivery',
             'delivery address', 'pickup address', 'collection address',
             'driver instruction', 'delivery instruction', 'access instruction',
+            'schedule delivery', 'schedule collection', 'schedule pickup',
+            'schedule pick-up', 'collection time', 'delivery time',
+            'delivery appointment', 'collection appointment', 'pickup appointment',
+            'delivery time slot', 'collection time slot', 'pickup time slot',
+            'confirm pickup', 'confirm delivery', 'confirm collection',
+            'arrange pickup', 'arrange delivery', 'arrange collection',
             # Dutch/German
             'afhaal planning', 'lever planning', 'ophaalplanning',
-            'abholplanung', 'lieferplanung',
+            'bezorg tijd', 'ophaal tijd', 'lever tijdslot',
+            'abholplanung', 'lieferplanung', 'liefertermin vereinbaren',
         ],
         'weak': [
             'pickup', 'pick-up', 'pick up', 'delivery planning',
@@ -1548,13 +1589,21 @@ _TOPIC_RULES: list[dict] = [
         'strong': [
             'shipping advice', 'shipment advice', 'departure notice', 'arrival notice',
             'advice note', 'pre-advice', 'pre advice', 'shipping notice',
+            # FYI / informational forwarding
+            'fyi', 'for your information', 'for your reference', 'for your records',
+            'please see attached', 'please find attached', 'see attached', 'attached herewith',
+            'attached please find', 'please find below', 'see below for details',
+            'attached information', 'attached document', 'kindly see attached',
+            'please see below', 'see below', 'information below',
+            'ter informatie', 'voor uw informatie', 'bijgevoegd vindt u',
+            'zur information', 'anbei erhalten sie', 'in der anlage',
             # Dutch/German
             'aankomstbericht', 'vertrekbericht', 'laadbericht', 'losbericht',
             'aankomst avis', 'vertrek avis', 'losavis',
             'versandavis', 'eingangsavis', 'ausgangsavis', 'ladebericht', 'löschbericht',
             'ankunftsavis', 'abgangsavis',
         ],
-        'weak': [' avis ', 'notice'],
+        'weak': [' avis ', 'notice', 'fyi'],
     },
     {
         'topic': 'vgm',
@@ -1864,20 +1913,27 @@ def _fallback_classify(text: str) -> dict | None:
 
 _OPERATIONAL_CLUES = [
     # ── English ──────────────────────────────────────────────────
-    ('shipment',    'tracking',          'unknown'),
-    ('vessel',      'tracking',          'unknown'),
-    ('barge',       'tracking',          'unknown'),
-    ('feeder',      'tracking',          'unknown'),
-    ('discharge',   'tracking',          'unknown'),
-    ('loading',     'tracking',          'unknown'),
-    ('terminal',    'tracking',          'unknown'),
-    ('gate in',     'tracking',          'unknown'),
-    ('gate out',    'tracking',          'unknown'),
-    ('pod',         'tracking',          'unknown'),
-    ('container',   'equipment',         'unknown'),
-    ('reefer',      'equipment',         'unknown'),
-    ('genset',      'equipment',         'unknown'),
-    ('stuffing',    'equipment',         'unknown'),
+    ('shipment',        'tracking',          'unknown'),
+    ('vessel',          'tracking',          'unknown'),
+    ('barge',           'tracking',          'unknown'),
+    ('feeder',          'tracking',          'unknown'),
+    ('discharge',       'tracking',          'unknown'),
+    ('loading',         'tracking',          'unknown'),
+    ('terminal',        'tracking',          'unknown'),
+    ('gate in',         'tracking',          'unknown'),
+    ('gate out',        'tracking',          'unknown'),
+    ('pod',             'tracking',          'unknown'),
+    ('tracking request','tracking',          'unknown'),
+    ('status update',   'tracking',          'unknown'),
+    ('eta request',     'tracking',          'unknown'),
+    ('container',       'equipment',         'unknown'),
+    ('reefer',          'equipment',         'unknown'),
+    ('genset',          'equipment',         'unknown'),
+    ('stuffing',        'equipment',         'unknown'),
+    ('equipment problem','equipment',        'unknown'),
+    ('arrange truck',   'transport_order',   'unknown'),
+    ('book truck',      'transport_order',   'unknown'),
+    ('arrange lorry',   'transport_order',   'unknown'),
     ('transport',   'transport_order',   'unknown'),
     ('transit',     't1',                'unknown'),
     ('customs',     'customs',           'unknown'),
@@ -2491,6 +2547,9 @@ _FINANCIAL_CHARGE_SIGNALS: list[str] = [
 _STRONG_TIMING_FAILURE_SIGNALS: list[str] = [
     'truck not arriving', 'barge delay', 'train delay', 'missed vessel',
     'missed cutoff', 'missed cco', 'driver delayed', 'arrival delay',
+    'delay arrival', 'delay in arrival', 'delay in delivery', 'delivery delayed',
+    'collection delayed', 'missed slot', 'missed loading slot', 'missed delivery slot',
+    'truck late', 'lorry late', 'vehicle late', 'lorry delayed',
     'container late', 'not on time', 'late delivery', 'late arrival',
     'late pickup', 'vertraging', 'vertraagd', 'verspätung', 'verspätet',
     'niet op tijd', 'nicht pünktlich', 'rollover',
@@ -2861,20 +2920,24 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
         clue_state = clue['state'] if clue['state'] != 'unknown' else _detect_state_windowed(normalized)
         return _build(clue['issueId'], clue_state, clue['confidence'], fb_used=True, rnk=ranked)
 
-    # 19b. Entity-pattern classification — if an ISO container, MRN, T1 ref, or
-    # load-ref value is found in text and nothing else matched, infer issue type
+    # 19b. Entity-pattern (first-pass) classification:
+    # Container number → Container / Equipment
+    # MRN             → Customs / Documentation
+    # T1 ref          → T1 / Transit Document
+    # Load ref        → Missing Load Reference
+    # Booking ref     → Transport Order
     norm_upper = normalized.upper()
     if _RE_CONTAINER.search(norm_upper):
         _ep_state = _detect_state_windowed(normalized)
-        return _build('equipment', _ep_state, 0.45, fb_used=True, rnk=ranked)
+        return _build('equipment', _ep_state, 0.48, fb_used=True, rnk=ranked)
     if _RE_MRN_EXTRACT.search(normalized):
-        return _build('customs', 'missing', 0.50, fb_used=True, rnk=ranked)
+        return _build('customs', 'missing', 0.52, fb_used=True, rnk=ranked)
     if _RE_T1_EXTRACT.search(normalized):
-        return _build('t1', 'missing', 0.48, fb_used=True, rnk=ranked)
+        return _build('t1', 'missing', 0.50, fb_used=True, rnk=ranked)
     if _RE_LOAD_REF_EXTRACT.search(normalized):
-        return _build('load_ref', 'missing', 0.48, fb_used=True, rnk=ranked)
+        return _build('load_ref', 'missing', 0.50, fb_used=True, rnk=ranked)
     if _RE_BOOKING_EXTRACT.search(normalized):
-        return _build('load_ref', 'missing', 0.45, fb_used=True, rnk=ranked)
+        return _build('transport_order', 'unknown', 0.48, fb_used=True, rnk=ranked)
 
     # 20. RECOVERY_SIGNALS scan — broad phrase list applied unconstrained
     norm_lower = normalized.lower()
