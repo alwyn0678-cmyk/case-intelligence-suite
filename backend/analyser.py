@@ -562,6 +562,46 @@ CATEGORY_MAP: dict[str, str] = {
     "vessel cut": "closing_time", "rail cut": "closing_time", "barge cut": "closing_time",
     # Seal
     "seal": "seal", "seal issue": "seal",
+    # ── Dutch category names ─────────────────────────────────────
+    "vertraging": "delay", "te laat": "delay", "niet op tijd": "delay",
+    "laadreferentie": "load_ref", "loadref": "load_ref", "referentie ontbreekt": "load_ref",
+    "douane": "customs", "douane documenten": "customs", "documenten": "customs",
+    "wijziging": "amendment", "correctie": "amendment", "aanpassing": "amendment",
+    "schade": "damage", "claim schade": "damage", "tekort": "damage",
+    "wachttijd": "waiting_time", "demurrage": "waiting_time",
+    "sporing": "tracking", "zichtbaarheid": "tracking", "status update": "tracking",
+    "cognossement": "bl", "b/l": "bl",
+    "t1 document": "t1", "transitdocument": "t1",
+    "container probleem": "equipment", "uitrusting": "equipment",
+    "vrijgave": "equipment_release", "pin code": "equipment_release",
+    "transportopdracht": "transport_order", "transport opdracht": "transport_order",
+    "tarief": "rate", "factuur": "rate", "kosten": "rate", "rekening": "rate",
+    "capaciteit": "capacity", "beschikbaarheid": "capacity",
+    "afhalen": "pickup_delivery", "bezorging": "pickup_delivery", "ophalen": "pickup_delivery",
+    "planning": "scheduling", "afspraak": "scheduling", "tijdslot": "scheduling",
+    "gewicht": "vgm", "vgm verklaring": "vgm",
+    "gevaarlijke goederen": "dangerous_goods", "gevaarlijke stoffen": "dangerous_goods",
+    "klacht": "communication", "escalatie": "communication",
+    "aankomstmelding": "shipping_advice", "vertrekmelding": "shipping_advice",
+    "sluitingstijd": "closing_time", "cutoff tijd": "closing_time",
+    "zegel": "seal",
+    # ── German category names ────────────────────────────────────
+    "verzögerung": "delay", "verspätung": "delay", "nicht rechtzeitig": "delay",
+    "ladereferenz": "load_ref", "referenz fehlt": "load_ref",
+    "zoll": "customs", "zolldokumente": "customs", "dokumente": "customs",
+    "korrektur": "amendment", "änderung": "amendment", "buchungskorrektur": "amendment",
+    "schaden": "damage", "verlust": "damage", "fehlmenge": "damage",
+    "standzeit": "waiting_time", "lagerzeit": "waiting_time",
+    "verfolgung": "tracking", "statusinformation": "tracking",
+    "konnossement": "bl", "seefrachtbrief": "bl",
+    "transportauftrag": "transport_order", "fahrauftrag": "transport_order",
+    "rechnung": "rate", "fracht": "rate", "kosten": "rate",
+    "kapazität": "capacity", "verfügbarkeit": "capacity",
+    "abholung": "pickup_delivery", "lieferung": "pickup_delivery",
+    "planung": "scheduling", "termin": "scheduling",
+    "gewicht": "vgm", "gefahrgut": "dangerous_goods",
+    "beschwerde": "communication", "reklamation": "communication",
+    "siegel": "seal",
 }
 
 # ─────────────────────────────────────────────────────────────────
@@ -2591,6 +2631,12 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
             combined = ' '.join(filter(None, [description, subject, isr]))
             state = _detect_state_windowed(combined)
             return _build(mapped, state, 0.88)
+        # 1b. Partial category match — scan CATEGORY_MAP keys for substring match
+        for map_key, map_val in CATEGORY_MAP.items():
+            if len(map_key) >= 4 and (map_key in cat_key or cat_key in map_key):
+                combined = ' '.join(filter(None, [description, subject, isr]))
+                state = _detect_state_windowed(combined)
+                return _build(map_val, state, 0.80)
 
     # 2. Financial subject early-exit — unambiguous financial subjects override everything
     subj_lower = subject.lower()
@@ -2798,7 +2844,15 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
         clue_state = clue['state'] if clue['state'] != 'unknown' else _detect_state_windowed(normalized)
         return _build(clue['issueId'], clue_state, clue['confidence'], fb_used=True, rnk=ranked)
 
-    # 20. Unclassified
+    # 20. RECOVERY_SIGNALS scan — broad phrase list applied unconstrained
+    norm_lower = normalized.lower()
+    for phrases, rec_issue_id in RECOVERY_SIGNALS:
+        for phrase in phrases:
+            if phrase in norm_lower:
+                rec_state = _detect_state_windowed(normalized)
+                return _build(rec_issue_id, rec_state, 0.45, fb_used=True, rnk=ranked)
+
+    # 21. Unclassified
     return _build('other', 'unknown', 0.10, fb_used=True, rnk=ranked)
 
 
