@@ -281,6 +281,27 @@ export function SummaryPage({ analysis }: Props) {
                 ))}
               </div>
             </div>
+            {/* QA export — review queue */}
+            {(() => {
+              const reviewQueue = analysis.records.filter(r => r.reviewFlag);
+              if (reviewQueue.length === 0) return null;
+              return (
+                <div className="mt-4 pt-4 border-t border-[#2a2f3f]/50 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-[#a6aec4]">
+                      <span className="text-[#d8a34c] font-medium">{reviewQueue.length.toLocaleString()} cases</span> flagged for manual review (confidence &lt; 60%)
+                    </p>
+                    <p className="text-[10px] text-[#a6aec4]/60 mt-0.5">Export includes all diagnostic fields: trigger phrase, evidence, intent, confidence</p>
+                  </div>
+                  <button
+                    onClick={() => exportEnrichedToXlsx('Review Queue', reviewQueue)}
+                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-[#d8a34c]/10 border border-[#d8a34c]/30 text-[#d8a34c] hover:bg-[#d8a34c]/20 transition-colors"
+                  >
+                    ↓ Export Review Queue
+                  </button>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
