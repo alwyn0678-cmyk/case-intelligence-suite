@@ -121,11 +121,11 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       isr_details: (raw.isr_details as string) ?? null,
       customer: (raw.customer as string) ?? null,
       transporter: (raw.transporter as string) ?? null,
-      zip: (raw.zip as string) ?? null,
+      zip: (raw.zip as string) ?? (raw.ext_zip as string) ?? null,
       area: (raw.area as string) ?? null,
       date: raw.date ? new Date(raw.date as string) : null,
       case_number: (raw.case_number as string) ?? null,
-      booking_ref: (raw.booking_ref as string) ?? null,
+      booking_ref: (raw.booking_ref as string) ?? (raw.ext_booking_ref as string) ?? null,
       combinedText: '',
       issues: [raw.primaryIssue as string].filter(Boolean),
       primaryIssue: (raw.primaryIssue as string) ?? 'other',
@@ -136,8 +136,8 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       routingHint: null,
       routingAlignment: 'no_zip' as const,
       extractedZip: null,
-      resolvedCustomer: (raw.customer as string) ?? null,
-      resolvedTransporter: (raw.transporter as string) ?? null,
+      resolvedCustomer: (raw.resolvedCustomer as string) ?? (raw.customer as string) ?? null,
+      resolvedTransporter: (raw.resolvedTransporter as string) ?? (raw.ext_transporter as string) ?? (raw.transporter as string) ?? null,
       resolvedDepot: null,
       resolvedDeepseaTerminal: null,
       confidence: (raw.confidence as number) ?? 0.5,
@@ -181,14 +181,18 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
     // Extract load ref from booking_ref or evidence
     const ev = r.evidence ?? [];
     const loadRef =
-      r.booking_ref ??
+      (r._raw?.ext_load_ref as string | undefined) ??
       ev.find((e: string) => e.startsWith('ref[load_ref]='))?.slice('ref[load_ref]='.length) ??
+      r.booking_ref ??
       null;
     const containerNumber =
+      (r._raw?.ext_container as string | undefined) ??
       ev.find((e: string) => e.startsWith('ref[container]='))?.slice('ref[container]='.length) ??
       (r._raw?.container as string | undefined) ??
       null;
     const mrnRef =
+      (r._raw?.ext_mrn as string | undefined) ??
+      (r._raw?.ext_t1_ref as string | undefined) ??
       ev.find((e: string) => e.startsWith('ref[mrn]='))?.slice('ref[mrn]='.length) ??
       ev.find((e: string) => e.startsWith('ref[t1_mrn]='))?.slice('ref[t1_mrn]='.length) ??
       null;

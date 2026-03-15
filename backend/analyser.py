@@ -787,6 +787,116 @@ def _canonical_transporter_name(name: str) -> str | None:
 
 
 # ─────────────────────────────────────────────────────────────────
+# TEXT EXTRACTION LAYER
+# Extract reference values from free-text (subject + description + isr)
+# ─────────────────────────────────────────────────────────────────
+
+# ISO 6346 container: 3 owner letters + category (U/J/Z) + 6 digits + optional check digit
+_RE_CONTAINER = re.compile(r'\b([A-Z]{3}[UJZ])\s?(\d{6})\s?(\d)?\b')
+
+# Booking ref: keyword + optional qualifier + value
+_RE_BOOKING_EXTRACT = re.compile(
+    r'\b(?:booking|bkg|bkng|reserv(?:ation)?)\s*(?:ref(?:erence)?|no\.?|num(?:ber)?|#)?\s*[:\-]?\s*([A-Z0-9]{4,20})\b',
+    re.I)
+
+# Load ref: keyword + value
+_RE_LOAD_REF_EXTRACT = re.compile(
+    r'\b(?:load[\s\-]?ref(?:erence)?|loadref|laadreferentie|ladereferenz|laad[\s\-]?ref)\s*[:\-]?\s*([A-Z0-9]{4,20})\b',
+    re.I)
+
+# MRN: EU customs reference (year + country + 14-16 alphanumeric)
+_RE_MRN_EXTRACT = re.compile(r'\bMRN\s*[:\-]?\s*([0-9]{2}[A-Z]{2}[A-Z0-9]{12,16})\b', re.I)
+
+# T1 transit reference
+_RE_T1_EXTRACT = re.compile(
+    r'\bT1\s*(?:doc(?:ument)?)?\s*(?:no\.?|num(?:ber)?|#|ref(?:erence)?)?\s*[:\-]?\s*([A-Z0-9][\w\-]{5,24})\b',
+    re.I)
+
+# ZIP: Dutch (4 digits + 2 letters), German (5 digits)
+_RE_ZIP_NL = re.compile(r'\b(\d{4})\s?([A-Z]{2})\b')
+_RE_ZIP_DE = re.compile(r'(?<!\d)(\d{5})(?!\d)')
+
+_EXTRACT_STOPWORDS = frozenset([
+    'THE', 'FOR', 'OUR', 'YOUR', 'REF', 'AND', 'FROM', 'WITH',
+    'THIS', 'THAT', 'HAVE', 'BEEN', 'ALSO', 'WILL', 'DOES', 'NOT',
+])
+
+
+def _extract_container(text: str) -> str | None:
+    m = _RE_CONTAINER.search(text.upper())
+    if m:
+        return m.group(1) + m.group(2) + (m.group(3) or '')
+    return None
+
+
+def _extract_booking_ref(text: str) -> str | None:
+    m = _RE_BOOKING_EXTRACT.search(text)
+    if m:
+        val = m.group(1).strip().upper()
+        return None if (val in _EXTRACT_STOPWORDS or len(val) < 4) else val
+    return None
+
+
+def _extract_load_ref_value(text: str) -> str | None:
+    m = _RE_LOAD_REF_EXTRACT.search(text)
+    if m:
+        val = m.group(1).strip().upper()
+        return None if (val in _EXTRACT_STOPWORDS or len(val) < 4) else val
+    return None
+
+
+def _extract_mrn(text: str) -> str | None:
+    m = _RE_MRN_EXTRACT.search(text)
+    return m.group(1).upper() if m else None
+
+
+def _extract_t1_ref(text: str) -> str | None:
+    m = _RE_T1_EXTRACT.search(text)
+    if m:
+        val = m.group(1).strip().upper()
+        return None if (val in _EXTRACT_STOPWORDS or len(val) < 4) else val
+    return None
+
+
+def _extract_zip_from_text(text: str) -> str | None:
+    m = _RE_ZIP_NL.search(text)
+    if m:
+        return f"{m.group(1)}{m.group(2)}"
+    m = _RE_ZIP_DE.search(text)
+    if m:
+        raw = m.group(1)
+        return raw if len(raw) == 5 else None
+    return None
+
+
+def _extract_transporter_from_text(text: str) -> str | None:
+    """Find a known transporter entity name in combined free text."""
+    t_lower = text.lower()
+    best_canon: str | None = None
+    best_len = 0
+    for alias, (canonical, _etype, roles) in _ALIAS_MAP.items():
+        if 'transporter' not in roles or len(alias) < 4:
+            continue
+        if alias in t_lower and len(alias) > best_len:
+            best_canon = canonical
+            best_len = len(alias)
+    return best_canon
+
+
+def _extract_all_refs(combined: str) -> dict:
+    """Extract all reference values from combined free text."""
+    return {
+        'ext_container':   _extract_container(combined),
+        'ext_booking_ref': _extract_booking_ref(combined),
+        'ext_load_ref':    _extract_load_ref_value(combined),
+        'ext_mrn':         _extract_mrn(combined),
+        'ext_t1_ref':      _extract_t1_ref(combined),
+        'ext_zip':         _extract_zip_from_text(combined),
+        'ext_transporter': _extract_transporter_from_text(combined),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────
 # COLUMN ALIASES
 # ─────────────────────────────────────────────────────────────────
 
@@ -2665,6 +2775,21 @@ def _compute_health_check(df: 'pd.DataFrame', issue_counts: dict, total: int) ->
     alerts = []
     status = "pass"
 
+    # Extraction coverage metrics
+    def _col_coverage(col: str) -> float:
+        if col not in df.columns:
+            return 0.0
+        filled = df[col].notna() & (df[col].astype(str).str.strip() != '') & (df[col].astype(str) != 'None')
+        return round(float(filled.sum()) / total * 100, 1) if total else 0.0
+
+    transporter_pct  = _col_coverage('resolvedTransporter')
+    booking_ref_pct  = _col_coverage('ext_booking_ref')
+    load_ref_pct     = _col_coverage('ext_load_ref')
+    container_pct    = _col_coverage('ext_container')
+    mrn_pct          = _col_coverage('ext_mrn')
+    zip_pct          = _col_coverage('zip')
+    unknown_state_pct = round(float((df['issueState'] == 'unknown').sum()) / total * 100, 1) if total else 0.0
+
     if other_pct > 15:
         alerts.append(f"FAIL: Other/Unclassified {other_pct}% > 15% threshold")
         status = "fail"
@@ -2705,6 +2830,13 @@ def _compute_health_check(df: 'pd.DataFrame', issue_counts: dict, total: int) ->
         "reviewFlagViolations": violations,
         "categoriesSeen": categories_seen,
         "alerts": alerts,
+        "transporterCoverage": transporter_pct,
+        "bookingRefCoverage":  booking_ref_pct,
+        "loadRefCoverage":     load_ref_pct,
+        "containerCoverage":   container_pct,
+        "mrnCoverage":         mrn_pct,
+        "zipCoverage":         zip_pct,
+        "unknownStatePct":     unknown_state_pct,
     }
 
 
@@ -2795,13 +2927,23 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
         tp = _clean_text(r.get("transporter", ""))
         if tp:
             canon = _canonical_transporter_name(tp)
-            return canon if canon else (tp if _is_operational_transporter(tp) else None)
+            if canon:
+                return canon
+            if _is_operational_transporter(tp):
+                return tp
         # Fallback: check customer column
         cust = _clean_text(r.get("customer", ""))
         if cust:
             canon = _canonical_transporter_name(cust)
-            return canon
-        return None
+            if canon:
+                return canon
+        # Fallback: extract from combined text
+        combined = ' '.join(filter(None, [
+            _clean_text(str(r.get('subject', '') or '')),
+            _clean_text(str(r.get('description', '') or '')),
+            _clean_text(str(r.get('isr_details', '') or '')),
+        ]))
+        return _extract_transporter_from_text(combined)
 
     df["resolvedTransporter"] = df.apply(_get_resolved_transporter, axis=1)
 
@@ -2815,6 +2957,26 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
         return cust
 
     df["resolvedCustomer"] = df.apply(_get_resolved_customer, axis=1)
+
+    # ── TEXT EXTRACTION — extract reference values from free text ──
+    def _extract_row(r: pd.Series) -> pd.Series:
+        combined = ' '.join(filter(None, [
+            _clean_text(str(r.get('subject', '') or '')),
+            _clean_text(str(r.get('description', '') or '')),
+            _clean_text(str(r.get('isr_details', '') or '')),
+        ]))
+        return pd.Series(_extract_all_refs(combined))
+
+    extracted = df.apply(_extract_row, axis=1)
+    for col in ['ext_container', 'ext_booking_ref', 'ext_load_ref', 'ext_mrn', 'ext_t1_ref', 'ext_zip', 'ext_transporter']:
+        df[col] = extracted[col]
+
+    # Merge extracted ZIP into zip column (fill blanks)
+    df['zip'] = df.apply(
+        lambda r: (str(r.get('zip', '') or '').strip() or r.get('ext_zip')), axis=1
+    )
+    # Re-resolve area with any newly extracted ZIP
+    df['resolvedArea'] = df.apply(_row_area, axis=1)
 
     # ── AGGREGATIONS ──────────────────────────────────────────────
 
@@ -2930,6 +3092,9 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
         "fallbackUsed", "unresolvedReason",
         "resolvedArea", "resolvedCustomer", "resolvedTransporter",
         "weekKey", "missing_load_ref",
+        # Extracted reference fields
+        "ext_container", "ext_booking_ref", "ext_load_ref",
+        "ext_mrn", "ext_t1_ref", "ext_zip", "ext_transporter",
     ]
     keep_cols = [c for c in KEY_FIELDS if c in df.columns]
     cases_df = df[keep_cols].copy()
