@@ -220,6 +220,71 @@ export function SummaryPage({ analysis }: Props) {
         </div>
       )}
 
+      {/* Classification Health */}
+      {analysis.classificationHealth && (
+        <div className="bg-[#171922] border border-[#2a2f3f] rounded-lg overflow-hidden">
+          <div className="bg-[#1d2030] border-b border-[#2a2f3f] px-5 py-3 flex items-center gap-3">
+            <p className="text-sm font-semibold text-[#eceff7]">Classification Health</p>
+            <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+              analysis.classificationHealth.status === 'pass'  ? 'bg-[#52c7c7]/15 text-[#52c7c7]' :
+              analysis.classificationHealth.status === 'warn'  ? 'bg-[#d8a34c]/15 text-[#d8a34c]' :
+                                                                 'bg-[#dc6d7d]/15 text-[#dc6d7d]'
+            }`}>{analysis.classificationHealth.status.toUpperCase()}</span>
+          </div>
+          <div className="p-5 space-y-4">
+            {/* Alert banners */}
+            {analysis.classificationHealth.alerts.length > 0 && (
+              <div className="space-y-1.5">
+                {analysis.classificationHealth.alerts.map((a, i) => (
+                  <div key={i} className={`text-xs px-3 py-2 rounded ${
+                    a.startsWith('FAIL') ? 'bg-[#dc6d7d]/8 text-[#dc6d7d] border border-[#dc6d7d]/20' :
+                                           'bg-[#d8a34c]/8 text-[#d8a34c] border border-[#d8a34c]/20'
+                  }`}>{a}</div>
+                ))}
+              </div>
+            )}
+            {/* Classification accuracy metrics */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { label: 'Other / Unclassified', value: analysis.classificationHealth.otherPct, unit: '%', warn: 15 },
+                { label: 'Below 60% Confidence', value: analysis.classificationHealth.below60Pct, unit: '%', warn: 30 },
+                { label: 'Unknown Issue State', value: analysis.classificationHealth.unknownStatePct, unit: '%', warn: 40 },
+                { label: 'Categories Detected', value: analysis.classificationHealth.categoriesSeen, unit: '', warn: null, good: true },
+              ].map(m => (
+                <div key={m.label} className="bg-[#1d2030] rounded-lg px-4 py-3">
+                  <p className="text-[10px] text-[#a6aec4] uppercase tracking-wide mb-1">{m.label}</p>
+                  <p className={`text-xl font-semibold ${
+                    m.good ? 'text-[#52c7c7]' :
+                    m.warn !== null && m.value > m.warn ? 'text-[#dc6d7d]' : 'text-[#52c7c7]'
+                  }`}>{m.value}{m.unit}</p>
+                </div>
+              ))}
+            </div>
+            {/* Extraction coverage */}
+            <div>
+              <p className="text-xs text-[#a6aec4] mb-2">Field Extraction Coverage (% rows populated)</p>
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                {[
+                  { label: 'Transporter', value: analysis.classificationHealth.transporterCoverage },
+                  { label: 'Booking Ref', value: analysis.classificationHealth.bookingRefCoverage },
+                  { label: 'Load Ref', value: analysis.classificationHealth.loadRefCoverage },
+                  { label: 'Container', value: analysis.classificationHealth.containerCoverage },
+                  { label: 'MRN/T1', value: analysis.classificationHealth.mrnCoverage },
+                  { label: 'ZIP', value: analysis.classificationHealth.zipCoverage },
+                ].map(m => (
+                  <div key={m.label} className="bg-[#1d2030] rounded px-3 py-2 text-center">
+                    <p className="text-[10px] text-[#a6aec4] mb-0.5">{m.label}</p>
+                    <p className={`text-sm font-semibold ${m.value >= 20 ? 'text-[#52c7c7]' : m.value >= 5 ? 'text-[#d8a34c]' : 'text-[#a6aec4]/50'}`}>
+                      {m.value}%
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Forecast headline */}
       {analysis.forecast.available && (
         <div className="bg-[#8b7cff]/8 border border-[#8b7cff]/25 rounded-lg p-4 flex items-center justify-between">

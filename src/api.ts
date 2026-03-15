@@ -51,11 +51,22 @@ interface BackendResult {
   health_check?: {
     status: string;
     alerts: string[];
+    totalRows: number;
+    otherCount: number;
     otherPct: number;
+    below60Count: number;
     below60Pct: number;
+    reviewFlagCount: number;
     reviewFlagPct: number;
     reviewFlagViolations: number;
     categoriesSeen: number;
+    unknownStatePct: number;
+    transporterCoverage: number;
+    bookingRefCoverage: number;
+    loadRefCoverage: number;
+    containerCoverage: number;
+    mrnCoverage: number;
+    zipCoverage: number;
   };
 }
 
@@ -238,6 +249,22 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       analyzedAt: new Date(b.meta.analyzedAt),
       hasZipMap: false,
     },
+    classificationHealth: b.health_check ? {
+      status:               b.health_check.status,
+      alerts:               b.health_check.alerts,
+      otherPct:             b.health_check.otherPct,
+      below60Pct:           b.health_check.below60Pct,
+      reviewFlagPct:        b.health_check.reviewFlagPct,
+      reviewFlagViolations: b.health_check.reviewFlagViolations,
+      categoriesSeen:       b.health_check.categoriesSeen,
+      unknownStatePct:      b.health_check.unknownStatePct ?? 0,
+      transporterCoverage:  b.health_check.transporterCoverage ?? 0,
+      bookingRefCoverage:   b.health_check.bookingRefCoverage ?? 0,
+      loadRefCoverage:      b.health_check.loadRefCoverage ?? 0,
+      containerCoverage:    b.health_check.containerCoverage ?? 0,
+      mrnCoverage:          b.health_check.mrnCoverage ?? 0,
+      zipCoverage:          b.health_check.zipCoverage ?? 0,
+    } : null,
     summary: {
       totalCases: b.summary.totalCases,
       totalHoursLost: b.summary.totalHoursLost,
