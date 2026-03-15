@@ -1964,6 +1964,23 @@ _OPERATIONAL_CLUES = [
     ('ladezeit',    'waiting_time',      'unknown'),
     ('standzeit',   'waiting_time',      'unknown'),
     ('korrektur',   'amendment',         'amended'),
+    # ── French ───────────────────────────────────────────────────
+    ('chauffeur',   'delay',             'unknown'),
+    ('livraison',   'delay',             'unknown'),
+    ('enlèvement',  'pickup_delivery',   'unknown'),
+    ('enlèvement',  'pickup_delivery',   'unknown'),
+    ('douane',      'customs',           'unknown'),
+    ('dédouanement','customs',           'unknown'),
+    ('navire',      'tracking',          'unknown'),
+    ('expédition',  'tracking',          'unknown'),
+    ('conteneur',   'equipment',         'unknown'),
+    ('référence',   'load_ref',          'unknown'),
+    ('facture',     'rate',              'unknown'),
+    ('dommage',     'damage',            'unknown'),
+    ('retard',      'delay',             'unknown'),
+    ('transport',   'transport_order',   'unknown'),
+    ('manifeste',   'bl',                'unknown'),
+    ('connaissement','bl',               'unknown'),
 ]
 
 def _operational_clue_scan(text: str) -> dict | None:
