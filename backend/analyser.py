@@ -3164,6 +3164,60 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
     # Re-resolve area with any newly extracted ZIP
     df['resolvedArea'] = df.apply(_row_area, axis=1)
 
+    # ── PER-ROW OPERATIONAL SIGNALS ───────────────────────────────
+
+    # preventableIssue: True if the row's primaryIssue is in the preventable taxonomy set
+    _preventable_ids = {t["id"] for t in TAXONOMY if t["preventable"]}
+    df["preventableIssue"] = df["primaryIssue"].isin(_preventable_ids)
+
+    # rootCause: keyword-based root cause signal from combined text
+    _DELAY_SIGNALS = {
+        "weather_delay":        ["weather", "storm", "fog", "ice", "wind", "flood", "snow"],
+        "terminal_congestion":  ["congestion", "terminal congestion", "port congestion", "terminal delay",
+                                 "berth", "berth delay", "yard full", "port delay"],
+        "vessel_delay":         ["vessel delay", "vessel late", "vessel arrival", "eta changed",
+                                 "eta update", "ata", "vessel schedule", "sailing delay"],
+        "haulier_delay":        ["haulier delay", "driver delay", "truck delay", "haulage delay",
+                                 "collection delay", "pickup delay", "driver not available"],
+        "missed_cutoff":        ["missed cutoff", "cutoff missed", "missed cut-off", "cut off missed",
+                                 "booking cutoff", "vgm cutoff", "si cutoff", "documentation cutoff"],
+        "equipment_unavailable":["equipment not available", "container not available", "no equipment",
+                                 "equipment shortage", "reefer not available", "flat rack",
+                                 "container shortage", "unit not available"],
+        "late_booking":         ["late booking", "last minute booking", "booking too late",
+                                 "insufficient notice", "short notice"],
+        "documentation_error":  ["wrong document", "incorrect document", "document error",
+                                 "documentation error", "wrong bl", "bl error", "mismatch"],
+        "extra_cost":           ["invoice", "extra cost", "additional cost", "surcharge",
+                                 "demurrage", "detention", "overdue", "rechnung", "factuur"],
+    }
+
+    def _detect_root_cause(row: pd.Series) -> str | None:
+        primary = str(row.get("primaryIssue", "") or "")
+        combined = " ".join(filter(None, [
+            str(row.get("subject", "") or ""),
+            str(row.get("description", "") or ""),
+            str(row.get("isr_details", "") or ""),
+        ])).lower()
+        if primary == "rate":
+            return "extra_cost"
+        if primary in ("customs", "t1", "portbase", "bl"):
+            for kw in _DELAY_SIGNALS["documentation_error"]:
+                if kw in combined:
+                    return "documentation_error"
+            return None
+        if primary in ("delay", "equipment", "transport_order"):
+            for cause, keywords in _DELAY_SIGNALS.items():
+                if cause == "extra_cost":
+                    continue
+                for kw in keywords:
+                    if kw in combined:
+                        return cause
+            return "unknown"
+        return None
+
+    df["rootCause"] = df.apply(_detect_root_cause, axis=1)
+
     # ── AGGREGATIONS ──────────────────────────────────────────────
 
     total = len(df)
@@ -3278,6 +3332,8 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
         "fallbackUsed", "unresolvedReason",
         "resolvedArea", "resolvedCustomer", "resolvedTransporter",
         "weekKey", "missing_load_ref",
+        # Operational signals
+        "rootCause", "preventableIssue",
         # Extracted reference fields
         "ext_container", "ext_booking_ref", "ext_load_ref",
         "ext_mrn", "ext_t1_ref", "ext_zip", "ext_transporter",
