@@ -5,7 +5,7 @@
  * only uploads the file and renders the returned AnalysisResult.
  */
 
-import type { AnalysisResult, CustomerBurdenItem, TransporterItem, AreaHotspot, EnrichedRecord, ExampleCase, ControlTowerData, CtBottleneck, CtTransporterRisk, CtPreventableOpportunity, CtRootCauseItem, CtCategoryRow } from './types/analysis';
+import type { AnalysisResult, CustomerBurdenItem, TransporterItem, AreaHotspot, EnrichedRecord, ExampleCase, ControlTowerData, CtBottleneck, CtTransporterRisk, CtPreventableOpportunity, CtRootCauseItem, CtCategoryRow, CtAlert, CtSeverity, CtForecastItem, CtRiskSummary } from './types/analysis';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'https://case-intelligence-suite.onrender.com';
 
@@ -474,6 +474,168 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
   }
   if (valNotes.length === 0) valNotes.push('All totals verified against backend truth source.');
 
+  // Phase 28 — Operational alerts
+  function alertSeverity(pct: number, thresholds: [number, number]): CtSeverity {
+    if (pct >= thresholds[1]) return 'HIGH';
+    if (pct >= thresholds[0]) return 'MEDIUM';
+    return 'LOW';
+  }
+  const alerts: CtAlert[] = [];
+
+  // Category spikes ≥40% WoW (no minimum case count for alerts, unlike bottlenecks)
+  for (let wi = 1; wi < sortedWeeks.length; wi++) {
+    const wk  = sortedWeeks[wi];
+    const pw  = sortedWeeks[wi - 1];
+    const cur = weeklyHistory[wk];
+    const pri = weeklyHistory[pw];
+    if (!cur || !pri) continue;
+    for (const [issueId, currCount] of Object.entries(cur.issues)) {
+      if (currCount < 5) continue; // skip noise
+      const priorCount = pri.issues[issueId] ?? 0;
+      if (priorCount === 0) continue;
+      const pct = Math.round(((currCount - priorCount) / priorCount) * 100);
+      if (pct >= 40) {
+        alerts.push({
+          alertType: 'category_spike',
+          subject: ISSUE_LABEL_MAP[issueId] ?? issueId,
+          changePct: pct,
+          caseCount: currCount,
+          weekDetected: wk,
+          severity: alertSeverity(pct, [70, 100]),
+        });
+      }
+    }
+  }
+
+  // Transporter delay rate ≥30% increase (from transporterRisks already computed)
+  for (const tr of transporterRisks) {
+    for (const flag of tr.riskFlags) {
+      if (flag.metric === 'Delay rate') {
+        alerts.push({
+          alertType: 'transporter_delay',
+          subject: tr.name,
+          changePct: flag.changePct,
+          caseCount: tr.totalCases,
+          weekDetected: sortedWeeks[sortedWeeks.length - 1] ?? '',
+          severity: alertSeverity(flag.changePct, [50, 100]),
+        });
+      }
+    }
+  }
+
+  // Preventable hours lost spike ≥30% (recent 4w vs prior 4w per category)
+  for (const op of preventableOpportunities) {
+    const recPrev = recentRecs.filter(r => r.primaryIssue === op.categoryId && r.preventableIssue).length;
+    const priPrev = priorRecs.filter(r => r.primaryIssue === op.categoryId && r.preventableIssue).length;
+    if (priPrev === 0 || recPrev < 5) continue;
+    const pct = Math.round(((recPrev - priPrev) / priPrev) * 100);
+    if (pct >= 30) {
+      alerts.push({
+        alertType: 'preventable_spike',
+        subject: op.categoryLabel,
+        changePct: pct,
+        caseCount: recPrev,
+        weekDetected: sortedWeeks[sortedWeeks.length - 1] ?? '',
+        severity: alertSeverity(pct, [50, 100]),
+      });
+    }
+  }
+
+  // Root cause trend surge ≥40%
+  for (const rc of rootCauses) {
+    if (rc.priorCount === 0 || rc.recentCount < 5) continue;
+    if (rc.trendPct >= 40) {
+      alerts.push({
+        alertType: 'root_cause_surge',
+        subject: rc.causeLabel,
+        changePct: rc.trendPct,
+        caseCount: rc.recentCount,
+        weekDetected: sortedWeeks[sortedWeeks.length - 1] ?? '',
+        severity: alertSeverity(rc.trendPct, [70, 120]),
+      });
+    }
+  }
+
+  // Deduplicate and sort: HIGH first, then by changePct desc
+  const severityOrder: Record<CtSeverity, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+  // Keep only the most recent week's category spikes
+  const latestWeek = sortedWeeks[sortedWeeks.length - 1] ?? '';
+  const deduped: CtAlert[] = [];
+  const seen = new Set<string>();
+  for (const a of alerts) {
+    if (a.alertType === 'category_spike' && a.weekDetected !== latestWeek) continue;
+    const key = `${a.alertType}:${a.subject}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(a);
+  }
+  deduped.sort((a, z) => severityOrder[a.severity] - severityOrder[z.severity] || z.changePct - a.changePct);
+
+  // Phase 30 — Category trend forecasting (rolling 4-week average)
+  const TOP_FORECAST_CATEGORIES = issueBreakdown
+    .filter(i => i.id !== 'other')
+    .sort((a, z) => z.count - a.count)
+    .slice(0, 6);
+
+  const forecasts: CtForecastItem[] = TOP_FORECAST_CATEGORIES.map(item => {
+    const weeksToUse = sortedWeeks.slice(-5); // last 5 weeks: current + 4 prior
+    const counts = weeksToUse.map(wk => weeklyHistory[wk]?.issues[item.id] ?? 0);
+    const currentCount = counts[counts.length - 1] ?? 0;
+    const prior4 = counts.slice(0, 4);
+    const rolling4wAvg = prior4.length > 0
+      ? +(prior4.reduce((s, n) => s + n, 0) / prior4.length).toFixed(1)
+      : currentCount;
+    // Simple projection: average of current + rolling avg (dampened extrapolation)
+    const projected = Math.max(0, Math.round((currentCount + rolling4wAvg) / 2));
+    const trend: 'up' | 'down' | 'stable' =
+      projected > currentCount * 1.08 ? 'up' :
+      projected < currentCount * 0.92 ? 'down' : 'stable';
+    return {
+      categoryId: item.id,
+      categoryLabel: item.label,
+      color: item.color,
+      currentWeekCount: currentCount,
+      projectedCount: projected,
+      rolling4wAvg,
+      trend,
+    };
+  });
+
+  // Phase 31 — Risk summary cards
+  const highestDelayTr = transporterRisks
+    .filter(t => t.riskFlags.some(f => f.metric === 'Delay rate'))
+    .sort((a, z) => {
+      const aFlag = a.riskFlags.find(f => f.metric === 'Delay rate');
+      const zFlag = z.riskFlags.find(f => f.metric === 'Delay rate');
+      return (zFlag?.changePct ?? 0) - (aFlag?.changePct ?? 0);
+    })[0];
+
+  const riskSummary: CtRiskSummary = {
+    highestDelayTransporter: highestDelayTr ? {
+      name: highestDelayTr.name,
+      delayRate: highestDelayTr.recentDelayRate,
+      changePct: highestDelayTr.riskFlags.find(f => f.metric === 'Delay rate')?.changePct ?? 0,
+    } : null,
+    largestPreventableCategory: preventableOpportunities[0] ? {
+      label: preventableOpportunities[0].categoryLabel,
+      hoursLost: preventableOpportunities[0].hoursLost,
+      count: preventableOpportunities[0].preventableCount,
+    } : null,
+    fastestGrowingCategory: categoryRows
+      .filter(c => c.trendPct > 0 && c.count >= 10)
+      .sort((a, z) => z.trendPct - a.trendPct)[0]
+      ? (() => {
+          const c = categoryRows.filter(r => r.trendPct > 0 && r.count >= 10).sort((a, z) => z.trendPct - a.trendPct)[0];
+          return { label: c.label, trendPct: c.trendPct, count: c.count };
+        })()
+      : null,
+    mostFrequentRootCause: rootCauses[0] ? {
+      label: rootCauses[0].causeLabel,
+      count: rootCauses[0].count,
+      percent: rootCauses[0].percent,
+    } : null,
+  };
+
   const controlTower: ControlTowerData = {
     totalCases: records.length,
     preventableCases: preventableRecords.length,
@@ -488,6 +650,9 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
     rootCauses,
     validationPassed: valNotes.every(n => !n.startsWith('WARN')),
     validationNotes: valNotes,
+    alerts: deduped.slice(0, 30),
+    forecasts,
+    riskSummary,
   };
 
   return {

@@ -406,6 +406,38 @@ export interface CtCategoryRow {
   trendPct: number;
 }
 
+// Phase 28 — Alerts
+export type CtAlertType = 'category_spike' | 'transporter_delay' | 'preventable_spike' | 'root_cause_surge';
+export type CtSeverity  = 'LOW' | 'MEDIUM' | 'HIGH';
+
+export interface CtAlert {
+  alertType: CtAlertType;
+  subject: string;
+  changePct: number;
+  caseCount: number;
+  weekDetected: string;
+  severity: CtSeverity;
+}
+
+// Phase 30 — Forecast
+export interface CtForecastItem {
+  categoryId: string;
+  categoryLabel: string;
+  color: string;
+  currentWeekCount: number;
+  projectedCount: number;
+  rolling4wAvg: number;
+  trend: 'up' | 'down' | 'stable';
+}
+
+// Phase 31 — Risk summary
+export interface CtRiskSummary {
+  highestDelayTransporter: { name: string; delayRate: number; changePct: number } | null;
+  largestPreventableCategory: { label: string; hoursLost: number; count: number } | null;
+  fastestGrowingCategory: { label: string; trendPct: number; count: number } | null;
+  mostFrequentRootCause: { label: string; count: number; percent: number } | null;
+}
+
 export interface ControlTowerData {
   // Phase 21 — Overview
   totalCases: number;
@@ -433,6 +465,15 @@ export interface ControlTowerData {
   // Phase 27 — Validation
   validationPassed: boolean;
   validationNotes: string[];
+
+  // Phase 28 — Alerts
+  alerts: CtAlert[];
+
+  // Phase 30 — Forecasts
+  forecasts: CtForecastItem[];
+
+  // Phase 31 — Risk summary
+  riskSummary: CtRiskSummary;
 }
 
 export interface AnalysisResult {
