@@ -1087,6 +1087,14 @@ _TOPIC_RULES: list[dict] = [
             'missed time slot', 'delivery window missed',
             'hasn\'t arrived', 'have not arrived', 'still not here',
             'not yet delivered', 'not yet collected', 'driver no show',
+            # Dutch
+            'nog niet aangekomen', 'niet tijdig', 'te laat aangekomen',
+            'nog steeds niet', 'nog wachten op', 'niet opgehaald',
+            'niet bezorgd', 'niet afgeleverd', 'vertraging gemeld',
+            # German
+            'noch nicht angekommen', 'nicht rechtzeitig', 'zu spät',
+            'immer noch nicht', 'nicht abgeholt', 'nicht zugestellt',
+            'verzögert angekommen',
         ],
         'weak': [
             'delay', 'late', 'still waiting', 'expected today', 'expected yesterday',
@@ -1200,6 +1208,16 @@ _TOPIC_RULES: list[dict] = [
             'proof of delivery', 'pod not received', 'pod missing',
             'delivery confirmation', 'delivery proof', 'signed delivery',
             'eta update', 'current eta', 'revised eta', 'expected arrival',
+            # Common tracking requests
+            'can you confirm delivery', 'please confirm receipt', 'confirm arrival',
+            'track and trace update', 'please advise status', 'any news on',
+            'what is the current status', 'update on delivery',
+            # Dutch
+            'waar is mijn', 'waar zijn mijn', 'status van', 'update over',
+            'wanneer wordt', 'kunt u bevestigen', 'graag bevestiging',
+            # German
+            'wo ist meine', 'wo sind meine', 'status von', 'update zu',
+            'wann kommt', 'bitte bestätigen', 'können sie bestätigen',
         ],
         'weak': [
             'tracking', 'where is', 'status update', 'no update',
@@ -1277,7 +1295,6 @@ _TOPIC_RULES: list[dict] = [
             'commercial invoice query', 'commercial invoice dispute',
             'price correction', 'price adjustment', 'rate correction',
             'wrong rate applied', 'incorrect rate applied', 'corrected invoice', 'invoice correction',
-            'purchase order', 'po number', 'po no',
             # Dutch/German
             'inkooporder', 'bestelnummer', 'bestellnummer',
             'po bedrag fout', 'po verschil', 'po abweichung',
@@ -1292,6 +1309,7 @@ _TOPIC_RULES: list[dict] = [
             'tariff', 'refund request', 'payment dispute',
             'invoice', 'billing', 'extra cost', 'extra costs', 'additional charge',
             'cost report',
+            'purchase order', 'po number', 'po no',
         ],
     },
     {
@@ -1409,6 +1427,35 @@ _TOPIC_RULES: list[dict] = [
             'sicherheitsdatenblatt',
         ],
         'weak': ['imo', 'adr', 'hazardous'],
+    },
+    {
+        'topic': 'ref_provided',
+        'strong': [
+            # Direct provision signals (person IS providing a reference)
+            'ref below', 'reference below', 'load ref below', 'booking ref below',
+            'please find the ref', 'ref provided below', 'see ref below',
+            'reference update', 'updated reference', 'updated load ref',
+            'correct reference', 'corrected reference', 'correct load ref',
+            'providing reference', 'reference provided', 'ref has been provided',
+            'ref has been sent', 'reference attached', 'load ref attached',
+            'booking ref attached', 'load ref: ', 'booking ref: ', 'ref: ',
+            'load reference is ', 'the booking ref is', 'the load ref is',
+            'ref confirmed', 'booking ref confirmed', 'load ref confirmed',
+            'sending load ref', 'forwarding load ref', 'sending booking ref',
+            # Dutch
+            'referentie hieronder', 'ref hieronder', 'ref bijgevoegd',
+            'referentie bijgevoegd', 'loadref bijgevoegd', 'referentie is ',
+            'loadref is ', 'loadref: ', 'laadreferentie is',
+            # German
+            'referenz unten', 'referenz anbei', 'referenz beigefügt',
+            'referenz beigefuegt', 'die referenz ist ', 'referenz: ',
+            'ladereferenz ist ', 'ladereferenz: ',
+        ],
+        'weak': [
+            'ref provided', 'reference provided', 'ref sent', 'reference sent',
+            'ref confirmed', 'booking confirmed', 'load confirmed',
+            'reference update', 'ref update', 'info provided',
+        ],
     },
 ]
 
@@ -1574,6 +1621,67 @@ _FALLBACK_RULES: list[dict] = [
     {'issueId': 'scheduling',        'state': 'missing',
      'pattern': re.compile(r'\b(slot|time.slot|appointment).{0,25}(needed|required|missing|not confirmed|not allocated)\b', re.I),
      'confidence': 0.55},
+    # ── RECOVERY_SIGNALS patterns (integrated from unused RECOVERY_SIGNALS list) ──
+    # Scheduling / timing
+    {'issueId': 'scheduling', 'state': 'unknown',
+     'pattern': re.compile(r'\b(what time will|confirm time|delivery window|morning delivery|afternoon delivery|morning slot|afternoon slot|arrival window|loading time|unloading time|what day will|which day will)\b', re.I),
+     'confidence': 0.60},
+    # Pickup / delivery arrangement
+    {'issueId': 'pickup_delivery', 'state': 'unknown',
+     'pattern': re.compile(r'\b(please arrange|please organise|please organize|need to arrange|requires delivery to|need delivery to|please book transport|arrange collection from|arrange delivery to|requesting transport|book transport|organize transport)\b', re.I),
+     'confidence': 0.60},
+    # Shipping advice
+    {'issueId': 'shipping_advice', 'state': 'informational',
+     'pattern': re.compile(r'\b(booking confirmed|booking acknowledgement|shipment confirmed|pre.?alert|arrival notice|departure notice|goods dispatched|goods shipped|shipped today|vessel departed|loaded on vessel)\b', re.I),
+     'confidence': 0.60},
+    # Waiting / demurrage
+    {'issueId': 'waiting_time', 'state': 'unknown',
+     'pattern': re.compile(r'\b(waiting at gate|waiting at terminal|driver waiting|truck waiting|free time expired|free days expired|per diem|storage accruing|demurrage accruing|futile trip|wasted journey|empty trip)\b', re.I),
+     'confidence': 0.65},
+    # Damage / shortage
+    {'issueId': 'damage', 'state': 'unknown',
+     'pattern': re.compile(r'\b(goods were damaged|arrived damaged|items missing|goods missing|short delivery|short shipment|partial delivery|not all items received|goods not received|incorrect quantity|cargo damage|damaged goods)\b', re.I),
+     'confidence': 0.65},
+    # Capacity / feasibility
+    {'issueId': 'capacity', 'state': 'unknown',
+     'pattern': re.compile(r'\b(is it possible to|can you do|can you handle|is there capacity|is it feasible|do you have space|slot available|is there a slot|can this be loaded)\b', re.I),
+     'confidence': 0.60},
+    # Equipment release / pin
+    {'issueId': 'equipment_release', 'state': 'unknown',
+     'pattern': re.compile(r'\b(release code|release pin|pin code|container pin|vbs pin|require pin|need pin|pin for|pin number|release number|collect container|container collection|pickup container|terminal release|port release|collect at terminal)\b', re.I),
+     'confidence': 0.65},
+    # BL related
+    {'issueId': 'bl', 'state': 'unknown',
+     'pattern': re.compile(r'\b(release cargo|cargo release|release shipment|surrender bl|telex release|cargo documents required|original documents required|draft bl|bl draft)\b', re.I),
+     'confidence': 0.60},
+    # VGM / weight
+    {'issueId': 'vgm', 'state': 'unknown',
+     'pattern': re.compile(r'\b(gross weight|gross mass|total weight|weight declaration|vgm declaration|weighing slip|weight slip|shipper weight|verified weight)\b', re.I),
+     'confidence': 0.65},
+    # Seal details
+    {'issueId': 'seal', 'state': 'unknown',
+     'pattern': re.compile(r'\b(seal no\.|seal nr|container seal|seal intact|seal broken|seal ok|seal check|seal discrepancy)\b', re.I),
+     'confidence': 0.65},
+    # Dangerous goods
+    {'issueId': 'dangerous_goods', 'state': 'unknown',
+     'pattern': re.compile(r'\b(un number|dg class|imo class|hazardous material|dangerous cargo|dg cargo|imdg|dg document|dangerous goods form|un no|adnr|regulated goods)\b', re.I),
+     'confidence': 0.70},
+    # Closing time / cutoff
+    {'issueId': 'closing_time', 'state': 'unknown',
+     'pattern': re.compile(r'\b(what is the cutoff|what is the closing|when is the cutoff|when is the closing|gate closes at|gate opening time|gate close time)\b', re.I),
+     'confidence': 0.60},
+    # Ref provided — direct provision
+    {'issueId': 'ref_provided', 'state': 'provided',
+     'pattern': re.compile(r'\b(reference update|updated ref|correct ref|ref below|please find the ref|load ref below|booking ref below|load ref provided|reference provided|ref has been sent)\b', re.I),
+     'confidence': 0.65},
+    # Communication / escalation
+    {'issueId': 'communication', 'state': 'escalated',
+     'pattern': re.compile(r'\b(chasing|following up|follow.up|no reply|no response|unanswered|third reminder|second reminder|first reminder|as per my previous|as per my email|did you receive|awaiting your response|urgent reminder|reminder email|this is a reminder)\b', re.I),
+     'confidence': 0.60},
+    # Amendment / correction — common patterns
+    {'issueId': 'amendment', 'state': 'amended',
+     'pattern': re.compile(r'\b(wrong address|incorrect address|address correction|address change|wrong name|incorrect name|name correction|correction needed|wrong details|incorrect details|mistake in|wrong date|incorrect date|error in booking)\b', re.I),
+     'confidence': 0.65},
 ]
 
 def _fallback_classify(text: str) -> dict | None:
@@ -1610,7 +1718,7 @@ def _operational_clue_scan(text: str) -> dict | None:
     t = text.lower()
     for keyword, issue_id, state in _OPERATIONAL_CLUES:
         if keyword in t:
-            return {'issueId': issue_id, 'state': state, 'confidence': 0.35}
+            return {'issueId': issue_id, 'state': state, 'confidence': 0.50}
     return None
 
 

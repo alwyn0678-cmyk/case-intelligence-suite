@@ -5,7 +5,7 @@
  * only uploads the file and renders the returned AnalysisResult.
  */
 
-import type { AnalysisResult, CustomerBurdenItem, TransporterItem, AreaHotspot, EnrichedRecord } from './types/analysis';
+import type { AnalysisResult, CustomerBurdenItem, TransporterItem, AreaHotspot, EnrichedRecord, ExampleCase } from './types/analysis';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'https://case-intelligence-suite.onrender.com';
 
@@ -173,11 +173,56 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
   const sortedWeeks = Object.keys(weeklyHistory).sort();
   const chartWeeks = sortedWeeks.slice(-16);
 
-  const issueBreakdown = b.issueBreakdown.map((item) => ({
-    ...item,
-    trend: 'stable' as const,
-    exampleCases: [],
-  }));
+  // ── Build exampleCases from classified records ─────────────────
+  // Converts an EnrichedRecord to the ExampleCase shape the modal expects.
+  function toExampleCase(r: EnrichedRecord, label: string): ExampleCase {
+    const fmt = (d: Date | null): string | null =>
+      d ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : null;
+    // Extract load ref from booking_ref or evidence
+    const ev = r.evidence ?? [];
+    const loadRef =
+      r.booking_ref ??
+      ev.find((e: string) => e.startsWith('ref[load_ref]='))?.slice('ref[load_ref]='.length) ??
+      null;
+    const containerNumber =
+      ev.find((e: string) => e.startsWith('ref[container]='))?.slice('ref[container]='.length) ??
+      (r._raw?.container as string | undefined) ??
+      null;
+    const mrnRef =
+      ev.find((e: string) => e.startsWith('ref[mrn]='))?.slice('ref[mrn]='.length) ??
+      ev.find((e: string) => e.startsWith('ref[t1_mrn]='))?.slice('ref[t1_mrn]='.length) ??
+      null;
+    return {
+      caseNumber:      r.case_number ?? null,
+      bookingRef:      r.booking_ref ?? null,
+      primaryIssue:    r.primaryIssue,
+      issueLabel:      label,
+      issueState:      r.issueState ?? 'unknown',
+      subject:         r.subject ? r.subject.slice(0, 120) : null,
+      date:            fmt(r.date),
+      customer:        r.resolvedCustomer ?? r.customer ?? null,
+      transporter:     r.resolvedTransporter ?? r.transporter ?? null,
+      loadRef,
+      containerNumber,
+      mrnRef,
+      confidence:      r.confidence,
+    };
+  }
+
+  // Cap at 100 example cases per category, sorted by confidence desc
+  const MAX_EXAMPLES = 100;
+  const issueBreakdown = b.issueBreakdown.map((item) => {
+    const categoryRecords = records
+      .filter(r => r.primaryIssue === item.id)
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, MAX_EXAMPLES)
+      .map(r => toExampleCase(r, item.label));
+    return {
+      ...item,
+      trend: 'stable' as const,
+      exampleCases: categoryRecords,
+    };
+  });
 
   const topCustomer = customerBurden[0]?.name ?? '';
   const topTransporter = transporterPerformance[0]?.name ?? '';

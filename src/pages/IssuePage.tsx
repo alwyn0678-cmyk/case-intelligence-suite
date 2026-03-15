@@ -131,12 +131,12 @@ export function IssuePage({ analysis }: Props) {
                 {/* Examples + export buttons */}
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-3">
-                    {iss.exampleCases.length > 0 && (
+                    {iss.count > 0 && (
                       <button
                         onClick={() => setSelected(iss)}
                         className="text-xs text-[#7aa2ff] hover:text-[#8fb3ff] font-medium whitespace-nowrap"
                       >
-                        View {iss.exampleCases.length}
+                        View {iss.exampleCases.length > 0 ? iss.exampleCases.length : iss.count}
                       </button>
                     )}
                     {iss.count > 0 && (
