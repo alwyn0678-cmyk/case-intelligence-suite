@@ -165,13 +165,13 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       resolvedTransporter: (raw.resolvedTransporter as string) ?? (raw.ext_transporter as string) ?? (raw.transporter as string) ?? null,
       resolvedDepot: null,
       resolvedDeepseaTerminal: null,
-      confidence: (raw.confidence as number) ?? 0.5,
-      reviewFlag: (raw.reviewFlag as boolean) ?? false,
+      confidence: typeof raw.confidence === 'number' ? raw.confidence : (typeof raw.confidence === 'string' ? parseFloat(raw.confidence) || 0.5 : 0.5),
+      reviewFlag: Boolean(raw.reviewFlag),
       unresolvedReason: null,
       allEntities: [],
       unknownEntities: [],
-      evidence: (() => { try { return JSON.parse((raw.evidence as string) ?? '[]') as string[]; } catch { return []; } })(),
-      sourceFieldsUsed: (() => { try { return JSON.parse((raw.sourceFieldsUsed as string) ?? '[]') as string[]; } catch { return []; } })(),
+      evidence: (() => { try { const v = raw.evidence; return Array.isArray(v) ? v as string[] : JSON.parse((v as string) ?? '[]') as string[]; } catch { return []; } })(),
+      sourceFieldsUsed: (() => { try { const v = raw.sourceFieldsUsed; return Array.isArray(v) ? v as string[] : JSON.parse((v as string) ?? '[]') as string[]; } catch { return []; } })(),
       detectedIntent: (raw.detectedIntent as string) ?? '',
       detectedObject: (raw.detectedObject as string) ?? '',
       triggerPhrase: (raw.triggerPhrase as string) ?? '',
@@ -180,8 +180,8 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
       loadRefExtracted: null,
       containerExtracted: null,
       mrnRefExtracted: null,
-      rootCause: (raw.rootCause as string) ?? null,
-      preventableIssue: (raw.preventableIssue as boolean) ?? false,
+      rootCause: typeof raw.rootCause === 'string' ? raw.rootCause : null,
+      preventableIssue: Boolean(raw.preventableIssue),
       _raw: raw,
     } as unknown as EnrichedRecord;
   });
@@ -556,20 +556,23 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
     }
   }
 
-  // Deduplicate and sort: HIGH first, then by changePct desc
+  // Deduplicate: keep the most severe (then most recent week) alert per (type, subject) pair
   const severityOrder: Record<CtSeverity, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
-  // Keep only the most recent week's category spikes
   const latestWeek = sortedWeeks[sortedWeeks.length - 1] ?? '';
-  const deduped: CtAlert[] = [];
-  const seen = new Set<string>();
-  for (const a of alerts) {
-    if (a.alertType === 'category_spike' && a.weekDetected !== latestWeek) continue;
+  // For category_spikes: only keep the latest week to avoid historical noise
+  const filtered_alerts = alerts.filter(a => a.alertType !== 'category_spike' || a.weekDetected === latestWeek);
+  const bestAlert = new Map<string, CtAlert>();
+  for (const a of filtered_alerts) {
     const key = `${a.alertType}:${a.subject}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(a);
+    const existing = bestAlert.get(key);
+    if (!existing
+      || severityOrder[a.severity] < severityOrder[existing.severity]
+      || (severityOrder[a.severity] === severityOrder[existing.severity] && a.changePct > existing.changePct)) {
+      bestAlert.set(key, a);
+    }
   }
-  deduped.sort((a, z) => severityOrder[a.severity] - severityOrder[z.severity] || z.changePct - a.changePct);
+  const deduped = Array.from(bestAlert.values())
+    .sort((a, z) => severityOrder[a.severity] - severityOrder[z.severity] || z.changePct - a.changePct);
 
   // Phase 30 — Category trend forecasting (rolling 4-week average)
   const TOP_FORECAST_CATEGORIES = issueBreakdown
@@ -581,13 +584,15 @@ function mapToAnalysisResult(b: BackendResult): AnalysisResult {
     const weeksToUse = sortedWeeks.slice(-5); // last 5 weeks: current + 4 prior
     const counts = weeksToUse.map(wk => weeklyHistory[wk]?.issues[item.id] ?? 0);
     const currentCount = counts[counts.length - 1] ?? 0;
-    const prior4 = counts.slice(0, 4);
+    const prior4 = counts.slice(0, 4).filter(n => n > 0); // only non-zero weeks for avg
     const rolling4wAvg = prior4.length > 0
       ? +(prior4.reduce((s, n) => s + n, 0) / prior4.length).toFixed(1)
       : currentCount;
     // Simple projection: average of current + rolling avg (dampened extrapolation)
     const projected = Math.max(0, Math.round((currentCount + rolling4wAvg) / 2));
+    // Only show directional trend when we have a meaningful baseline
     const trend: 'up' | 'down' | 'stable' =
+      currentCount === 0 ? 'stable' :
       projected > currentCount * 1.08 ? 'up' :
       projected < currentCount * 0.92 ? 'down' : 'stable';
     return {

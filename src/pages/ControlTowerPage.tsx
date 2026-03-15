@@ -53,7 +53,7 @@ function InvestigationPanel({ records, categories, transporters, rootCauses, wee
     if (filterWeekFrom)    recs = recs.filter(r => r.weekKey >= filterWeekFrom);
     if (filterWeekTo)      recs = recs.filter(r => r.weekKey <= filterWeekTo);
     const sorted = [...recs];
-    if (sortBy === 'date')        sorted.sort((a, z) => (z.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0));
+    if (sortBy === 'date')        sorted.sort((a, z) => (z.date instanceof Date ? z.date.getTime() : 0) - (a.date instanceof Date ? a.date.getTime() : 0));
     if (sortBy === 'confidence')  sorted.sort((a, z) => z.confidence - a.confidence);
     if (sortBy === 'transporter') sorted.sort((a, z) => (a.resolvedTransporter ?? '').localeCompare(z.resolvedTransporter ?? ''));
     return sorted;
@@ -282,7 +282,7 @@ export function ControlTowerPage({ analysis }: Props) {
     <div className="p-8 space-y-6">
       <SectionHeader
         title="Operations Control Tower"
-        subtitle={`${analysis.summary.weekRange} · ${ct.totalCases.toLocaleString()} cases · ${analysis.summary.weekCount} weeks`}
+        subtitle={`${analysis.summary.weekRange || 'No date range'} · ${ct.totalCases.toLocaleString()} cases · ${analysis.summary.weekCount} week${analysis.summary.weekCount !== 1 ? 's' : ''}`}
       />
 
       {/* Phase 27 — Validation banner */}
@@ -742,8 +742,8 @@ export function ControlTowerPage({ analysis }: Props) {
                   <span className="text-[#a6aec4]">4-wk avg: <span className="text-[#eceff7]">{f.rolling4wAvg}</span></span>
                   <span className="font-bold text-sm" style={{ color: TREND_CLR[f.trend] }}>
                     {TREND_ICON[f.trend]}{' '}
-                    {f.trend !== 'stable' && f.currentWeekCount > 0
-                      ? `${f.trend === 'up' ? '+' : ''}${Math.round(((f.projectedCount - f.currentWeekCount) / Math.max(f.currentWeekCount, 1)) * 100)}%`
+                    {f.trend !== 'stable' && f.currentWeekCount > 0 && f.projectedCount > 0
+                      ? `${f.trend === 'up' ? '+' : ''}${Math.round(((f.projectedCount - f.currentWeekCount) / f.currentWeekCount) * 100)}%`
                       : 'Stable'}
                   </span>
                 </div>

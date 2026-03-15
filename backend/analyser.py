@@ -3167,8 +3167,9 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
     # ── PER-ROW OPERATIONAL SIGNALS ───────────────────────────────
 
     # preventableIssue: True if the row's primaryIssue is in the preventable taxonomy set
+    # Explicit bool() ensures the column is always boolean, not numpy bool or int
     _preventable_ids = {t["id"] for t in TAXONOMY if t["preventable"]}
-    df["preventableIssue"] = df["primaryIssue"].isin(_preventable_ids)
+    df["preventableIssue"] = df["primaryIssue"].isin(_preventable_ids).astype(bool)
 
     # rootCause: keyword-based root cause signal from combined text
     _DELAY_SIGNALS = {
@@ -3192,7 +3193,7 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
                                  "demurrage", "detention", "overdue", "rechnung", "factuur"],
     }
 
-    def _detect_root_cause(row: pd.Series) -> str | None:
+    def _detect_root_cause(row: pd.Series) -> str:
         primary = str(row.get("primaryIssue", "") or "")
         combined = " ".join(filter(None, [
             str(row.get("subject", "") or ""),
@@ -3205,7 +3206,7 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
             for kw in _DELAY_SIGNALS["documentation_error"]:
                 if kw in combined:
                     return "documentation_error"
-            return None
+            return "unknown"
         if primary in ("delay", "equipment", "transport_order"):
             for cause, keywords in _DELAY_SIGNALS.items():
                 if cause == "extra_cost":
@@ -3214,7 +3215,8 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
                     if kw in combined:
                         return cause
             return "unknown"
-        return None
+        # For all other categories (amendment, load_ref, vgm, etc.) return unknown
+        return "unknown"
 
     df["rootCause"] = df.apply(_detect_root_cause, axis=1)
 
@@ -3334,6 +3336,8 @@ def analyse_file(file_bytes: bytes, filename: str) -> dict:
         "weekKey", "missing_load_ref",
         # Operational signals
         "rootCause", "preventableIssue",
+        # Evidence trail (serialized as JSON strings by the loop below)
+        "evidence", "sourceFieldsUsed",
         # Extracted reference fields
         "ext_container", "ext_booking_ref", "ext_load_ref",
         "ext_mrn", "ext_t1_ref", "ext_zip", "ext_transporter",
