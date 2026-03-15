@@ -2528,6 +2528,11 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
         state      = best['state']
         confidence = best['confidence']
 
+        # 4b. State fallback — if windowed state is unknown, scan full combined text
+        if state == 'unknown':
+            combined_for_state = ' '.join(filter(None, [description, subject, isr]))
+            state = _detect_state_windowed(combined_for_state)
+
         # 5. Subject-only penalty
         desc_is_substantive = len((description or '').strip()) >= _SUBSTANTIVE_DESC_MIN
         isr_has_content = len((isr or '').strip()) > 10
@@ -2688,7 +2693,8 @@ def _classify_row(subject: str, description: str, isr: str, category: str) -> di
             if clue_intent != _winning_intent_ctx:
                 clue = None
     if clue:
-        return _build(clue['issueId'], clue['state'], clue['confidence'], fb_used=True, rnk=ranked)
+        clue_state = clue['state'] if clue['state'] != 'unknown' else _detect_state_windowed(normalized)
+        return _build(clue['issueId'], clue_state, clue['confidence'], fb_used=True, rnk=ranked)
 
     # 20. Unclassified
     return _build('other', 'unknown', 0.10, fb_used=True, rnk=ranked)
